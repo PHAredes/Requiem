@@ -3,9 +3,8 @@
 # ================================================================
 #                       CORETT (Janet)
 #   HOAS kernel with proper semantic domain, NbE with eta-equality,
-#   bidirectional type checker
+#   bidirectional type checker, J and ID
 # ================================================================
-
 # ---------------------
 # Semantic Domain
 # ---------------------
@@ -13,6 +12,8 @@
 #   [:Type l]           - universes
 #   function            - Pi types (HOAS)
 #   [v1 v2]             - Sigma types (pairs)
+#   [:Id A x y]         - Identity type
+#   [:refl x]           - Reflexivity proof
 #   [:neutral ne]       - stuck terms
 
 # Normal forms:
@@ -21,6 +22,8 @@
 #   [:nType l]          - type universe
 #   [:nPi A B]          - Pi type
 #   [:nSigma A B]       - Sigma type
+#   [:nId A x y]        - Identity type
+#   [:nrefl x]          - Reflexivity
 #   [:nneut ne]         - neutral term
 
 # Neutral terms:
@@ -28,6 +31,7 @@
 #   [:napp f x]         - application
 #   [:nfst p]           - first projection
 #   [:nsnd p]           - second projection
+#   [:nJ A x P d y p]   - J eliminator (stuck)
 
 # ---------------------
 # Type constructors
@@ -35,9 +39,10 @@
 (defn ty/type [lvl] [:Type lvl])
 (defn ty/pi [A B] [:Pi A B])
 (defn ty/sigma [A B] [:Sigma A B])
+(defn ty/id [A x y] [:Id A x y])
 
-(defn univ-lvl [ty] 
-  (match ty 
+(defn univ-lvl [ty]
+  (match ty
     [:Type l] l
     _ (errorf "not a universe: %v" ty)))
 
@@ -53,6 +58,9 @@
 (defn tm/pair [l r] [:pair l r])
 (defn tm/fst [p] [:fst p])
 (defn tm/snd [p] [:snd p])
+(defn tm/id [A x y] [:t-id A x y])
+(defn tm/refl [x] [:t-refl x])
+(defn tm/J [A x P d y p] [:t-J A x P d y p])
 
 # ---------------------
 # Neutral / normal form constructors
@@ -61,6 +69,7 @@
 (defn ne/app [f x] [:napp f x])
 (defn ne/fst [p] [:nfst p])
 (defn ne/snd [p] [:nsnd p])
+(defn ne/J [A x P d y p] [:nJ A x P d y p])
 
 (defn nf/neut [ne] [:nneut ne])
 (defn nf/lam [body] [:nlam body])
@@ -68,28 +77,23 @@
 (defn nf/sigma [A B] [:nSigma A B])
 (defn nf/type [l] [:nType l])
 (defn nf/pair [l r] [:npair l r])
+(defn nf/id [A x y] [:nId A x y])
+(defn nf/refl [x] [:nrefl x])
 
 # ---------------------
 # Context with proper shadowing
 # ---------------------
-# Context is a list of [name type] tuples
-# This preserves shadowing: newer bindings shadow older ones
-(defn ctx/empty [] @[])
+(defn ctx/empty []
+  @{})
 
 (defn ctx/add [Γ x A]
-  (array/concat @[x A] Γ))
+  (put (table/clone Γ) x A))
 
 (defn ctx/lookup [Γ x]
-  (var found nil)
-  (var i 0)
-  (while (and (< i (length Γ)) (nil? found))
-    (if (= (get Γ i) x)
-      (set found (get Γ (+ i 1)))
-      (+= i 2)))
-  (if (nil? found)
+  (def A (get Γ x nil))
+  (if (nil? A)
     (errorf "unbound variable: %v" x)
-    found))
-
+    A))
 # ---------------------
 # NbE: raise / lower with eta-equality
 # ---------------------
@@ -97,56 +101,61 @@
 (var lower nil)
 
 (set raise
-  (fn [ty ne]
-    (match ty
-      [:Type l] [:neutral ne]
-      
-      [:Pi A B]
-      (fn [x]
-        (let [nfx (lower A x)]
-          (raise (B x) (ne/app ne nfx))))
-      
-      [:Sigma A B]
-      (let [v1 (raise A (ne/fst ne))
-            v2 (raise (B v1) (ne/snd ne))]
-        [v1 v2]))))
+     (fn [ty ne]
+       (match ty
+         [:Type l] [:neutral ne]
+
+         [:Pi A B]
+         (fn [x]
+           (let [nfx (lower A x)]
+             (raise (B x) (ne/app ne nfx))))
+
+         [:Sigma A B]
+         (let [v1 (raise A (ne/fst ne))
+               v2 (raise (B v1) (ne/snd ne))]
+           [v1 v2])
+
+         [:Id A x y]
+         [:neutral ne])))
 
 (set lower
-  (fn [ty sem]
-    (match ty
-      [:Type l] 
-      (match sem
-        [:neutral ne] (nf/neut ne)
-        _ sem)  # pass through [:Type l] unchanged
-      
-      [:Pi A B]
-      (match sem
-        # Eta-equality for functions: λx. f x ≡ f
-        [:neutral ne]
-        (nf/lam
-          (fn [fresh]
-            (let [arg-sem (raise A (ne/var fresh))]
-              (lower (B arg-sem)
-                     (raise (B arg-sem) (ne/app ne (lower A arg-sem)))))))
-        
-        # Normal function
-        _
-        (nf/lam
-          (fn [fresh]
-            (let [arg-sem (raise A (ne/var fresh))]
-              (lower (B arg-sem) (sem arg-sem))))))
-      
-      [:Sigma A B]
-      (match sem
-        # Eta-equality for pairs: (fst p, snd p) ≡ p
-        [:neutral ne]
-        (let [v1 (raise A (ne/fst ne))
-              v2 (raise (B v1) (ne/snd ne))]
-          (nf/pair (lower A v1) (lower (B v1) v2)))
-        
-        # Normal pair
-        [v1 v2]
-        (nf/pair (lower A v1) (lower (B v1) v2))))))
+     (fn [ty sem]
+       (match ty
+         [:Type l]
+         (match sem
+           [:neutral ne] (nf/neut ne)
+           _ sem)
+
+         [:Pi A B]
+         (match sem
+           [:neutral ne]
+           (nf/lam
+             (fn [fresh]
+               (let [arg-sem (raise A (ne/var fresh))]
+                 (lower (B arg-sem)
+                        (raise (B arg-sem) (ne/app ne (lower A arg-sem)))))))
+
+           _
+           (nf/lam
+             (fn [fresh]
+               (let [arg-sem (raise A (ne/var fresh))]
+                 (lower (B arg-sem) (sem arg-sem))))))
+
+         [:Sigma A B]
+         (match sem
+           [:neutral ne]
+           (let [v1 (raise A (ne/fst ne))
+                 v2 (raise (B v1) (ne/snd ne))]
+             (nf/pair (lower A v1) (lower (B v1) v2)))
+
+           [v1 v2]
+           (nf/pair (lower A v1) (lower (B v1) v2)))
+
+         [:Id A x y]
+         (match sem
+           [:refl v] (nf/refl (lower A v))
+           [:neutral ne] (nf/neut ne)
+           _ sem))))
 
 # ---------------------
 # Evaluator (returns semantic values)
@@ -158,47 +167,73 @@
     [:Type l] [:Type l]
     [:Pi A B] [:Pi A B]
     [:Sigma A B] [:Sigma A B]
+    [:Id A x y] [:Id A x y]
+    [:refl x] [:refl x]
     [:neutral ne] [:neutral ne]
-    
-    # String or symbol variable - becomes neutral
+
     [:var x]
     (if (or (string? x) (symbol? x))
       [:neutral (ne/var x)]
-      x)  # Already a semantic value (used in HOAS)
-    
-    [:lam body] 
+      x)
+
+    [:lam body]
     (fn [x] (eval Γ (body x)))
-    
+
     [:app f x]
     (let [fv (eval Γ f)
           xv (eval Γ x)]
       (match fv
         [:neutral ne] [:neutral (ne/app ne (lower [:Type 0] xv))]
-        _ (fv xv)))  # apply function
-    
+        _ (fv xv)))
+
     [:type l] (ty/type l)
-    
-    [:t-pi A B] 
+
+    [:t-pi A B]
     (ty/pi (eval Γ A) (fn [x] (eval Γ (B x))))
-    
-    [:t-sigma A B] 
+
+    [:t-sigma A B]
     (ty/sigma (eval Γ A) (fn [x] (eval Γ (B x))))
-    
+
     [:pair a b] [(eval Γ a) (eval Γ b)]
-    
+
     [:fst p]
     (let [v (eval Γ p)]
       (match v
         [l r] l
         [:neutral ne] [:neutral (ne/fst ne)]))
-    
+
     [:snd p]
     (let [v (eval Γ p)]
       (match v
         [l r] r
         [:neutral ne] [:neutral (ne/snd ne)]))
-    
-    # If it's a function, it's already a semantic value
+
+    # Identity type
+    [:t-id A x y]
+    (ty/id (eval Γ A) (eval Γ x) (eval Γ y))
+
+    [:t-refl x]
+    [:refl (eval Γ x)]
+
+    # J eliminator
+    [:t-J A x P d y p]
+    (let [Av (eval Γ A)
+          xv (eval Γ x)
+          Pv (eval Γ P)
+          dv (eval Γ d)
+          yv (eval Γ y)
+          pv (eval Γ p)]
+      (match pv
+        # Computation rule: J A x P d x (refl x) ≡ d
+        [:refl zv]
+        (if (= zv xv) dv
+          [:neutral (ne/J Av xv Pv dv yv pv)])
+
+        [:neutral ne]
+        [:neutral (ne/J Av xv Pv dv yv pv)]
+
+        _ (errorf "J applied to non-proof: %v" pv)))
+
     _ (if (function? tm) tm tm)))
 
 (defn nf [ty tm]
@@ -211,28 +246,34 @@
   "Check if two semantic values are equal at given type (with eta)"
   (match ty
     [:Type l] (= v1 v2)
-    
+
     [:Pi A B]
     (let [fresh (gensym)
           arg-sem (raise A (ne/var fresh))]
       (match [v1 v2]
         [[:neutral ne1] [:neutral ne2]] (= ne1 ne2)
         [[:neutral ne1] _]
-        (sem-eq (B [:var fresh]) 
+        (sem-eq (B [:var fresh])
                 (raise (B [:var fresh]) (ne/app ne1 (lower A arg-sem)))
                 (v2 arg-sem))
         [_ [:neutral ne2]]
-        (sem-eq (B [:var fresh]) 
+        (sem-eq (B [:var fresh])
                 (v1 arg-sem)
                 (raise (B [:var fresh]) (ne/app ne2 (lower A arg-sem))))
         _ (sem-eq (B [:var fresh]) (v1 arg-sem) (v2 arg-sem))))
-    
+
     [:Sigma A B]
     (match [v1 v2]
       [[l1 r1] [l2 r2]]
       (and (sem-eq A l1 l2)
            (sem-eq (B l1) r1 r2))
-      
+
+      [[:neutral ne1] [:neutral ne2]] (= ne1 ne2)
+      _ false)
+
+    [:Id A x y]
+    (match [v1 v2]
+      [[:refl a] [:refl b]] (sem-eq A a b)
       [[:neutral ne1] [:neutral ne2]] (= ne1 ne2)
       _ false)))
 
@@ -258,85 +299,132 @@
       _ (errorf "expected a Type, got: %v" UA))))
 
 (set infer
-  (fn [Γ t]
-    "Infer the type of term t in context Γ (returns semantic type)"
-    (match t
-      [:var x] 
-      (if (or (string? x) (symbol? x))
-        (ctx/lookup Γ x)
-        (errorf "var must be a string or symbol, got: %v" x))
-      
-      [:type l] (ty/type (+ l 1))
-      
-      [:lam _] (error "cannot infer type of lambda; requires annotation")
-      
-      [:app f x]
-      (let [fA (infer Γ f)]
-        (match fA
-          [:Pi A B]
-          (do (check Γ x A)
-              (B (eval Γ x)))
-          _ (errorf "application of non-Pi: %v" fA)))
-      
-      [:t-pi A B]
-      (let [lvlA (check-univ Γ A)
-            fresh (gensym)
-            A-sem (eval Γ A)
-            Γ2 (ctx/add Γ fresh A-sem)
-            lvlB (check-univ Γ2 (B [:var fresh]))]
-        (ty/type (max lvlA lvlB)))
-      
-      [:t-sigma A B]
-      (let [lvlA (check-univ Γ A)
-            fresh (gensym)
-            A-sem (eval Γ A)
-            Γ2 (ctx/add Γ fresh A-sem)
-            lvlB (check-univ Γ2 (B [:var fresh ]))]
-        (ty/type (max lvlA lvlB)))
-      
-      [:fst p]
-      (let [pA (infer Γ p)]
-        (match pA
-          [:Sigma A B] A
-          _ (error "fst expects Sigma")))
-      
-      [:snd p]
-      (let [pA (infer Γ p)]
-        (match pA
-          [:Sigma A B] (B (eval Γ [:fst p]))
-          _ (error "snd expects Sigma")))
-      
-      [:pair _ _]
-      (error "cannot infer type of pair; expected Sigma annotation")
-      
-      _ (errorf "infer: unknown term %v" t))))
+     (fn [Γ t]
+       "Infer the type of term t in context Γ (returns semantic type)"
+       (match t
+         [:var x]
+         (if (or (string? x) (symbol? x))
+           (ctx/lookup Γ x)
+           (errorf "var must be a string or symbol, got: %v" x))
+
+         [:type l] (ty/type (+ l 1))
+
+         [:lam _] (error "cannot infer type of lambda; requires annotation")
+
+         [:app f x]
+         (let [fA (infer Γ f)]
+           (match fA
+             [:Pi A B]
+             (do (check Γ x A)
+               (B (eval Γ x)))
+             _ (errorf "application of non-Pi: %v" fA)))
+
+         [:t-pi A B]
+         (let [lvlA (check-univ Γ A)
+               fresh (gensym)
+               A-sem (eval Γ A)
+               Γ2 (ctx/add Γ fresh A-sem)
+               lvlB (check-univ Γ2 (B [:var fresh]))]
+           (ty/type (max lvlA lvlB)))
+
+         [:t-sigma A B]
+         (let [lvlA (check-univ Γ A)
+               fresh (gensym)
+               A-sem (eval Γ A)
+               Γ2 (ctx/add Γ fresh A-sem)
+               lvlB (check-univ Γ2 (B [:var fresh]))]
+           (ty/type (max lvlA lvlB)))
+
+         [:fst p]
+         (let [pA (infer Γ p)]
+           (match pA
+             [:Sigma A B] A
+             _ (error "fst expects Sigma")))
+
+         [:snd p]
+         (let [pA (infer Γ p)]
+           (match pA
+             [:Sigma A B] (B (eval Γ [:fst p]))
+             _ (error "snd expects Sigma")))
+
+         [:pair _ _]
+         (error "cannot infer type of pair; expected Sigma annotation")
+
+         # Identity type: Id A x y : Type_l where A : Type_l
+         [:t-id A x y]
+         (let [A-ty (infer Γ A)
+               A-sem (eval Γ A)]
+           (match A-ty
+             [:Type l]
+             (do (check Γ x A-sem)
+               (check Γ y A-sem)
+               (ty/type l))
+             _ (errorf "Id type expects A to be a Type, got: %v" A-ty)))
+
+         # Reflexivity: refl x : Id A x x
+         [:t-refl x]
+         (let [A (infer Γ x)
+               xv (eval Γ x)]
+           (ty/id A xv xv))
+
+         # J eliminator
+         [:t-J A x P d y p]
+         (let [lvlA (check-univ Γ A)
+               A-sem (eval Γ A)]
+           (check Γ x A-sem)
+
+           # P : (y : A) → Id A x y → Type_l
+           (let [fresh-y (gensym)
+                 fresh-p (gensym)
+                 xv (eval Γ x)
+                 Γ-y (ctx/add Γ fresh-y A-sem)
+                 id-ty (ty/id A-sem xv [:var fresh-y])
+                 Γ-yp (ctx/add Γ-y fresh-p id-ty)]
+             (check-univ Γ-yp (P [:var fresh-y] [:var fresh-p]))
+
+             # d : P x (refl x)
+             (let [P-refl (eval Γ (P xv [:refl xv]))]
+               (check Γ d P-refl))
+
+             # y : A
+             (check Γ y A-sem)
+             (let [yv (eval Γ y)]
+
+               # p : Id A x y
+               (check Γ p (ty/id A-sem xv yv))
+
+               # Result type: P y p
+               (let [pv (eval Γ p)]
+                 (eval Γ (P yv pv))))))
+
+         _ (errorf "infer: unknown term %v" t))))
 
 (set check
-  (fn [Γ t A]
-    "Check that term t has type A in context Γ"
-    (match t
-      [:lam body]
-      (match A
-        [:Pi dom cod]
-        (let [fresh (gensym)
-              arg-sem (raise dom (ne/var fresh))]
-          (check (ctx/add Γ fresh dom)
-                 (body [:var fresh])
-                 (cod arg-sem)))
-        _ (error "lambda expected Pi type"))
-      
-      [:pair l r]
-      (match A
-        [:Sigma A1 B1]
-        (do (check Γ l A1)
-            (check Γ r (B1 (eval Γ l))))
-        _ (error "pair expects Sigma type"))
-      
-      _
-      (let [A1 (infer Γ t)]
-        (if (sem-eq (ty/type 100) A A1)
-          true
-          (errorf "type mismatch: expected %v got %v" A A1))))))
+     (fn [Γ t A]
+       "Check that term t has type A in context Γ"
+       (match t
+         [:lam body]
+         (match A
+           [:Pi dom cod]
+           (let [fresh (gensym)
+                 arg-sem (raise dom (ne/var fresh))]
+             (check (ctx/add Γ fresh dom)
+                    (body [:var fresh])
+                    (cod arg-sem)))
+           _ (error "lambda expected Pi type"))
+
+         [:pair l r]
+         (match A
+           [:Sigma A1 B1]
+           (do (check Γ l A1)
+             (check Γ r (B1 (eval Γ l))))
+           _ (error "pair expects Sigma type"))
+
+         _
+         (let [A1 (infer Γ t)]
+           (if (sem-eq (ty/type 100) A A1)
+             true
+             (errorf "type mismatch: expected %v got %v" A A1))))))
 
 # ---------------------
 # Top-level helpers
@@ -355,6 +443,7 @@
   {:ty/type ty/type
    :ty/pi ty/pi
    :ty/sigma ty/sigma
+   :ty/id ty/id
    :tm/var tm/var
    :tm/lam tm/lam
    :tm/app tm/app
@@ -364,16 +453,22 @@
    :tm/pair tm/pair
    :tm/fst tm/fst
    :tm/snd tm/snd
+   :tm/id tm/id
+   :tm/refl tm/refl
+   :tm/J tm/J
    :ne/var ne/var
    :ne/app ne/app
    :ne/fst ne/fst
    :ne/snd ne/snd
+   :ne/J ne/J
    :nf/neut nf/neut
    :nf/lam nf/lam
    :nf/pi nf/pi
    :nf/sigma nf/sigma
    :nf/type nf/type
    :nf/pair nf/pair
+   :nf/id nf/id
+   :nf/refl nf/refl
    :eval eval
    :nf nf
    :lower lower
