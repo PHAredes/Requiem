@@ -9,10 +9,10 @@
 
 # Helper to check parse results
 (defn parse-ok? [text]
-  (not (nil? (parser/parse text))))
+  (not (nil? (parser/term-parser text))))
 
 (defn parse-result [text]
-  (parser/parse text))
+  (parser/term-parser text))
 
 # 1. Variables
 (test/assert (parse-ok? "x") "should parse variable 'x'")

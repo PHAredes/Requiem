@@ -7,6 +7,7 @@
 /.emacs.desktop
 /.emacs.desktop.lock
 *.elc
+.projectile
 auto-save-list
 tramp
 .\#*
