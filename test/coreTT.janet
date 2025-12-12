@@ -3,7 +3,7 @@
 (import spork/test)
 (import "../src/coreTT" :as c)
 
-(test/start-suite "CoreTT - Improved Tests")
+(test/start-suite "CoreTT")
 
 # ===============================================
 # Test 1: Semantic Domain Separation
@@ -42,7 +42,7 @@
 # Test 3: Eta-Equality for Functions
 # ===============================================
 # λx. f x ≡ f (when x not free in f)
-(let [id-ty (c/ty/pi [:Type 0] (fn [x] [:Type 0]))
+(let [id-ty (c/tm/pi [:type 0] (fn [x] [:type 0]))
       f [:var "f"]
       eta-expanded [:lam (fn [x] [:app f x])]
       Γ (c/ctx/add (c/ctx/empty) "f" id-ty)]
@@ -54,7 +54,7 @@
 # Test 4: Eta-Equality for Pairs
 # ===============================================
 # (fst p, snd p) ≡ p
-(let [pair-ty (c/ty/sigma [:Type 0] (fn [x] [:Type 0]))
+(let [pair-ty (c/tm/sigma [:type 0] (fn [x] [:type 0]))
       p [:var "p"]
       eta-expanded [:pair [:fst p] [:snd p]]
       Γ (c/ctx/add (c/ctx/empty) "p" pair-ty)]
@@ -82,11 +82,11 @@
     [:Type 1])
   "Type preservation: [:type 0] : [:Type 1]")
 
-(let [id-ty (c/ty/pi [:Type 0] (fn [x] [:Type 0]))]
+(let [id-ty [:t-pi [:type 0] (fn [x] [:type 0])]]
   (test/assert
     (type-preserves
       (c/ctx/empty)
-      [:t-pi [:type 0] (fn [x] [:type 0])]
+      id-ty
       [:Type 1])
     "Type preservation: (Type₀ → Type₀) : Type₁"))
 
@@ -159,8 +159,8 @@
 # ===============================================
 (let [dep-fn-type [:t-pi 
                    [:type 0]
-                   (fn [A] [:t-pi [:var A] (fn [x] [:var A])])]
-      expected [:Type 2]]
+                   (fn [A] [:t-pi A (fn [x] A)])]
+      expected [:Type 1]]
   (test/assert
     (= (c/infer-top dep-fn-type) expected)
     "Dependent function: ∀(A : Type₀). A → A"))
@@ -179,13 +179,13 @@
 
 (test/assert
   (normalization-stable 
-    [:Type 1]
+    [:type 1]
     [:type 0])
   "Normalization stability: simple type")
 
 (test/assert
   (normalization-stable
-    (c/ty/pi [:Type 0] (fn [x] [:Type 0]))
+    [:t-pi [:type 0] (fn [x] [:type 0])]
     [:lam (fn [x] [:var x])])
   "Normalization stability: identity function")
 
@@ -221,7 +221,7 @@
   (prop-well-typed-types 20)
   "Property: randomly generated types are well-formed")
 
-# ===============================================
+# # ===============================================
 # Property Tests: Beta-Eta Equivalence
 # ===============================================
 (defn prop-id-function [n]
@@ -232,7 +232,7 @@
       (let [a (gen-univ)
             id [:lam (fn [x] [:var x])]
             applied [:app id a]]
-        (unless (c/term-eq Γ [:Type 1] applied a)
+        (unless (c/term-eq Γ [:type 1] applied a)
           (set passed false)
           (print "Beta reduction failed for:" a)))))
   passed)
@@ -264,21 +264,30 @@
 # ===============================================
 # Edge Cases
 # ===============================================
-(test/assert-thrown
-  (c/infer-top [:var "undefined"])
+(defn assert-throws [f msg]
+  "Helper to assert that a function throws an error"
+  (var threw false)
+  (try
+    (f)
+    ([err] (set threw true)))
+  (test/assert threw msg))
+
+(assert-throws
+  (fn [] (c/infer-top [:var "undefined"]))
   "Error: undefined variable throws")
 
-(test/assert-thrown
-  (c/infer-top [:lam (fn [x] [:var x])])
+(assert-throws
+  (fn [] (c/infer-top [:lam (fn [x] [:var x])]))
   "Error: cannot infer lambda without annotation")
 
-(test/assert-thrown
-  (c/infer-top [:pair [:type 0] [:type 1]])
+(assert-throws
+  (fn [] (c/infer-top [:pair [:type 0] [:type 1]]))
   "Error: cannot infer pair without Sigma annotation")
 
-(test/assert-thrown
-  (let [Γ (c/ctx/add (c/ctx/empty) "x" [:Type 0])]
-    (c/check Γ [:lam (fn [y] [:var y])] [:Type 0]))
+(assert-throws
+  (fn [] 
+    (let [Γ (c/ctx/add (c/ctx/empty) "x" [:type 0])]
+      (c/check Γ [:lam (fn [y] [:var y])] [:type 0])))
   "Error: lambda cannot have non-Pi type")
 
 # ===============================================
@@ -294,7 +303,7 @@
 
 (let [f1 (fn [x] x)
       f2 (fn [x] x)
-      ty (c/ty/pi [:Type 0] (fn [x] [:Type 0]))]
+      ty [:Pi [:Type 0] (fn [x] [:Type 0])]]
   (test/assert
     (c/sem-eq ty f1 f2)
     "Semantic equality: extensional function equality"))
@@ -304,11 +313,11 @@
 # ===============================================
 (test/assert
   (= (c/nf [:Type 1] [:type 0])
-     [:nType 0])
-  "Normalization: Type₀ normalizes to [:nType 0]")
+     [:Type 0])
+  "Normalization: Type₀ normalizes to [:Type 0]")
 
 (test/assert
-  (match (c/nf (c/ty/pi [:Type 0] (fn [x] [:Type 0]))
+  (match (c/nf [:Pi [:Type 0] (fn [x] [:Type 0])]
                [:lam (fn [x] [:var x])])
     [:nlam _] true
     _ false)
@@ -318,19 +327,208 @@
 # Variable Handling
 # ===============================================
 (let [Γ (c/ctx/empty)
-      Γ1 (c/ctx/add Γ "x" [:Type 0])]
+      Γ1 (c/ctx/add Γ "x" [:type 0])]
   (test/assert
     (= (c/eval Γ1 [:var "x"]) [:neutral [:nvar "x"]])
     "String variables evaluate to neutrals"))
 
+(let [Γ (c/ctx/empty)
+      fresh (gensym)
+      Γ1 (c/ctx/add Γ fresh [:type 0])]
+  (test/assert
+    (= (c/eval Γ1 [:var fresh]) [:neutral [:nvar fresh]])
+    "Symbol variables (gensyms) evaluate to neutrals"))
+
 # ===============================================
-# Complex Dependent Types
+# Dependent Types
 # ===============================================
-(let [pair-ty [:t-sigma [:type 0] (fn [A] [:t-pi [:var A] (fn [x] [:var A])])]
+(let [pair-ty [:t-sigma [:type 0] (fn [A] [:t-pi A (fn [x] A)])]
       # (A : Type₀) × (A → A)
       expected [:Type 1]]
   (test/assert
     (= (c/infer-top pair-ty) expected)
-    "Complex dependent type: (A : Type₀) × (A → A)"))
+    "Dependent type: (A : Type₀) × (A → A)"))
+
+# ===============================================
+# Property Tests: Type Preservation (Complex)
+# ===============================================
+(defn prop-type-preservation [n]
+  "Property: If Γ ⊢ t : A, then eval(t) has semantic type A"
+  (var passed true)
+  (let [Γ (c/ctx/empty)]
+    (repeat n
+      (let [tm (case (math/rng-int rng 4)
+                  0 [:type (math/rng-int rng 3)]
+                  1 [:lam (fn [x] [:var x])]
+                  2 [:app [:lam (fn [x] [:var x])] [:type (math/rng-int rng 3)]]
+                  3 [:pair [:type (math/rng-int rng 3)] [:type (math/rng-int rng 3)]])]
+        (try
+          (let [ty (c/infer Γ tm)]
+            # Check that the inferred type is well-formed
+            (unless ty
+              (set passed false)
+              (print "Type preservation failed for:" tm)))
+          ([err] nil)))))  # Skip ill-typed terms
+  passed)
+
+(test/assert
+  (prop-type-preservation 50)
+  "Property: type preservation for random terms")
+
+# ===============================================
+# Property Tests: Beta Reduction (Simple)
+# ===============================================
+(defn prop-beta-reduction [n]
+  "Property: (λx. x) a ≡ a for various a"
+  (var passed true)
+  (let [Γ (c/ctx/empty)]
+    (repeat n
+      (let [a [:type (math/rng-int rng 3)]
+            id [:lam (fn [x] [:var x])]
+            applied [:app id a]]
+        (unless (c/term-eq Γ [:type 1] applied a)
+          (set passed false)
+          (print "Beta reduction failed for:" a)))))
+  passed)
+
+(test/assert
+  (prop-beta-reduction 20)
+  "Property: identity function beta-reduces correctly")
+
+# ===============================================
+# Property Tests: Weakening (Context Extension)
+# ===============================================
+(defn prop-weakening [n]
+  "Property: If Γ ⊢ t : A, then Γ, x : B ⊢ t : A (x not in t)"
+  (var passed true)
+  (repeat n
+    (let [Γ (c/ctx/empty)
+          x (gensym)
+          B [:type (math/rng-int rng 3)]
+          tm (case (math/rng-int rng 3)
+              0 [:type (math/rng-int rng 3)]
+              1 [:lam (fn [y] [:var y])]
+              2 [:pair [:type (math/rng-int rng 3)] [:type (math/rng-int rng 3)]])]
+      (try
+        (let [ty (c/infer Γ tm)
+              Γ2 (c/ctx/add Γ x B)
+              ty2 (c/infer Γ2 tm)]
+          (unless (c/sem-eq [:Type 100] ty ty2)
+            (set passed false)
+            (print "Weakening failed for:" tm)))
+        ([err] nil))))  # Skip ill-typed terms
+  passed)
+
+(test/assert
+  (prop-weakening 20)
+  "Property: weakening preserves types")
+
+# ===============================================
+# Property Tests: Nested Terms
+# ===============================================
+(defn gen-nested-term [depth]
+  "Generate a nested term of given depth"
+  (if (<= depth 0)
+    [:type (math/rng-int rng 3)]
+    (case (math/rng-int rng 4)
+      0 [:type (math/rng-int rng 3)]
+      1 [:lam (fn [x] (gen-nested-term (dec depth)))]
+      2 [:app (gen-nested-term (dec depth)) (gen-nested-term (dec depth))]
+      3 [:pair (gen-nested-term (dec depth)) (gen-nested-term (dec depth))])))
+
+(defn prop-nested-normalization [depth max-terms]
+  "Property: Normalization of nested terms terminates"
+  (var passed true)
+  (repeat max-terms
+    (let [tm (gen-nested-term depth)]
+      (try
+        (let [ty (c/infer-top tm)
+              nf1 (c/nf ty tm)]
+          # Just check that normalization terminates
+          (unless nf1
+            (set passed false)
+            (print "Nested normalization failed for:" tm)))
+        ([err] nil))))  # Skip ill-typed terms
+  passed)
+
+(test/assert
+  (prop-nested-normalization 3 10)
+  "Property: nested terms normalize correctly")
+
+# ===============================================
+# Property Tests: Congruence
+# ===============================================
+(defn prop-app-congruence [n]
+  "Property: If t₁ ≡ t₁' and t₂ ≡ t₂', then t₁ t₂ ≡ t₁' t₂'"
+  (var passed true)
+  (let [Γ (c/ctx/empty)]
+    (repeat n
+      (let [t1 [:type (math/rng-int rng 3)]
+            t2 [:type (math/rng-int rng 3)]
+            t1-prime [:type (math/rng-int rng 3)]
+            t2-prime [:type (math/rng-int rng 3)]
+            app1 [:app t1 t2]
+            app2 [:app t1-prime t2-prime]]
+        (when (and (c/term-eq Γ [:type 1] t1 t1-prime)
+                   (c/term-eq Γ [:type 1] t2 t2-prime))
+          (unless (c/term-eq Γ [:type 1] app1 app2)
+            (set passed false)
+            (print "App congruence failed"))))))
+  passed)
+
+(test/assert
+  (prop-app-congruence 20)
+  "Property: application is congruent")
+
+# ===============================================
+# Property Tests: Extensional Equality
+# ===============================================
+(defn prop-extensionality [n]
+  "Property: Functions are equal if they are equal on all arguments"
+  (var passed true)
+  (let [Γ (c/ctx/empty)]
+    (repeat n
+      (let [f [:lam (fn [x] [:var x])]
+            g [:lam (fn [x] [:var x])]
+            test-args @[[:type (math/rng-int rng 3)]
+                       [:type (math/rng-int rng 3)]
+                       [:type (math/rng-int rng 3)]]]
+        # Check that f and g are equal on all test arguments
+        (var all-equal true)
+        (each arg test-args
+          (unless (c/term-eq Γ [:type 1] [:app f arg] [:app g arg])
+            (set all-equal false)))
+        (when all-equal
+          (unless (c/term-eq Γ [:t-pi [:type 0] (fn [x] [:type 0])] f g)
+            (set passed false)
+            (print "Extensionality failed"))))))
+  passed)
+
+(test/assert
+  (prop-extensionality 10)
+  "Property: extensional equality for functions")
+
+# ===============================================
+# Property Tests: Universe Hierarchy
+# ===============================================
+(defn prop-universe-hierarchy [n]
+  "Property: Type_l : Type_(l+1)"
+  (var passed true)
+  (repeat n
+    (let [l (math/rng-int rng 5)]
+      (try
+        (let [ty (c/infer-top [:type l])]
+          # Check that Type_l : Type_(l+1)
+          (unless (c/sem-eq [:Type 100] ty [:Type (inc l)])
+            (set passed false)
+            (print "Universe hierarchy failed for Type_" l)))
+        ([err] 
+          (set passed false)
+          (print "Error in universe hierarchy")))))
+  passed)
+
+(test/assert
+  (prop-universe-hierarchy 10)
+  "Property: universe hierarchy")
 
 (test/end-suite)

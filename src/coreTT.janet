@@ -1,13 +1,13 @@
 #!/usr/bin/env janet
 
 # ================================================================
-#                       CORETT (Janet) - Improved
+#                       CORETT (Janet)
 #   HOAS kernel with proper semantic domain, NbE with eta-equality,
-#   bidirectional type checker with better context handling
+#   bidirectional type checker
 # ================================================================
 
 # ---------------------
-# Semantic Domain (separate from syntax!)
+# Semantic Domain
 # ---------------------
 # Semantic values:
 #   [:Type l]           - universes
@@ -154,11 +154,17 @@
 (defn eval [Γ tm]
   "Evaluate a term in context Γ to a semantic value"
   (match tm
-    # String variable - look up in context
+    # Semantic values (already evaluated) - pass through
+    [:Type l] [:Type l]
+    [:Pi A B] [:Pi A B]
+    [:Sigma A B] [:Sigma A B]
+    [:neutral ne] [:neutral ne]
+    
+    # String or symbol variable - becomes neutral
     [:var x]
-    (if (string? x)
+    (if (or (string? x) (symbol? x))
       [:neutral (ne/var x)]
-      x)  # Already a semantic value
+      x)  # Already a semantic value (used in HOAS)
     
     [:lam body] 
     (fn [x] (eval Γ (body x)))
@@ -190,7 +196,10 @@
     (let [v (eval Γ p)]
       (match v
         [l r] r
-        [:neutral ne] [:neutral (ne/snd ne)]))))
+        [:neutral ne] [:neutral (ne/snd ne)]))
+    
+    # If it's a function, it's already a semantic value
+    _ (if (function? tm) tm tm)))
 
 (defn nf [ty tm]
   (lower ty (eval (ctx/empty) tm)))
@@ -205,10 +214,18 @@
     
     [:Pi A B]
     (let [fresh (gensym)
-          arg (raise A (ne/var fresh))]
+          arg-sem (raise A (ne/var fresh))]
       (match [v1 v2]
         [[:neutral ne1] [:neutral ne2]] (= ne1 ne2)
-        _ (sem-eq (B arg) (v1 arg) (v2 arg))))
+        [[:neutral ne1] _]
+        (sem-eq (B [:var fresh]) 
+                (raise (B [:var fresh]) (ne/app ne1 (lower A arg-sem)))
+                (v2 arg-sem))
+        [_ [:neutral ne2]]
+        (sem-eq (B [:var fresh]) 
+                (v1 arg-sem)
+                (raise (B [:var fresh]) (ne/app ne2 (lower A arg-sem))))
+        _ (sem-eq (B [:var fresh]) (v1 arg-sem) (v2 arg-sem))))
     
     [:Sigma A B]
     (match [v1 v2]
@@ -245,9 +262,9 @@
     "Infer the type of term t in context Γ (returns semantic type)"
     (match t
       [:var x] 
-      (if (string? x)
+      (if (or (string? x) (symbol? x))
         (ctx/lookup Γ x)
-        (errorf "var must be a string, got: %v" x))
+        (errorf "var must be a string or symbol, got: %v" x))
       
       [:type l] (ty/type (+ l 1))
       
@@ -266,7 +283,7 @@
             fresh (gensym)
             A-sem (eval Γ A)
             Γ2 (ctx/add Γ fresh A-sem)
-            lvlB (check-univ Γ2 (B fresh))]
+            lvlB (check-univ Γ2 (B [:var fresh]))]
         (ty/type (max lvlA lvlB)))
       
       [:t-sigma A B]
@@ -274,7 +291,7 @@
             fresh (gensym)
             A-sem (eval Γ A)
             Γ2 (ctx/add Γ fresh A-sem)
-            lvlB (check-univ Γ2 (B fresh))]
+            lvlB (check-univ Γ2 (B [:var fresh ]))]
         (ty/type (max lvlA lvlB)))
       
       [:fst p]
@@ -304,7 +321,7 @@
         (let [fresh (gensym)
               arg-sem (raise dom (ne/var fresh))]
           (check (ctx/add Γ fresh dom)
-                 (body fresh)
+                 (body [:var fresh])
                  (cod arg-sem)))
         _ (error "lambda expected Pi type"))
       
