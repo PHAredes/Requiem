@@ -90,17 +90,35 @@
 # ---------------------
 # Context with proper shadowing
 # ---------------------
+(def CHUNK_SIZE 32)
+
 (defn ctx/empty []
-  @{})
+  (def Γ (table/new (inc CHUNK_SIZE)))
+  (put Γ :count 0)
+  Γ)
 
 (defn ctx/add [Γ x A]
-  (put (table/clone Γ) x A))
+  (def count (get Γ :count 0))
+  
+  (if (< count CHUNK_SIZE)
+    (do
+      (def new-Γ (table/clone Γ))
+      (put new-Γ x A)
+      (put new-Γ :count (inc count))
+      new-Γ)
+    (do
+      (def new-chunk (table/new (inc CHUNK_SIZE)))
+      (put new-chunk x A)
+      (put new-chunk :count 1)
+      (table/setproto new-chunk Γ)
+      new-chunk)))
 
 (defn ctx/lookup [Γ x]
   (def A (get Γ x nil))
   (if (nil? A)
-    (errorf "unbound variable: %v" x)
+    (error "unbound")
     A))
+
 # ---------------------
 # NbE: raise / lower with eta-equality
 # ---------------------
