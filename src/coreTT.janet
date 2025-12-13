@@ -41,9 +41,16 @@
 (defn ty/sigma [A B] [:Sigma A B])
 (defn ty/id [A x y] [:Id A x y])
 
+# "this is ugly and overkill"
+# WHO...CARES???
 (defn univ-lvl [ty]
   (match ty
-    [:Type l] l
+    [:Type l] (do
+      (unless (int? l) 
+        (errorf "Universe level is not an integer in %v" ty))
+      (unless (>= l 0)
+        (errorf "Universe level is negative in %v" ty))
+      l)
     _ (errorf "not a universe: %v" ty)))
 
 # ---------------------
@@ -226,7 +233,8 @@
       (match pv
         # Computation rule: J A x P d x (refl x) ≡ d
         [:refl zv]
-        (if (= zv xv) dv
+        # FIXME: should be sem-eq. We need to debug and fix sem-eq first
+        (if (= zv xv) dv 
           [:neutral (ne/J Av xv Pv dv yv pv)])
 
         [:neutral ne]
@@ -242,6 +250,8 @@
 # ---------------------
 # Definitional equality with eta
 # ---------------------
+# FIXME: somewhere here or on the eval, a tuple is being applied as a function
+# if we have deep Π or Σ types
 (defn sem-eq [ty v1 v2]
   "Check if two semantic values are equal at given type (with eta)"
   (match ty
