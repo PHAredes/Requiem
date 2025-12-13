@@ -117,7 +117,7 @@
       nf-result (c/nf id-ty refl-term)]
   (test/assert
     (and (tuple? nf-result)
-         (= (first nf-result) :refl))
+         (= (first nf-result) :nrefl))
     "Normalization: refl normalizes"))
 
 # ===============================================

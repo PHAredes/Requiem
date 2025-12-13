@@ -43,6 +43,8 @@
 
 # "this is ugly and overkill"
 # WHO...CARES???
+# I do, but we need a better approach
+# TODO: Refact this to use a more secure implementation
 (defn univ-lvl [ty]
   (match ty
     [:Type l] (do
@@ -183,6 +185,44 @@
            _ sem))))
 
 # ---------------------
+# Definitional equality with eta
+# ---------------------
+(defn sem-eq [ty v1 v2]
+  "Check if two semantic values are equal at given type (with eta)"
+  (match ty
+    [:Type l] (= v1 v2)
+
+    [:Pi A B]
+    (let [fresh (gensym)
+          arg-sem (raise A (ne/var fresh))]
+      (match [v1 v2]
+        [[:neutral ne1] [:neutral ne2]] (= ne1 ne2)
+        [[:neutral ne1] _]
+        (sem-eq (B arg-sem)
+                (raise (B arg-sem) (ne/app ne1 (lower A arg-sem)))
+                (v2 arg-sem))
+        [_ [:neutral ne2]]
+        (sem-eq (B arg-sem)
+                (v1 arg-sem)
+                (raise (B arg-sem) (ne/app ne2 (lower A arg-sem))))
+        _ (sem-eq (B arg-sem) (v1 arg-sem) (v2 arg-sem))))
+
+    [:Sigma A B]
+    (match [v1 v2]
+      [[l1 r1] [l2 r2]]
+      (and (sem-eq A l1 l2)
+           (sem-eq (B l1) r1 r2))
+
+      [[:neutral ne1] [:neutral ne2]] (= ne1 ne2)
+      _ false)
+
+    [:Id A x y]
+    (match [v1 v2]
+      [[:refl a] [:refl b]] (sem-eq A a b)
+      [[:neutral ne1] [:neutral ne2]] (= ne1 ne2)
+      _ false)))
+
+# ---------------------
 # Evaluator (returns semantic values)
 # ---------------------
 (defn eval [Γ tm]
@@ -252,7 +292,7 @@
         # Computation rule: J A x P d x (refl x) ≡ d
         [:refl zv]
         # FIXME: should be sem-eq. We need to debug and fix sem-eq first
-        (if (= zv xv) dv 
+        (if (sem-eq Av zv xv) dv 
           [:neutral (ne/J Av xv Pv dv yv pv)])
 
         [:neutral ne]
@@ -264,54 +304,6 @@
 
 (defn nf [ty tm]
   (lower ty (eval (ctx/empty) tm)))
-
-# ---------------------
-# Definitional equality with eta
-# ---------------------
-# FIXME: somewhere here or on the eval, a tuple is being applied as a function
-# if we have deep Π or Σ types
-(defn sem-eq [ty v1 v2]
-  "Check if two semantic values are equal at given type (with eta)"
-  (match ty
-    [:Type l] (= v1 v2)
-
-    [:Pi A B]
-    (let [fresh (gensym)
-          arg-sem (raise A (ne/var fresh))]
-      (match [v1 v2]
-        [[:neutral ne1] [:neutral ne2]] (= ne1 ne2)
-        [[:neutral ne1] _]
-        (sem-eq (B [:var fresh])
-                (raise (B [:var fresh]) (ne/app ne1 (lower A arg-sem)))
-                (v2 arg-sem))
-        [_ [:neutral ne2]]
-        (sem-eq (B [:var fresh])
-                (v1 arg-sem)
-                (raise (B [:var fresh]) (ne/app ne2 (lower A arg-sem))))
-        _ (sem-eq (B [:var fresh]) (v1 arg-sem) (v2 arg-sem))))
-
-    [:Sigma A B]
-    (match [v1 v2]
-      [[l1 r1] [l2 r2]]
-      (and (sem-eq A l1 l2)
-           (sem-eq (B l1) r1 r2))
-
-      [[:neutral ne1] [:neutral ne2]] (= ne1 ne2)
-      _ false)
-
-    [:Id A x y]
-    (match [v1 v2]
-      [[:refl a] [:refl b]] (sem-eq A a b)
-      [[:neutral ne1] [:neutral ne2]] (= ne1 ne2)
-      _ false)))
-
-(defn type-eq [Γ A B]
-  "Check if two types are equal"
-  (= (eval Γ A) (eval Γ B)))
-
-(defn term-eq [Γ A t u]
-  "Check if two terms are equal at type A"
-  (sem-eq (eval Γ A) (eval Γ t) (eval Γ u)))
 
 # ---------------------
 # Bidirectional checker (returns semantic type)
@@ -457,6 +449,15 @@
 # ---------------------
 # Top-level helpers
 # ---------------------
+
+(defn type-eq [Γ A B]
+  "Check if two types are equal"
+  (= (eval Γ A) (eval Γ B)))
+
+(defn term-eq [Γ A t u]
+  "Check if two terms are equal at type A"
+  (sem-eq (eval Γ A) (eval Γ t) (eval Γ u)))
+
 (defn check-top [t expected]
   (let [Γ (ctx/empty)]
     (check Γ t expected)
