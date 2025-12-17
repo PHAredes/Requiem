@@ -314,7 +314,6 @@
       (match pv
         # Computation rule: J A x P d x (refl x) ≡ d
         [:refl zv]
-        # FIXME: should be sem-eq. We need to debug and fix sem-eq first
         (if (sem-eq Av zv xv) dv 
           [:neutral (ne/J Av xv Pv dv yv pv)])
 
