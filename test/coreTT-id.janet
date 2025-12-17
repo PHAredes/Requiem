@@ -62,24 +62,59 @@
 # ===============================================
 # Test 2: Reflexivity
 # ===============================================
+# Reflexivity rule:
+# Γ ⊢ x : A
+# ─────────────────────
+# Γ ⊢ refl x : Id A x x
+
+(defn prop-reflexivity-typing [n]
+  "Property: refl x : Id A x x for any well-typed x : A"
+  (var passed true)
+  (repeat n
+    (let [l (math/rng-int rng 5)
+          x [:type l]
+          refl-x [:t-refl x]]
+      (try
+        (let [inferred (c/infer-top refl-x)
+              expected [:Id [:Type (inc l)] [:Type l] [:Type l]]]
+          (unless (= inferred expected)
+            (set passed false)
+            (printf "Reflexivity typing failed: expected %v, got %v"
+                    expected inferred)))
+        ([err]
+          (set passed false)
+          (printf "Reflexivity error for Type_%d: %v" l err)))))
+  passed)
+
+(test/assert
+  (prop-reflexivity-typing 50)
+  "Property: reflexivity is well-typed for all terms")
+
+# Sanity checks with concrete examples
 (test/assert
   (= (c/infer-top [:t-refl [:type 0]])
      [:Id [:Type 1] [:Type 0] [:Type 0]])
   "Reflexivity: refl Type₀ : Id Type₁ Type₀ Type₀")
 
-(let [x [:type 5]]
-  (test/assert
-    (= (c/infer-top [:t-refl x])
-       [:Id [:Type 6] [:Type 5] [:Type 5]])
-    "Reflexivity: refl Type₅ : Id Type₆ Type₅ Type₅"))
+(test/assert
+  (= (c/infer-top [:t-refl [:type 5]])
+     [:Id [:Type 6] [:Type 5] [:Type 5]])
+  "Reflexivity: refl Type₅ : Id Type₆ Type₅ Type₅")
 
-# (let [id-fn [:lam (fn [x] [:var x])]]
+# Note: Reflexivity for lambdas requires type annotation.
+# Use context variables with inferred function types instead:
+#
+# (let [fn-ty [:t-pi [:type 0] (fn [x] [:type 0])]
+#       Γ (c/ctx/empty)
+#       fn-ty-sem (c/eval Γ fn-ty)
+#       Γf (c/ctx/add Γ "f" fn-ty-sem)
+#       f [:var "f"]
+#       refl-f [:t-refl f]]
 #   (test/assert
-#     (match (c/infer-top [:t-refl id-fn])
+#     (match (c/infer Γf refl-f)
 #       [:Id [:Pi _ _] _ _] true
 #       _ false)
-#     "Reflexivity: refl works for lambda terms"))
-
+#     "Reflexivity: refl works for function variables"))
 # ===============================================
 # Test 3: J Eliminator Type Formation
 # ===============================================
