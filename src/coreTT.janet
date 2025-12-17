@@ -190,7 +190,30 @@
 (defn sem-eq [ty v1 v2]
   "Check if two semantic values are equal at given type (with eta)"
   (match ty
-    [:Type l] (= v1 v2)
+    [:Type l]
+    (match [v1 v2]
+      # Both are Pi types - check structural equality
+      [[:Pi A1 B1] [:Pi A2 B2]]
+      (and (sem-eq [:Type l] A1 A2)
+           (let [fresh (gensym)
+                 arg-sem (raise A1 (ne/var fresh))]
+             (sem-eq [:Type l] (B1 arg-sem) (B2 arg-sem))))
+      
+      # Both are Sigma types
+      [[:Sigma A1 B1] [:Sigma A2 B2]]
+      (and (sem-eq [:Type l] A1 A2)
+           (let [fresh (gensym)
+                 arg-sem (raise A1 (ne/var fresh))]
+             (sem-eq [:Type l] (B1 arg-sem) (B2 arg-sem))))
+      
+      # Both are Id types
+      [[:Id A1 x1 y1] [:Id A2 x2 y2]]
+      (and (sem-eq [:Type l] A1 A2)
+           (sem-eq A1 x1 x2)
+           (sem-eq A1 y1 y2))
+      
+      # Otherwise structural equality
+      _ (= v1 v2))
 
     [:Pi A B]
     (let [fresh (gensym)

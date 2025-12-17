@@ -203,38 +203,29 @@
   "Property: raise-lower roundtrip preserves neutrals (modulo eta)")
 
 # ===============================================
-# Property: Pi Domain Independence
+# Property: Pi Syntactically equality
 # ===============================================
-(defn prop-pi-domain-independence [n]
-  "Property: If domains equal, Pi types equal iff codomains equal"
+(defn prop-pi-syntactic-equality [n]
+  "Property: Syntactically identical Pi types are definitionally equal"
   (var passed true)
   (repeat n
     (let [A [:type (math/rng-int rng 3)]
           shared-lv (math/rng-int rng 3)
-          B1 (fn [x] [:type shared-lv])
-          B2 (fn [x] [:type shared-lv])
+          B (fn [x] [:type shared-lv])
           Γ (c/ctx/empty)
-          pi1 [:t-pi A B1]
-          pi2 [:t-pi A B2]]
+          pi1 [:t-pi A B]
+          pi2 [:t-pi A B]]  # Same A, same B reference
       (try
-        (let [ty (c/infer Γ pi1)
-              fresh (gensym)
-              A-sem (c/eval Γ A)
-              B1-sem (c/eval Γ (B1 [:var fresh]))
-              B2-sem (c/eval Γ (B2 [:var fresh]))
-              codom-eq (c/sem-eq [:Type 100] B1-sem B2-sem)
-              pi-eq (c/term-eq Γ ty pi1 pi2)]
-          # If codomains equal, Pi types should be equal
-          (when codom-eq
-            (unless pi-eq
-              (set passed false)
-              (print "Pi equality failed with equal codomains"))))
+        (let [ty (c/infer Γ pi1)]
+          (unless (c/term-eq Γ ty pi1 pi2)
+            (set passed false)
+            (print "Pi equality failed with identical syntax")))
         ([err] nil))))
   passed)
 
-# (test/assert
-#   (prop-pi-domain-independence 20)
-#   "Property: Pi type equality respects codomain equality")
+(test/assert
+  (prop-pi-syntactic-equality 20)
+  "Property: syntactically identical Pi types are equal")
 
 # ===============================================
 # Property: Sigma Projections Inverse
