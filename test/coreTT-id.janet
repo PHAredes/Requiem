@@ -5,22 +5,60 @@
 
 (test/start-suite "CoreTT Identity Types")
 
+(var rng (math/rng 42))  # Fixed seed for reproducibility
+
 # ===============================================
 # Test 1: Identity Type Formation
 # ===============================================
+# Formation rule (non-cumulative):
+# Γ ⊢ A : Type_l    Γ ⊢ x : A    Γ ⊢ y : A
+# ─────────────────────────────────────────
+#         Γ ⊢ Id A x y : Type_l
+
+(defn prop-id-type-formation [n]
+  "Property: Id A x y : Type_(l+1) when A : Type_l and x,y : A"
+  (var passed true)
+  (repeat n
+    (let [l (math/rng-int rng 5) # l ∈ {0,1,2,3,4}
+          A [:type (inc l)]      # A = Type_(l+1) : Type_(l+2)
+          x [:type l]            # x = Type_l : Type_(l+1) = A
+          y [:type l]            # y = Type_l : Type_(l+1) = A
+          id-ty [:t-id A x y]]
+      (try
+        (let [inferred (c/infer-top id-ty)
+              expected [:Type (+ l 2)]] # Id Type_(l+1) _ _ : Type_(l+2)
+          (unless (= inferred expected)
+            (set passed false)
+            (printf "Id formation failed: expected Type_%d, got %v"
+                    (+ l 2) inferred)))
+        ([err]
+          (set passed false)
+          (printf "Id formation error for level %d: %v" l err)))))
+  passed)
+
+(test/assert
+  (prop-id-type-formation 50)
+  "Property: Id type formation preserves universe levels")
+
+# Sanity check with concrete example
 (test/assert
   (= (c/infer-top [:t-id [:type 1] [:type 0] [:type 0]])
      [:Type 2])
   "Id formation: Id Type₁ Type₀ Type₀ : Type₂")
 
+# Note: Identity types of functions cannot be tested with bare lambdas
+# because lambda type inference is not supported by design (bidirectional
+# type checking requires annotations). Use context variables instead:
+#
 # (let [fn-ty [:t-pi [:type 0] (fn [x] [:type 0])]
-#       f [:lam (fn [x] [:var x])]
-#       g [:lam (fn [x] [:var x])]
-#       id-ty [:t-id fn-ty f f]]
+#       Γ (c/ctx/empty)
+#       fn-ty-sem (c/eval Γ fn-ty)
+#       Γf (c/ctx/add Γ "f" fn-ty-sem)
+#       Γfg (c/ctx/add Γf "g" fn-ty-sem)
+#       id-ty [:t-id fn-ty [:var "f"] [:var "g"]]]
 #   (test/assert
-#     (= (c/infer-top id-ty) [:Type 1])
+#     (= (c/infer Γfg id-ty) [:Type 1])
 #     "Id formation: identity of functions in Type₁"))
-
 # ===============================================
 # Test 2: Reflexivity
 # ===============================================
