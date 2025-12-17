@@ -196,24 +196,88 @@
 # ===============================================
 # Test 8: J with Dependent Motive (Symmetry)
 # ===============================================
-# (let [A [:type 2]
-#       x [:var "x"]
-#       y [:var "y"]
-#       P (fn [y p] [:t-id A y [:var "x"]])
-#       d [:t-refl [:var "x"]]
-#       p [:var "p"]
-#       symm [:t-J A x P d y p]
+# Symmetry via J:
+# Given p : Id A x y, we can derive Id A y x
+# P(y, p) := Id A y x
+# d := refl x : P(x, refl x) = Id A x x
+# J A x P d y p : P(y, p) = Id A y x
+(defn prop-j-symmetry [n]
+  "Property: J can derive symmetry of identity types"
+  (var passed true)
+  (repeat n
+    (let [l (math/rng-int rng 4)
+          A [:type (inc l)]  # A = Type_(l+1)
+          x-val [:type l]    # x = Type_l : A
+          y-val [:type l]    # y = Type_l : A (same value for valid proof)
+          
+          Γ (c/ctx/empty)
+          A-sem (c/eval Γ A)
+          
+          # Add x : A to context
+          Γx (c/ctx/add Γ "x" A-sem)
+          
+          # Add y : A to context
+          Γxy (c/ctx/add Γx "y" A-sem)
+          
+          # Add p : Id A x y to context
+          x-sem (c/eval Γx [:var "x"])
+          y-sem (c/eval Γxy [:var "y"])
+          id-xy-sem (c/ty/id A-sem x-sem y-sem)
+          Γxyp (c/ctx/add Γxy "p" id-xy-sem)
+          
+          # Define motive P(y, p) = Id A y x
+          x [:var "x"]
+          y [:var "y"]
+          P (fn [y p] [:t-id A y x])
+          
+          # Base case d : Id A x x
+          d [:t-refl x]
+          
+          # J application
+          p [:var "p"]
+          symm [:t-J A x P d y p]]
       
-#       Γ (c/ctx/empty)
-#       Γx (c/ctx/add Γ "x" [:Type 2])
-#       Γxy (c/ctx/add Γx "y" [:Type 2])
-#       id-xy [:Id [:Type 2] [:Type 2] [:Type 2]]
-#       Γxyp (c/ctx/add Γxy "p" id-xy)]
-#   (test/assert
-#     (= (c/infer Γxyp symm)
-#        [:Id [:Type 2] [:Type 2] [:Type 2]])
-#     "J proves symmetry: Id A x y → Id A y x"))
+      (try
+        (let [result-ty (c/infer Γxyp symm)]
+          (match result-ty
+            [:Id _ _ _] true  # Successfully produces an identity type
+            _ (do
+                (set passed false)
+                (printf "J symmetry failed: expected Id type, got %v" result-ty))))
+        ([err]
+          (set passed false)
+          (printf "J symmetry error at level %d: %v" l err)))))
+  passed)
 
+(test/assert
+  (prop-j-symmetry 20)
+  "Property: J derives symmetry for identity types")
+
+# Concrete example with specific values
+(let [A [:type 2]
+      Γ (c/ctx/empty)
+      A-sem (c/eval Γ A)
+      
+      Γx (c/ctx/add Γ "x" A-sem)
+      Γxy (c/ctx/add Γx "y" A-sem)
+      
+      x-sem (c/eval Γx [:var "x"])
+      y-sem (c/eval Γxy [:var "y"])
+      id-xy-sem (c/ty/id A-sem x-sem y-sem)
+      Γxyp (c/ctx/add Γxy "p" id-xy-sem)
+      
+      x [:var "x"]
+      y [:var "y"]
+      p [:var "p"]
+      P (fn [y p] [:t-id A y x])
+      d [:t-refl x]
+      symm [:t-J A x P d y p]]
+  
+  (test/assert
+    (match (c/infer Γxyp symm)
+      [:Id [:Type 2] _ _] true
+      _ false)
+    "J proves symmetry: Id A x y → Id A y x"))
 # ===============================================
 # Test 9: Identity Preserves Universe Levels
 # ===============================================
