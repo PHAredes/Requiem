@@ -21,11 +21,10 @@ The core is ~500 lines of Janet and embeds trivially into C/C++ via Janet's FFI.
 - ✅ NbE with eta-equality
 - ✅ Mostly property-based tests passing
 - ✅ Context with efficient shadowing (benchmark validated)
+- ✅ Legacy experiments (`legacy/hoas`, `legacy/phoas`), for documentation
 
 **Currently consolidating:**
-- Pruning up legacy experiments (`hoas-legacy/`, `NbEXP/`), for documentation
 - Finalizing the core (`src/coreTT.janet`)
-- Property tests for confluence, Church-Rosser, normalization stability
 - Fixing "gambiarras"
 
 **Not planned (yet):**
@@ -46,7 +45,7 @@ Requiem solves *my* problem. Not yours. Maybe that's useful to you anyway.
 ```bash
 # Run tests
 janet test/coreTT.janet
-janet test/coreTT-id.janet  
+janet test/coreTT-id.janet
 janet test/coreTT-plus.janet
 
 # Benchmark context operations
