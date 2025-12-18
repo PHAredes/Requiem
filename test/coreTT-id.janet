@@ -347,16 +347,84 @@
     "Context can store identity types"))
 
 # ===============================================
-# Test 13: Dependent Identity Types
+# Test 13: Identity Types of Dependent Functions
 # ===============================================
+# Note: Cannot test identity of polymorphic functions using bare lambdas
+# because lambda type inference is not supported. Would require:
+# - System Fω style type abstractions, or
+# - Context variables with annotated function types
+#
+# Example of what we're trying to express:
+# id : ∀(A : Type). A → A
+# Id (∀A. A → A) id id : Type
+#
+# This would require either:
+# 1. Explicit type lambdas: Λ(A : Type). λ(x : A). x
+# 2. Or testing with context variables instead of bare terms
+# NOTE: DOES NOT WORK!
 # (let [id-ty [:t-pi [:type 0] (fn [A] [:t-pi A (fn [x] A)])]
 #       id-fn [:lam (fn [A] [:lam (fn [x] [:var x])])]
 #       dep-id [:t-id id-ty id-fn id-fn]]
 #   (test/assert
 #     (= (c/infer-top dep-id) [:Type 1])
 #     "Dependent identity: Id (A → A) id id"))
+#
+# Instead. we test it with context variables
+(let [id-ty [:t-pi [:type 0] (fn [A] [:t-pi A (fn [x] A)])]
+      Γ (c/ctx/empty)
+      id-ty-sem (c/eval Γ id-ty)
+      
+      # Add two identity functions to context
+      Γf (c/ctx/add Γ "f" id-ty-sem)
+      Γfg (c/ctx/add Γf "g" id-ty-sem)
+      
+      # Create identity type between them
+      f [:var "f"]
+      g [:var "g"]
+      dep-id [:t-id id-ty f g]]
+  
+  (test/assert
+    (= (c/infer Γfg dep-id) [:Type 1])
+    "Dependent identity: Id (∀A. A → A) f g"))
 
-# ===============================================
+# And a property test for non-polymorphic Pi Types
+(defn prop-id-of-pi-types [n]
+  "Property: Identity types can be formed for Pi types"
+  (var passed true)
+  (repeat n
+    (let [l (math/rng-int rng 3)
+          A [:type l]
+          B [:type l]
+          pi-ty [:t-pi A (fn [_] B)]
+          
+          Γ (c/ctx/empty)
+          pi-sem (c/eval Γ pi-ty)
+          
+          # Add two function variables to context
+          Γf (c/ctx/add Γ "f" pi-sem)
+          Γfg (c/ctx/add Γf "g" pi-sem)
+          
+          f [:var "f"]
+          g [:var "g"]
+          id-ty [:t-id pi-ty f g]]
+      
+      (try
+        (let [result (c/infer Γfg id-ty)]
+          (match result
+            [:Type _] true
+            _ (do
+                (set passed false)
+                (printf "Id of Pi type failed: got %v" result))))
+        ([err]
+          (set passed false)
+          (printf "Id of Pi type error at level %d: %v" l err)))))
+  passed)
+
+(test/assert
+  (prop-id-of-pi-types 20)
+  "Property: identity types work for function types")
+
+# # ===============================================
 # Test 14: Eta-Equality with Identity
 # ===============================================
 (let [Γ (c/ctx/empty)
