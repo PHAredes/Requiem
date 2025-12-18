@@ -612,19 +612,41 @@
 # ===============================================
 # Test 20: Identity on Higher Universes
 # ===============================================
-# (test/assert
-#   (= (c/infer-top [:t-id [:type 5] [:type 3] [:type 3]])
-#      [:Type 6])
-#   "Identity works on higher universes")
+(defn prop-id-higher-universes [n]
+  "Property: Identity types work correctly at high universe levels"
+  (var passed true)
+  (repeat n
+    (let [l (+ 5 (math/rng-int rng 10))  # High levels: 5-14
+          A [:type (inc l)]               # A = Type_(l+1)
+          x [:type l]                     # x = Type_l : A
+          y [:type l]                     # y = Type_l : A
+          id-ty [:t-id A x y]]
+      (try
+        (let [inferred (c/infer-top id-ty)
+              expected [:Type (+ l 2)]]
+          (unless (= inferred expected)
+            (set passed false)
+            (printf "High universe Id failed at level %d: expected Type_%d, got %v"
+                    l (+ l 2) inferred)))
+        ([err]
+          (set passed false)
+          (printf "High universe Id error at level %d: %v" l err)))))
+  passed)
 
-# (let [high-univ [:type 10]
-#       x [:type 5]
-#       y [:type 5]
-#       id-ty [:t-id high-univ x y]]
-#   (test/assert
-#     (= (c/infer-top id-ty) [:Type 11])
-#     "Identity preserves high universe levels"))
+(test/assert
+  (prop-id-higher-universes 20)
+  "Property: identity types work at high universe levels")
 
+# Sanity checks
+(test/assert
+  (= (c/infer-top [:t-id [:type 5] [:type 4] [:type 4]])
+     [:Type 6])
+  "Identity works on higher universes")
+
+(test/assert
+  (= (c/infer-top [:t-id [:type 10] [:type 9] [:type 9]])
+     [:Type 11])
+  "Identity preserves high universe levels")
 # ===============================================
 # Test 21: J with Pi Types (FIXED)
 # ===============================================
