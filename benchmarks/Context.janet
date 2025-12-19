@@ -5,7 +5,7 @@
 #   Compare: table/clone vs prototypes vs arrays vs chunking
 # ================================================================
 
-(import ../Utils/TestRunner :as test)
+(import ../test/Utils/TestRunner :as test)
 
 # ================================================================
 # Implementation 1: Current (table/clone)

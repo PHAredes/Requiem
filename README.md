@@ -13,14 +13,15 @@ Requiem is a dependently-typed language in the spirit of Agda, implementing:
 - **Universe hierarchy** — `Type₀ : Type₁ : Type₂ : ...`
 
 The core is ~500 lines of Janet and embeds trivially into C/C++ via Janet's FFI.
+**Zero dependencies.**
 
 ## Status: Work in Progress
 
 **What works:**
 - ✅ Core type theory (Pi, Sigma, Id types)
 - ✅ NbE with eta-equality
-- ✅ Mostly property-based tests passing
-- ✅ Context with efficient shadowing (benchmark validated)
+- ✅ Comprehensive property-based test suite (Confluence, Church-Rosser, Normalization)
+- ✅ Context with efficient shadowing
 - ✅ Legacy experiments (`legacy/hoas`, `legacy/phoas`), for documentation
 
 **Currently consolidating:**
@@ -41,15 +42,24 @@ I needed a dependently-typed core I could:
 
 Requiem solves *my* problem. Not yours. Maybe that's useful to you anyway.
 
-## Running
-```bash
-# Run tests
-janet test/coreTT.janet
-janet test/coreTT-id.janet
-janet test/coreTT-plus.janet
+Requiem is a standard Janet project managed by `jpm`.
 
-# Benchmark context operations
-janet test/ctx.benchmark.janet
+```bash
+# Install dependencies (none!) and build
+jpm build
+
+# Install globally (optional)
+# jpm install
+```
+
+## Running
+
+```bash
+# Run the test suite
+jpm test
+
+# Run context benchmarks
+janet benchmarks/Context.janet
 ```
 
 ## License
