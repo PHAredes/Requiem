@@ -1,11 +1,13 @@
 #!/usr/bin/env janet
 
 (import spork/test)
-(import "../src/coreTT" :as c)
+(import ../../src/coreTT :as c)
+(import ../Utils/Generators :as gen)
+(import ../Utils/Assertions :as a)
 
 (test/start-suite "CoreTT Identity Types")
 
-(var rng (math/rng 42))  # Fixed seed for reproducibility
+(def rng (gen/rng)) # Fixed seed for reproducibility
 
 # ===============================================
 # Test 1: Identity Type Formation
@@ -20,9 +22,9 @@
   (var passed true)
   (repeat n
     (let [l (math/rng-int rng 5) # l ∈ {0,1,2,3,4}
-          A [:type (inc l)]      # A = Type_(l+1) : Type_(l+2)
-          x [:type l]            # x = Type_l : Type_(l+1) = A
-          y [:type l]            # y = Type_l : Type_(l+1) = A
+          A [:type (inc l)] # A = Type_(l+1) : Type_(l+2)
+          x [:type l] # x = Type_l : Type_(l+1) = A
+          y [:type l] # y = Type_l : Type_(l+1) = A
           id-ty [:t-id A x y]]
       (try
         (let [inferred (c/infer-top id-ty)
@@ -46,19 +48,6 @@
      [:Type 2])
   "Id formation: Id Type₁ Type₀ Type₀ : Type₂")
 
-# Note: Identity types of functions cannot be tested with bare lambdas
-# because lambda type inference is not supported by design (bidirectional
-# type checking requires annotations). Use context variables instead:
-#
-# (let [fn-ty [:t-pi [:type 0] (fn [x] [:type 0])]
-#       Γ (c/ctx/empty)
-#       fn-ty-sem (c/eval Γ fn-ty)
-#       Γf (c/ctx/add Γ "f" fn-ty-sem)
-#       Γfg (c/ctx/add Γf "g" fn-ty-sem)
-#       id-ty [:t-id fn-ty [:var "f"] [:var "g"]]]
-#   (test/assert
-#     (= (c/infer Γfg id-ty) [:Type 1])
-#     "Id formation: identity of functions in Type₁"))
 # ===============================================
 # Test 2: Reflexivity
 # ===============================================
@@ -101,20 +90,6 @@
      [:Id [:Type 6] [:Type 5] [:Type 5]])
   "Reflexivity: refl Type₅ : Id Type₆ Type₅ Type₅")
 
-# Note: Reflexivity for lambdas requires type annotation.
-# Use context variables with inferred function types instead:
-#
-# (let [fn-ty [:t-pi [:type 0] (fn [x] [:type 0])]
-#       Γ (c/ctx/empty)
-#       fn-ty-sem (c/eval Γ fn-ty)
-#       Γf (c/ctx/add Γ "f" fn-ty-sem)
-#       f [:var "f"]
-#       refl-f [:t-refl f]]
-#   (test/assert
-#     (match (c/infer Γf refl-f)
-#       [:Id [:Pi _ _] _ _] true
-#       _ false)
-#     "Reflexivity: refl works for function variables"))
 # ===============================================
 # Test 3: J Eliminator Type Formation
 # ===============================================
@@ -172,14 +147,14 @@
   "Semantic inequality: different reflexivity proofs are not equal")
 
 # ===============================================
-# Test 7: Normalization of Identity Types (FIXED)
+# Test 7: Normalization of Identity Types
 # ===============================================
 (test/assert
   (= (c/nf [:Type 2] [:t-id [:type 1] [:type 0] [:type 0]])
      [:Id [:Type 1] [:Type 0] [:Type 0]])
   "Normalization: identity type normalizes")
 
-# Normalize refl at the identity type - just check it's a refl form
+# Normalize refl at the identity type
 (let [Γ (c/ctx/empty)
       A [:type 1]
       x [:type 0]
@@ -196,51 +171,46 @@
 # ===============================================
 # Test 8: J with Dependent Motive (Symmetry)
 # ===============================================
-# Symmetry via J:
-# Given p : Id A x y, we can derive Id A y x
-# P(y, p) := Id A y x
-# d := refl x : P(x, refl x) = Id A x x
-# J A x P d y p : P(y, p) = Id A y x
 (defn prop-j-symmetry [n]
   "Property: J can derive symmetry of identity types"
   (var passed true)
   (repeat n
     (let [l (math/rng-int rng 4)
-          A [:type (inc l)]  # A = Type_(l+1)
-          x-val [:type l]    # x = Type_l : A
-          y-val [:type l]    # y = Type_l : A (same value for valid proof)
-          
+          A [:type (inc l)] # A = Type_(l+1)
+          x-val [:type l] # x = Type_l : A
+          y-val [:type l] # y = Type_l : A (same value for valid proof)
+
           Γ (c/ctx/empty)
           A-sem (c/eval Γ A)
-          
+
           # Add x : A to context
           Γx (c/ctx/add Γ "x" A-sem)
-          
+
           # Add y : A to context
           Γxy (c/ctx/add Γx "y" A-sem)
-          
+
           # Add p : Id A x y to context
           x-sem (c/eval Γx [:var "x"])
           y-sem (c/eval Γxy [:var "y"])
           id-xy-sem (c/ty/id A-sem x-sem y-sem)
           Γxyp (c/ctx/add Γxy "p" id-xy-sem)
-          
+
           # Define motive P(y, p) = Id A y x
           x [:var "x"]
           y [:var "y"]
           P (fn [y p] [:t-id A y x])
-          
+
           # Base case d : Id A x x
           d [:t-refl x]
-          
+
           # J application
           p [:var "p"]
           symm [:t-J A x P d y p]]
-      
+
       (try
         (let [result-ty (c/infer Γxyp symm)]
           (match result-ty
-            [:Id _ _ _] true  # Successfully produces an identity type
+            [:Id _ _ _] true # Successfully produces an identity type
             _ (do
                 (set passed false)
                 (printf "J symmetry failed: expected Id type, got %v" result-ty))))
@@ -257,41 +227,39 @@
 (let [A [:type 2]
       Γ (c/ctx/empty)
       A-sem (c/eval Γ A)
-      
+
       Γx (c/ctx/add Γ "x" A-sem)
       Γxy (c/ctx/add Γx "y" A-sem)
-      
+
       x-sem (c/eval Γx [:var "x"])
       y-sem (c/eval Γxy [:var "y"])
       id-xy-sem (c/ty/id A-sem x-sem y-sem)
       Γxyp (c/ctx/add Γxy "p" id-xy-sem)
-      
+
       x [:var "x"]
       y [:var "y"]
       p [:var "p"]
       P (fn [y p] [:t-id A y x])
       d [:t-refl x]
       symm [:t-J A x P d y p]]
-  
+
   (test/assert
     (match (c/infer Γxyp symm)
       [:Id [:Type 2] _ _] true
       _ false)
     "J proves symmetry: Id A x y → Id A y x"))
+
 # ===============================================
 # Test 9: Identity Preserves Universe Levels
 # ===============================================
-# Γ ⊢ A : Type_l    Γ ⊢ x : A    Γ ⊢ y : A
-# ─────────────────────────────────────────
-#         Γ ⊢ Id A x y : Type_l
 (defn prop-id-preserves-universes [n]
   "Property: Id A x y : Type_(l+1) when A : Type_l"
   (var passed true)
   (repeat n
-    (let [l (math/rng-int rng 8)  # Test larger universes
-          A [:type (inc l)]       # A = Type_(l+1) : Type_(l+2)
-          x [:type l]             # x = Type_l : Type_(l+1) = A
-          y [:type l]             # y = Type_l : Type_(l+1) = A
+    (let [l (math/rng-int rng 8) # Test larger universes
+          A [:type (inc l)] # A = Type_(l+1) : Type_(l+2)
+          x [:type l] # x = Type_l : Type_(l+1) = A
+          y [:type l] # y = Type_l : Type_(l+1) = A
           id-ty [:t-id A x y]]
       (try
         (let [inferred (c/infer-top id-ty)
@@ -319,19 +287,12 @@
   (= (c/infer-top [:t-id [:type 10] [:type 9] [:type 9]])
      [:Type 11])
   "Identity preserves universe: larger universes")
+
 # ===============================================
 # Test 11: Type Checking Reflexivity
 # ===============================================
-(defn assert-throws [f msg]
-  "Helper to assert that a function throws an error"
-  (var threw false)
-  (try
-    (f)
-    ([err] (set threw true)))
-  (test/assert threw msg))
-
-(assert-throws
-  (fn [] 
+(a/assert-throws
+  (fn []
     (let [Γ (c/ctx/empty)]
       (c/check Γ [:t-refl [:type 0]] [:Id [:Type 1] [:Type 0] [:Type 1]])))
   "Error: refl x does not have type Id A x y when x ≠ y")
@@ -349,45 +310,24 @@
 # ===============================================
 # Test 13: Identity Types of Dependent Functions
 # ===============================================
-# Note: Cannot test identity of polymorphic functions using bare lambdas
-# because lambda type inference is not supported. Would require:
-# - System Fω style type abstractions, or
-# - Context variables with annotated function types
-#
-# Example of what we're trying to express:
-# id : ∀(A : Type). A → A
-# Id (∀A. A → A) id id : Type
-#
-# This would require either:
-# 1. Explicit type lambdas: Λ(A : Type). λ(x : A). x
-# 2. Or testing with context variables instead of bare terms
-# NOTE: DOES NOT WORK!
-# (let [id-ty [:t-pi [:type 0] (fn [A] [:t-pi A (fn [x] A)])]
-#       id-fn [:lam (fn [A] [:lam (fn [x] [:var x])])]
-#       dep-id [:t-id id-ty id-fn id-fn]]
-#   (test/assert
-#     (= (c/infer-top dep-id) [:Type 1])
-#     "Dependent identity: Id (A → A) id id"))
-#
-# Instead. we test it with context variables
 (let [id-ty [:t-pi [:type 0] (fn [A] [:t-pi A (fn [x] A)])]
       Γ (c/ctx/empty)
       id-ty-sem (c/eval Γ id-ty)
-      
+
       # Add two identity functions to context
       Γf (c/ctx/add Γ "f" id-ty-sem)
       Γfg (c/ctx/add Γf "g" id-ty-sem)
-      
+
       # Create identity type between them
       f [:var "f"]
       g [:var "g"]
       dep-id [:t-id id-ty f g]]
-  
+
   (test/assert
     (= (c/infer Γfg dep-id) [:Type 1])
     "Dependent identity: Id (∀A. A → A) f g"))
 
-# And a property test for non-polymorphic Pi Types
+# Pi Types property test
 (defn prop-id-of-pi-types [n]
   "Property: Identity types can be formed for Pi types"
   (var passed true)
@@ -396,18 +336,18 @@
           A [:type l]
           B [:type l]
           pi-ty [:t-pi A (fn [_] B)]
-          
+
           Γ (c/ctx/empty)
           pi-sem (c/eval Γ pi-ty)
-          
+
           # Add two function variables to context
           Γf (c/ctx/add Γ "f" pi-sem)
           Γfg (c/ctx/add Γf "g" pi-sem)
-          
+
           f [:var "f"]
           g [:var "g"]
           id-ty [:t-id pi-ty f g]]
-      
+
       (try
         (let [result (c/infer Γfg id-ty)]
           (match result
@@ -424,7 +364,7 @@
   (prop-id-of-pi-types 20)
   "Property: identity types work for function types")
 
-# # ===============================================
+# ===============================================
 # Test 14: Eta-Equality with Identity
 # ===============================================
 (let [Γ (c/ctx/empty)
@@ -435,30 +375,6 @@
   (test/assert
     (c/sem-eq fn-ty (c/eval Γ f) (c/eval Γ g))
     "Eta-equal functions are semantically equal"))
-
-# ===============================================
-# Test 15: J with Type Families (Transport)
-# ===============================================
-(let [A [:type 2]
-      x [:var "x"]
-      y [:var "y"]
-      P [:var "P"]
-      motive (fn [y p] [:app P y])
-      px [:var "px"]
-      p [:var "p"]
-      transport [:t-J A x motive px y p]
-      
-      Γ (c/ctx/empty)
-      Γx (c/ctx/add Γ "x" [:Type 2])
-      Γxy (c/ctx/add Γx "y" [:Type 2])
-      ΓxyP (c/ctx/add Γxy "P" [:Pi [:Type 2] (fn [_] [:Type 1])])
-      id-xy [:Id [:Type 2] [:Type 2] [:Type 2]]
-      Γxypp (c/ctx/add ΓxyP "p" id-xy)
-      Γall (c/ctx/add Γxypp "px" [:Type 1])]
-  # (test/assert
-  #   (= (c/infer Γall transport) [:Type 1])
-  #   "J implements transport along equality")
-  )
 
 # ===============================================
 # Test 16: Multiple J Applications (Transitivity)
@@ -481,45 +397,13 @@
     "Multiple J applications compute correctly"))
 
 # ===============================================
-# Property Tests: Identity Type Well-Formedness
-# ===============================================
-(var rng (math/rng))
-
-(defn gen-univ []
-  "Generate a random universe"
-  [:type (+ 1 (math/rng-int rng 3))])
-
-(defn gen-elem []
-  "Generate a random element at Type₀"
-  [:type 0])
-
-# (defn prop-id-well-formed [n]
-#   "Property: Id A x y is well-formed when A is a type and x,y : A"
-#   (var passed true)
-#   (repeat n
-#     (let [A (gen-univ)
-#           x (gen-elem)
-#           y (gen-elem)]
-#       (try
-#         (c/infer-top [:t-id A x y])
-#         (set passed true)
-#         ([err] 
-#          (set passed false)
-#          (print "Id type formation failed:" err)))))
-#   passed)
-
-# (test/assert
-#   (prop-id-well-formed 20)
-#   "Property: identity types are well-formed")
-
-# ===============================================
 # Property Tests: Reflexivity Always Works
 # ===============================================
 (defn prop-reflexivity [n]
   "Property: refl x : Id A x x for any well-typed x : A"
   (var passed true)
   (repeat n
-    (let [x (gen-elem)]
+    (let [x [:type 0]] # Reduced complexity to simple element for reliability
       (try
         (let [A (c/infer-top x)
               xv (c/eval (c/ctx/empty) x)
@@ -528,9 +412,9 @@
           (unless (c/check-top refl-x expected-ty)
             (set passed false)
             (print "Reflexivity failed for:" x)))
-        ([err] 
-         (print "Error in reflexivity test:" err)
-         nil))))
+        ([err]
+          (print "Error in reflexivity test:" err)
+          nil))))
   passed)
 
 (test/assert
@@ -545,10 +429,10 @@
   (var passed true)
   (let [Γ (c/ctx/empty)]
     (repeat n
-      (let [A (gen-univ)
-            x (gen-elem)
-            P (fn [y p] (gen-univ))
-            d (gen-elem)
+      (let [A (gen/gen-univ rng)
+            x [:type 0]
+            P (fn [y p] (gen/gen-univ rng))
+            d [:type 0]
             J-refl [:t-J A x P d x [:t-refl x]]]
         (try
           (let [P-ty (c/eval Γ (P (c/eval Γ x) [:refl (c/eval Γ x)]))]
@@ -578,17 +462,8 @@
 # ===============================================
 # Test 18: Type Preservation for Identity
 # ===============================================
-(defn type-preserves-id [Γ t expected-ty]
-  "Check that term t has type expected-ty and evaluation preserves this"
-  (try
-    (let [inferred-ty (c/infer Γ t)]
-      (c/sem-eq (c/ty/type 100) inferred-ty expected-ty))
-    ([err] 
-     (print "Type preservation error:" err)
-     false)))
-
 (test/assert
-  (type-preserves-id
+  (a/type-preserves
     (c/ctx/empty)
     [:t-refl [:type 0]]
     [:Id [:Type 1] [:Type 0] [:Type 0]])
@@ -616,10 +491,10 @@
   "Property: Identity types work correctly at high universe levels"
   (var passed true)
   (repeat n
-    (let [l (+ 5 (math/rng-int rng 10))  # High levels: 5-14
-          A [:type (inc l)]               # A = Type_(l+1)
-          x [:type l]                     # x = Type_l : A
-          y [:type l]                     # y = Type_l : A
+    (let [l (+ 5 (math/rng-int rng 10)) # High levels: 5-14
+          A [:type (inc l)] # A = Type_(l+1)
+          x [:type l] # x = Type_l : A
+          y [:type l] # y = Type_l : A
           id-ty [:t-id A x y]]
       (try
         (let [inferred (c/infer-top id-ty)
@@ -647,8 +522,9 @@
   (= (c/infer-top [:t-id [:type 10] [:type 9] [:type 9]])
      [:Type 11])
   "Identity preserves high universe levels")
+
 # ===============================================
-# Test 21: J with Pi Types (FIXED)
+# Test 21: J with Pi Types
 # ===============================================
 (let [Γ (c/ctx/empty)
       A [:t-pi [:type 0] (fn [x] [:type 0])]
@@ -687,7 +563,7 @@
       yv (c/eval Γ y)
       id-xy (c/ty/id Av xv yv)
       # Verify it has the right type
-      _ (test/assert (= id-xy [:Id [:Type 2] [:Type 1] [:Type 1]]) 
+      _ (test/assert (= id-xy [:Id [:Type 2] [:Type 1] [:Type 1]])
                      "Inner Id construction correct")
       # Now create proofs
       p [:refl [:Type 1]]
@@ -695,9 +571,9 @@
       # Create outer identity type on the proofs
       id-id (c/ty/id id-xy p q)]
   (test/assert
-    (= id-id [:Id [:Id [:Type 2] [:Type 1] [:Type 1]] 
-                  [:refl [:Type 1]] 
-                  [:refl [:Type 1]]])
+    (= id-id [:Id [:Id [:Type 2] [:Type 1] [:Type 1]]
+              [:refl [:Type 1]]
+              [:refl [:Type 1]]])
     "Nested identity types are well-formed"))
 
 # ===============================================
@@ -708,9 +584,9 @@
       x [:type 0]
       id-ty [:Id [:Type 1] [:Type 0] [:Type 0]]
       refl-x [:t-refl x]
-      
+
       Γp (c/ctx/add Γ "p" id-ty)
-      
+
       ty-before (c/infer Γ refl-x)
       ty-after (c/infer Γp refl-x)]
   (test/assert
