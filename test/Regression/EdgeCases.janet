@@ -1,6 +1,6 @@
 #!/usr/bin/env janet
 
-(import spork/test)
+(import ../Utils/TestRunner :as test)
 (import ../../src/coreTT :as c)
 (import ../Utils/Assertions :as a)
 

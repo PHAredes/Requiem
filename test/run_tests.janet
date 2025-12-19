@@ -6,7 +6,6 @@
 #   janet test/run_tests.janet Identity # Run only tests matching "Identity"
 #   janet test/run_tests.janet --bench  # Include benchmarks
 
-# (import spork/path) - REMOVED
 
 # Get the directory where this script lives
 (def script-path (dyn *current-file*))

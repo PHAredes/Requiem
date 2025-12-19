@@ -1,7 +1,7 @@
 #!/usr/bin/env janet
 
-(import spork/test)
 (import ../../src/coreTT :as c)
+(import ../Utils/TestRunner :as test)
 
 (test/start-suite "Core Context")
 

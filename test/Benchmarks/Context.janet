@@ -5,7 +5,7 @@
 #   Compare: table/clone vs prototypes vs arrays vs chunking
 # ================================================================
 
-(import spork/test)
+(import ../Utils/TestRunner :as test)
 
 # ================================================================
 # Implementation 1: Current (table/clone)
