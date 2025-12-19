@@ -41,20 +41,6 @@
 (defn ty/sigma [A B] [:Sigma A B])
 (defn ty/id [A x y] [:Id A x y])
 
-# "this is ugly and overkill"
-# WHO...CARES???
-# I do, but we need a better approach
-# TODO: Refact this to use a more secure implementation
-(defn univ-lvl [ty]
-  (match ty
-    [:Type l] (do
-      (unless (int? l) 
-        (errorf "Universe level is not an integer in %v" ty))
-      (unless (>= l 0)
-        (errorf "Universe level is negative in %v" ty))
-      l)
-    _ (errorf "not a universe: %v" ty)))
-
 # ---------------------
 # Term constructors (HOAS syntax)
 # ---------------------
@@ -116,10 +102,9 @@
       new-chunk)))
 
 (defn ctx/lookup [Γ x]
-  (def A (get Γ x nil))
-  (if (nil? A)
-    (error "unbound")
-    A))
+  (if (has-key? Γ x)
+    (get Γ x)
+    (errorf "unbound variable: %v" x)))
 
 # ---------------------
 # NbE: raise / lower with eta-equality
@@ -131,19 +116,16 @@
      (fn [ty ne]
        (match ty
          [:Type l] [:neutral ne]
-
          [:Pi A B]
          (fn [x]
            (let [nfx (lower A x)]
              (raise (B x) (ne/app ne nfx))))
-
          [:Sigma A B]
          (let [v1 (raise A (ne/fst ne))
                v2 (raise (B v1) (ne/snd ne))]
            [v1 v2])
-
-         [:Id A x y]
-         [:neutral ne])))
+         [:Id A x y] [:neutral ne]
+         [:neutral _] [:neutral ne])))
 
 (set lower
      (fn [ty sem]
@@ -179,10 +161,14 @@
            (nf/pair (lower A v1) (lower (B v1) v2)))
 
          [:Id A x y]
-         (match sem
-           [:refl v] (nf/refl (lower A v))
-           [:neutral ne] (nf/neut ne)
-           _ sem))))
+           (match sem
+             [:refl v] (nf/refl (lower A v))
+             [:neutral ne] (nf/neut ne)
+             _ sem)
+         [:neutral _]
+           (match sem
+             [:neutral ne] (nf/neut ne)
+             _ sem))))
 
 # ---------------------
 # Definitional equality with eta
@@ -251,77 +237,58 @@
 (defn eval [Γ tm]
   "Evaluate a term in context Γ to a semantic value"
   (match tm
-    # Semantic values (already evaluated) - pass through
     [:Type l] [:Type l]
     [:Pi A B] [:Pi A B]
     [:Sigma A B] [:Sigma A B]
     [:Id A x y] [:Id A x y]
     [:refl x] [:refl x]
     [:neutral ne] [:neutral ne]
-
     [:var x]
-    (if (or (string? x) (symbol? x))
-      [:neutral (ne/var x)]
-      x)
-
-    [:lam body]
-    (fn [x] (eval Γ (body x)))
-
+      (if (or (string? x) (symbol? x))
+        [:neutral (ne/var x)]
+        x)
+    [:lam body] (fn [x] (eval Γ (body x)))
     [:app f x]
-    (let [fv (eval Γ f)
-          xv (eval Γ x)]
-      (match fv
-        [:neutral ne] [:neutral (ne/app ne (lower [:Type 0] xv))]
-        _ (fv xv)))
+      (let [fv (eval Γ f)
+            xv (eval Γ x)]
+        (match fv
+          [:neutral ne] [:neutral (ne/app ne (lower [:Type 0] xv))]
+          _ (fv xv)))
 
     [:type l] (ty/type l)
-
-    [:t-pi A B]
-    (ty/pi (eval Γ A) (fn [x] (eval Γ (B x))))
-
-    [:t-sigma A B]
-    (ty/sigma (eval Γ A) (fn [x] (eval Γ (B x))))
-
+    [:t-pi A B] (ty/pi (eval Γ A) (fn [x] (eval Γ (B x))))
+    [:t-sigma A B] (ty/sigma (eval Γ A) (fn [x] (eval Γ (B x))))
     [:pair a b] [(eval Γ a) (eval Γ b)]
-
     [:fst p]
-    (let [v (eval Γ p)]
-      (match v
-        [l r] l
-        [:neutral ne] [:neutral (ne/fst ne)]))
-
+      (let [v (eval Γ p)]
+        (match v
+          [l r] l
+          [:neutral ne] [:neutral (ne/fst ne)]))
     [:snd p]
-    (let [v (eval Γ p)]
-      (match v
-        [l r] r
-        [:neutral ne] [:neutral (ne/snd ne)]))
-
+      (let [v (eval Γ p)]
+        (match v
+          [l r] r
+          [:neutral ne] [:neutral (ne/snd ne)]))
     # Identity type
-    [:t-id A x y]
-    (ty/id (eval Γ A) (eval Γ x) (eval Γ y))
-
+    [:t-id A x y] (ty/id (eval Γ A) (eval Γ x) (eval Γ y))
     [:t-refl x]
     [:refl (eval Γ x)]
-
     # J eliminator
     [:t-J A x P d y p]
-    (let [Av (eval Γ A)
-          xv (eval Γ x)
-          Pv (eval Γ P)
-          dv (eval Γ d)
-          yv (eval Γ y)
-          pv (eval Γ p)]
-      (match pv
-        # Computation rule: J A x P d x (refl x) ≡ d
-        [:refl zv]
-        (if (sem-eq Av zv xv) dv 
-          [:neutral (ne/J Av xv Pv dv yv pv)])
-
-        [:neutral ne]
-        [:neutral (ne/J Av xv Pv dv yv pv)]
-
-        _ (errorf "J applied to non-proof: %v" pv)))
-
+      (let [Av (eval Γ A)
+            xv (eval Γ x)
+            Pv (eval Γ P)
+            dv (eval Γ d)
+            yv (eval Γ y)
+            pv (eval Γ p)]
+        (match pv
+          # Computation rule: J A x P d x (refl x) ≡ d
+          [:refl zv]
+          (if (sem-eq Av zv xv) dv 
+              [:neutral (ne/J Av xv Pv dv yv pv)])
+          [:neutral ne]
+          [:neutral (ne/J Av xv Pv dv yv pv)]
+          _ (errorf "J applied to non-proof: %v" pv)))
     _ (if (function? tm) tm tm)))
 
 (defn nf [ty tm]
@@ -471,7 +438,6 @@
 # ---------------------
 # Top-level helpers
 # ---------------------
-
 (defn type-eq [Γ A B]
   "Check if two types are equal"
   (= (eval Γ A) (eval Γ B)))
