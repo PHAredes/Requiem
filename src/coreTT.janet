@@ -444,7 +444,9 @@
 
 (defn term-eq [Γ A t u]
   "Check if two terms are equal at type A"
-  (sem-eq (eval Γ A) (eval Γ t) (eval Γ u)))
+  (or
+    (= t u)
+    (sem-eq (eval Γ A) (eval Γ t) (eval Γ u))))
 
 (defn check-top [t expected]
   (let [Γ (ctx/empty)]
