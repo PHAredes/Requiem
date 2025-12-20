@@ -5,7 +5,7 @@
 #   Compare: table/clone vs prototypes vs arrays vs chunking
 # ================================================================
 
-(import spork/test)
+(import ../test/Utils/TestRunner :as test)
 
 # ================================================================
 # Implementation 1: Current (table/clone)
@@ -18,7 +18,7 @@
 
 (defn ctx1/lookup [Γ x]
   (def A (get Γ x nil))
-  (if (nil? A) 
+  (if (nil? A)
     (error "unbound")
     A))
 
@@ -67,7 +67,7 @@
 
 (defn ctx4/add [Γ x A]
   (def count (get Γ :count 0))
-  
+
   (if (< count CHUNK_SIZE_4)
     (do
       (def new-Γ (table/clone Γ))
@@ -100,7 +100,7 @@
 
 (defn ctx5/add [Γ x A]
   (def count (get Γ :count 0))
-  
+
   (if (< count CHUNK_SIZE_5)
     (do
       (def new-Γ (table/clone Γ))
@@ -119,7 +119,7 @@
   (if (nil? A)
     (error "unbound")
     A))
-    
+
 # ================================================================
 # Implementation 6: Prototypes + Chunking (CHUNK_SIZE=64, Test High K)
 # O(high k) amortized add (slower), O(low n/k) amortized lookup (faster)
@@ -133,7 +133,7 @@
 
 (defn ctx6/add [Γ x A]
   (def count (get Γ :count 0))
-  
+
   (if (< count CHUNK_SIZE_6)
     (do
       (def new-Γ (table/clone Γ))
@@ -161,13 +161,13 @@
     (do
       (def warm-up-iters (max 100 (div iterations 100)))
       (repeat warm-up-iters (thunk))
-      
+
       (def start (os/clock :cputime))
       (repeat iterations (thunk))
       (def elapsed (- (os/clock :cputime) start))
-      (printf "%s: %.6f seconds (%.2f μs per iteration)" 
-              name 
-              elapsed 
+      (printf "%s: %.6f seconds (%.2f μs per iteration)"
+              name
+              elapsed
               (* (/ elapsed iterations) 1000000))
       elapsed)
     ([err]
@@ -185,7 +185,7 @@
 (defn bench-deep-construction [ctx/empty ctx/add depths iterations]
   (print "\n=== Deep Context Construction ===")
   (each depth depths
-    (time-it 
+    (time-it
       (string "  Depth " depth)
       (fn []
         (var Γ (ctx/empty))
@@ -202,7 +202,7 @@
     (var Γ (ctx/empty))
     (loop [i :range [0 depth]]
       (set Γ (ctx/add Γ (string "x" i) [:Type i])))
-    
+
     (time-it
       (string "  Depth " depth " - lookup first binding")
       (fn [] (ctx/lookup Γ "x0"))
@@ -218,10 +218,10 @@
     (var Γ (ctx/empty))
     (loop [i :range [0 depth]]
       (set Γ (ctx/add Γ (string "x" i) [:Type i])))
-    
+
     (time-it
       (string "  Depth " depth " - random lookups")
-      (fn [] 
+      (fn []
         (def key (string "x" (math/rng-int rng depth)))
         (ctx/lookup Γ key))
       iterations)))
@@ -231,7 +231,7 @@
 # ================================================================
 (defn bench-shadowing [ctx/empty ctx/add ctx/lookup iterations]
   (print "\n=== Shadowing Performance ===")
-  
+
   # Add same variable 100 times (heavy shadowing)
   (time-it
     "  Shadow 'x' 100 times"
@@ -240,7 +240,7 @@
       (loop [i :range [0 100]]
         (set Γ (ctx/add Γ "x" [:Type i]))))
     iterations)
-  
+
   # Verify lookup gets most recent
   (var Γ (ctx/empty))
   (loop [i :range [0 100]]
@@ -260,7 +260,7 @@
       (loop [i :range [0 depth]]
         (set Γ (ctx/add Γ (string "x" i) [:Type i])))
       # Discard Γ (GC will collect)
-      )
+)
     iterations))
 
 # ================================================================
@@ -268,7 +268,7 @@
 # ================================================================
 (defn bench-typechecker-pattern [ctx/empty ctx/add ctx/lookup iterations]
   (print "\n=== Realistic Type Checker Pattern ===")
-  
+
   # Simulate: build context, lookup a few times, extend, repeat
   (time-it
     "  Simulate 1000 type checks"
@@ -277,7 +277,7 @@
       # Add 20 base bindings
       (loop [i :range [0 20]]
         (set Γ (ctx/add Γ (string "x" i) [:Type 0])))
-      
+
       # Simulate checking 1000 terms
       (loop [_ :range [0 1000]]
         # Lookup a few variables
@@ -298,7 +298,7 @@
     (var Γ (ctx/empty))
     (loop [i :range [0 width]]
       (set Γ (ctx/add Γ (string "x" i) [:Type i])))
-    
+
     (time-it
       (string "  Width " width " - lookup middle")
       (fn [] (ctx/lookup Γ (string "x" (div width 2))))
@@ -310,7 +310,7 @@
 (defn run-all-benchmarks []
   (def depths [10 50 100 200 500])
   (def widths [10 50 100 200])
-  
+
   # Increase iterations to make benchmarks slower (at least 0.5s each)
   (def construct-iters 5000)
   (def lookup-iters 500000)
@@ -318,7 +318,7 @@
   (def churn-iters 10000)
   (def typechecker-iters 100)
   (def wide-iters 500000)
-  
+
   (print "\n" (string/repeat "=" 60))
   (print "IMPLEMENTATION 1: table/clone (current)")
   (print (string/repeat "=" 60))
@@ -329,7 +329,7 @@
   (bench-memory-churn ctx1/empty ctx1/add 100 churn-iters)
   (bench-typechecker-pattern ctx1/empty ctx1/add ctx1/lookup typechecker-iters)
   (bench-wide-context ctx1/empty ctx1/add ctx1/lookup widths wide-iters)
-  
+
   (print "\n" (string/repeat "=" 60))
   (print "IMPLEMENTATION 2: Prototypes (pure)")
   (print (string/repeat "=" 60))
@@ -340,7 +340,7 @@
   (bench-memory-churn ctx2/empty ctx2/add 100 churn-iters)
   (bench-typechecker-pattern ctx2/empty ctx2/add ctx2/lookup typechecker-iters)
   (bench-wide-context ctx2/empty ctx2/add ctx2/lookup widths wide-iters)
-  
+
   (print "\n" (string/repeat "=" 60))
   (print "IMPLEMENTATION 3: Arrays (O(n) lookup)")
   (print (string/repeat "=" 60))
@@ -351,7 +351,7 @@
   (bench-memory-churn ctx3/empty ctx3/add 100 churn-iters)
   (bench-typechecker-pattern ctx3/empty ctx3/add ctx3/lookup typechecker-iters)
   (bench-wide-context ctx3/empty ctx3/add ctx3/lookup widths wide-iters)
-  
+
   (print "\n" (string/repeat "=" 60))
   (print "IMPLEMENTATION 4: Prototypes + Chunking (CHUNK=50 - Reference)")
   (print (string/repeat "=" 60))
@@ -383,19 +383,18 @@
   (bench-shadowing ctx6/empty ctx6/add ctx6/lookup shadow-iters)
   (bench-memory-churn ctx6/empty ctx6/add 100 churn-iters)
   (bench-typechecker-pattern ctx6/empty ctx6/add ctx6/lookup typechecker-iters)
-  (bench-wide-context ctx6/empty ctx6/add ctx6/lookup widths wide-iters)
-)
+  (bench-wide-context ctx6/empty ctx6/add ctx6/lookup widths wide-iters))
 
 # ================================================================
 # Correctness Tests
 # ================================================================
 (defn test-correctness [ctx/empty ctx/add ctx/lookup name]
   (print "\n=== Testing " name " ===")
-  
+
   # Test 1: Basic add/lookup
   (def Γ1 (ctx/add (ctx/empty) "x" [:Type 0]))
   (assert (= (ctx/lookup Γ1 "x") [:Type 0]) "Basic lookup failed")
-  
+
   # Test 2: Multiple bindings
   (var Γ (ctx/empty))
   (set Γ (ctx/add Γ "x" [:Type 0]))
@@ -404,14 +403,14 @@
   (assert (= (ctx/lookup Γ "x") [:Type 0]))
   (assert (= (ctx/lookup Γ "y") [:Type 1]))
   (assert (= (ctx/lookup Γ "z") [:Type 2]))
-  
+
   # Test 3: Shadowing
   (var Γ2 (ctx/empty))
   (set Γ2 (ctx/add Γ2 "x" [:Type 0]))
   (set Γ2 (ctx/add Γ2 "x" [:Type 1]))
   (set Γ2 (ctx/add Γ2 "x" [:Type 2]))
   (assert (= (ctx/lookup Γ2 "x") [:Type 2]) "Shadowing failed")
-  
+
   # Test 4: Immutability
   (def Γ-base (ctx/add (ctx/empty) "x" [:Type 0]))
   (def Γ-ext (ctx/add Γ-base "y" [:Type 1]))
@@ -419,14 +418,14 @@
   (try
     (do (ctx/lookup Γ-base "y") (error "Should not find y"))
     ([_] nil))
-  
+
   # Test 5: Deep contexts (testing chunking/prototypes)
   (var Γ-deep (ctx/empty))
   (loop [i :range [0 200]]
     (set Γ-deep (ctx/add Γ-deep (string "x" i) [:Type i])))
   (assert (= (ctx/lookup Γ-deep "x0") [:Type 0]) "Deep context lookup failed")
   (assert (= (ctx/lookup Γ-deep "x199") [:Type 199]) "Deep context lookup failed")
-  
+
   (print "  ✓ All correctness tests passed"))
 
 # ================================================================
@@ -440,16 +439,16 @@
   (test-correctness ctx4/empty ctx4/add ctx4/lookup "Prototypes+Chunking (50)")
   (test-correctness ctx5/empty ctx5/add ctx5/lookup "Prototypes+Chunking (32)")
   (test-correctness ctx6/empty ctx6/add ctx6/lookup "Prototypes+Chunking (64)")
-  
+
   (print "\n" (string/repeat "=" 60))
   (print "It may take several minutes to finish")
   (print "Starting benchmarks...")
   (print "Note: Each benchmark runs for 30 seconds max")
   (print "Tests that fail (too deep chains) will be SKIPPED")
   (print (string/repeat "=" 60))
-  
+
   (run-all-benchmarks)
-  
+
   (print "\n" (string/repeat "=" 60))
   (print "SUMMARY")
   (print (string/repeat "=" 60))
@@ -458,5 +457,4 @@
   (print "  - Prototypes (pure): Fastest construction, slowest lookup (fails deep)")
   (print "  - table/clone: Slow construction, fastest lookup")
   (print "  - Arrays: Slow and memory-intensive")
-  (print "  - Prototypes+Chunking: Best overall balance. ")
-  )
+  (print "  - Prototypes+Chunking: Best overall balance. "))
