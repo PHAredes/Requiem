@@ -1,0 +1,286 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,      
+    urlcolor=blue,
+}
+\usepackage{enumitem}
+
+\title{Requiem: Academic Bibliography\\
+\large Technical Foundations for Dependent Type Theory Implementation}
+\author{}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This bibliography provides the academic foundations for Requiem, a minimal dependently-typed language implementing Higher-Order Abstract Syntax (HOAS), Normalization by Evaluation (NbE), bidirectional type checking, and Martin-Löf identity types. Papers are organized by topic with annotations explaining their relevance to the implementation.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Normalization by Evaluation (NbE)}
+
+\subsection{Definitive References}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Abel, Andreas} (2013). \href{http://www.cse.chalmers.se/~abela/habil.pdf}{\emph{Normalization by Evaluation: Dependent Types and Impredicativity}}. Habilitation thesis.
+
+\textit{Annotation:} The definitive work on NbE for dependent type theory. Covers predicative universe hierarchies (directly applicable to Requiem's \texttt{Type\_0 : Type\_1 : Type\_2} hierarchy), eta-equality for functions and pairs (implemented in Requiem's \texttt{raise}/\texttt{lower}), and semantic domains. Essential for understanding the theoretical foundations.
+
+\item \textbf{Altenkirch, Thorsten and Kaposi, Ambrus} (2016). \href{https://drops.dagstuhl.de/entities/document/10.4230/LIPIcs.FSCD.2016.6}{``Normalisation by Evaluation for Dependent Types.''} \emph{FSCD 2016}.
+
+\textit{Annotation:} Modern formulation using presheaf categories and quotient inductive types. Includes partial Agda formalization showing type-directed reflection/reification (the \texttt{raise}/\texttt{lower} pattern). Provides categorical semantics justifying Requiem's semantic domain separation.
+
+\item \textbf{Abel, Andreas; Vezzosi, Andrea; Winterhalter, Théo} (2017). \href{https://arxiv.org/abs/1706.03409}{``Normalization by Evaluation for Sized Dependent Types.''} \emph{ICFP 2017}.
+
+\textit{Annotation:} Extends NbE to handle sized types while maintaining decidability. The type-directed reflection/reification algorithms are directly implemented in Requiem's \texttt{raise} and \texttt{lower} functions. Shows how to handle neutral terms (stuck computations).
+
+\end{itemize}
+
+\subsection{Practical Tutorials}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Christiansen, David} (2019). \href{http://davidchristiansen.dk/tutorials/nbe/}{``Checking Dependent Types with Normalization by Evaluation: A Tutorial.''}
+
+\textit{Annotation:} Literate Racket implementation building incrementally from untyped lambda calculus to dependent types. Excellent for understanding the evaluation-quotation cycle. The tutorial's semantic domain design directly inspired Requiem's structure.
+
+\item \textbf{Christiansen, David} (2013). \href{http://davidchristiansen.dk/tutorials/implementing-types-hs.pdf}{``Normalization by Evaluation (Haskell version).''}
+
+\textit{Annotation:} Haskell implementation with clear separation of syntax, semantics, and normal forms. Shows how to implement NbE without dependent types in the metalanguage (unlike Agda implementations).
+
+\end{itemize}
+
+\section{Higher-Order Abstract Syntax (HOAS)}
+
+\subsection{Foundational Papers}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Pfenning, Frank and Elliot, Conal} (1988). \href{https://www.cs.cmu.edu/~fp/papers/pldi88.pdf}{``Higher-Order Abstract Syntax.''} \emph{PLDI 1988}.
+
+\textit{Annotation:} The original paper introducing HOAS representation using typed lambda calculus. Shows how to delegate substitution to the metalanguage. Requiem uses this approach: Janet functions represent binders, avoiding explicit variable manipulation.
+
+\item \textbf{Chlipala, Adam}. \href{http://adam.chlipala.net/cpdt/html/Hoas.html}{``Certified Programming with Dependent Types'' (CPDT), Chapter on HOAS.}
+
+\textit{Annotation:} Discusses parametric HOAS (PHOAS) and weak HOAS as practical alternatives in proof assistants like Coq. Explains the trade-offs between full HOAS (exotic terms problem) and PHOAS (additional safety). Requiem uses weak HOAS since Janet's functions are unrestricted.
+
+\item \textbf{Poswolsky, Adam and Schürmann, Carsten} (2008). ``Practical Programming with Higher-Order Encodings and Dependent Types.'' \emph{ESOP 2008}.
+
+\textit{Annotation:} The Delphin system demonstrates programming over HOAS encodings without explicit contexts. Shows how to handle pattern matching and recursion over HOAS terms. Relevant for understanding Requiem's context-free evaluation.
+
+\end{itemize}
+
+\section{Bidirectional Type Checking}
+
+\subsection{Tutorial Introduction}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Christiansen, David} (2013). \href{http://davidchristiansen.dk/tutorials/bidirectional.pdf}{``Bidirectional Typing Rules: A Tutorial.''}
+
+\textit{Annotation:} Accessible introduction to synthesis ($\Rightarrow$) and checking ($\Leftarrow$) modes. Explains why lambdas require type annotations (checking mode) while applications can synthesize types (inference mode). Directly explains Requiem's \texttt{infer} and \texttt{check} functions.
+
+\end{itemize}
+
+\subsection{Comprehensive Survey}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Dunfield, Joshua and Krishnaswami, Neelakantan R.} (2022). \href{https://dl.acm.org/doi/10.1145/3450952}{``Bidirectional Typing.''} \emph{ACM Computing Surveys}, Vol. 54, No. 5.
+
+\textit{Annotation:} Definitive 62-page survey covering history, applications, and relationship to other type system techniques. Includes coverage of dependent types, higher-rank polymorphism, and subtyping. Essential reference for justifying the bidirectional approach.
+
+\item \textbf{Dunfield, Joshua and Krishnaswami, Neelakantan R.} (2013). \href{https://arxiv.org/abs/1310.2810}{``Complete and Easy Bidirectional Typechecking for Higher-Rank Polymorphism.''} \emph{ICFP 2013}.
+
+\textit{Annotation:} Shows how bidirectional typing handles complex features like rank-N types. Demonstrates completeness and decidability results. Provides theoretical backing for bidirectional approach.
+
+\item \textbf{Felicissimo, Thiago} (2024). \href{https://theses.hal.science/tel-04708691}{``Generic bidirectional typing for dependent type theories.''} PhD Thesis, ENS Lyon.
+
+\textit{Annotation:} Recent work on theory-independent formulation of bidirectional typing with machine-checked decidability proofs. Shows how to abstract over specific type theories while maintaining soundness.
+
+\end{itemize}
+
+\section{Martin-Löf Type Theory and Identity Types}
+
+\subsection{Foundational Works}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Martin-Löf, Per} (1975). \href{https://archive-pml.github.io/martin-lof/pdfs/An-Intuitionistic-Theory-of-Types-Predicative-Part-1975.pdf}{``An Intuitionistic Theory of Types: Predicative Part.''} In \emph{Logic Colloquium '73}.
+
+\textit{Annotation:} Where the J eliminator first appeared. Introduces intensional identity types with computation rule $J(A, x, P, d, x, refl_x) \equiv d$. This is the foundation for Requiem's identity type implementation.
+
+\item \textbf{Martin-Löf, Per} (1984). \href{https://archive-pml.github.io/martin-lof/pdfs/Bibliopolis-Book-retypeset-1984.pdf}{\emph{Intuitionistic Type Theory}}. Bibliopolis.
+
+\textit{Annotation:} The definitive book on MLTT. Presents the complete system including Pi, Sigma, identity types, and universe hierarchy. Requiem's type system is a direct implementation of this theory (without inductive types or W-types).
+
+\end{itemize}
+
+\subsection{Modern Explanations}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{nLab contributors}. \href{https://ncatlab.org/nlab/show/Martin-Lof+dependent+type+theory}{``Martin-Löf dependent type theory.''}
+
+\textit{Annotation:} Formal inference rules with modern notation. Includes detailed formation, introduction, elimination, and computation rules for all type formers. Excellent reference for checking rule implementations.
+
+\item \textbf{nLab contributors}. \href{https://ncatlab.org/nlab/show/identity+type}{``Identity type.''}
+
+\textit{Annotation:} Comprehensive coverage of identity types including J vs K axioms, intensional vs extensional equality, and connections to homotopy type theory. Explains why Requiem uses J (intensional) rather than K (UIP).
+
+\item \textbf{Licata, Dan} (2011). \href{https://homotopytypetheory.org/2011/04/10/just-kidding-understanding-identity-elimination-in-homotopy-type-theory}{``Just Kidding: Understanding Identity Elimination in Homotopy Type Theory.''}
+
+\textit{Annotation:} Explains the distinction between J (path induction) and K (uniqueness of identity proofs). Shows why intensional type theory with J is weaker than extensional type theory with K. Clarifies why Requiem can't prove UIP.
+
+\item \textbf{Götz, Lennard} (2018). \href{https://www.math.lmu.de/~petrakis/Goetz.pdf}{``Martin-Löf's J-Rule.''} Bachelor thesis, LMU München.
+
+\textit{Annotation:} Proves equivalence of various formulations of the J eliminator. Useful for understanding why different presentations (transport, path induction, etc.) are computationally equivalent.
+
+\end{itemize}
+
+\subsection{Philosophical Context}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Rathjen, Michael and Coquand, Thierry} (2024). \href{https://plato.stanford.edu/entries/type-theory-intuitionistic/}{``Intuitionistic Type Theory.''} \emph{Stanford Encyclopedia of Philosophy}.
+
+\textit{Annotation:} Covers meaning theory, BHK interpretation, and philosophical foundations. Explains the constructive mathematics perspective underlying Requiem's design.
+
+\end{itemize}
+
+\section{Complete Tutorial Implementations}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Löh, Andres; McBride, Conor; Swierstra, Wouter} (2010). \href{https://www.andres-loeh.de/LambdaPi/}{``A Tutorial Implementation of a Dependently Typed Lambda Calculus.''} Revised version. (\href{https://www.andres-loeh.de/LambdaPi/LambdaPi.pdf}{PDF})
+
+\textit{Annotation:} Literate Haskell implementation building from simply-typed lambda calculus to dependent types with Pi, application, and checking. Incremental development similar to Requiem's structure. Includes executable code and detailed explanations.
+
+\item \textbf{Löh, Andres; Conor McBride; Wouter Swierstra} (2008). \href{https://www.andres-loeh.de/LambdaPi/LambdaPi-short.pdf}{``Simply Easy! (An Implementation of a Dependently Typed Lambda Calculus).''}
+
+\textit{Annotation:} Short paper with a complete, minimal implementation. Focuses on simplicity and accessibility, making it an excellent starting point for understanding how the core algorithms (NbE, bidirectional checking) fit together.
+
+\end{itemize}
+
+\section{Proof Theory and Foundations}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Girard, Jean-Yves; Lafont, Yves; Taylor, Paul} (1989). \emph{Proofs and Types}.\\
+Cambridge University Press. \href{http://www.paultaylor.eu/stable/prot.pdf}{[PDF Available]}
+
+\textit{Annotation:} Introduction to proof theory via typed lambda calculus. Covers Curry-Howard correspondence, system F, and cut elimination. Provides theoretical foundations for understanding propositions-as-types, which underlies Requiem's identity types (proofs of equality are inhabitants of Id types).
+
+\item \textbf{Pierce, Benjamin C.} (2002). \emph{Types and Programming Languages} (TAPL).\\
+MIT Press.
+
+\textit{Annotation:} Standard textbook covering lambda calculus, simple types, polymorphism, and subtyping. Chapters 9-11 (Simply Typed Lambda Calculus) and Chapter 23 (Universal Types) provide foundations for understanding Requiem's function types. Essential background reading.
+
+\item \textbf{Pierce, Benjamin C.} (ed.) (2004). \emph{Advanced Topics in Types and Programming Languages} (ATTAPL).\\
+MIT Press.
+
+\textit{Annotation:} Chapter 2 (Dependent Types) by David Aspinall and Martin Hofmann directly covers dependent type systems. Chapter 1 (Substructural Type Systems) relevant for understanding linearity. Advanced companion to TAPL.
+
+\item \textbf{Henk P. Barendregt} (1992). \href{https://pms.cs.ru.nl/james/RESEARCH/barendregt.pdf}{``Lambda calculi with types.''} In \emph{Handbook of Logic in Computer Science}.
+
+\textit{Annotation:} Comprehensive reference on typed lambda calculi and the foundation of the lambda cube.
+
+\item \textbf{Rob Nederpelt and Herman Geuvers} (2014). \href{https://doi.org/10.1017/CBO9781139013727}{\emph{Type theory and formal proof: an introduction}}. Cambridge University Press.
+
+\textit{Annotation:} Accessible textbook covering foundations from untyped lambda calculus to the Calculus of Constructions.
+
+\item \textbf{Wadler, Philip} (2015). \href{https://homepages.inf.ed.ac.uk/wadler/papers/propositions-as-types/propositions-as-types.pdf}{``Propositions as Types.''} \emph{Communications of the ACM}, Vol. 58, No. 12.
+
+\textit{Annotation:} Historical and conceptual overview of the Curry-Howard correspondence. Explains how Requiem's identity types correspond to equality propositions, and how the J eliminator corresponds to proof by induction over equality.
+
+\end{itemize}
+
+\section{Online Textbooks and Courses}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Wadler, Philip; Kokke, Wen; Siek, Jeremy} (2024). \href{https://plfa.github.io/}{\emph{Programming Language Foundations in Agda}} (PLFA).
+
+\textit{Annotation:} Complete development of programming language theory in Agda, from lambda calculus through type soundness proofs. Part 1 (Logical Foundations) covers properties like confluence and normalization that Requiem's test suite verifies. Part 2 (Programming Language Foundations) covers type systems and metatheory.
+
+\item \textbf{Chlipala, Adam} (2013). \href{http://adam.chlipala.net/cpdt/}{\emph{Certified Programming with Dependent Types}} (CPDT).
+
+\textit{Annotation:} Practical guide to proof engineering in Coq. Covers inductive types, dependent pattern matching, and proof automation. Shows how to build verified software using dependent types (different approach than Requiem's minimal core, but valuable for understanding applications).
+
+\end{itemize}
+
+\section{Category Theory and Semantics}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Seely, R. A. G.} (1984). \href{https://www.math.mcgill.ca/rags/LCCC/LCCC.pdf}{``Locally Cartesian Closed Categories and Type Theory.''} \emph{Mathematical Proceedings of the Cambridge Philosophical Society}, Vol. 95, No. 1.
+
+\textit{Annotation:} Original paper showing that dependent type theory is the internal language of locally cartesian closed categories. Provides categorical semantics for Pi, Sigma, and substitution. Theoretical foundation for understanding Requiem's context operations categorically.
+
+\item \textbf{Hofmann, Martin} (1997). \emph{Syntax and Semantics of Dependent Types}. Chapter 2 in \emph{Extensional Constructs in Intensional Type Theory}.\\
+Springer.
+
+\textit{Annotation:} Detailed treatment of categorical semantics for dependent types. Clarifies the relationship between syntax (terms, types) and semantics (functors, natural transformations). Helps understand the semantic domain in Requiem.
+
+\end{itemize}
+
+\section{Implementation Techniques}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Hirrolot, Hirrolot} (2023). \href{https://hirrolot.github.io/posts/how-to-keep-lambda-calculus-simple.html}{``How to Keep Lambda Calculus Simple.''}
+
+\textit{Annotation:} Accessible blog post explaining de Bruijn indices vs levels, evaluation strategies, and normalization. Compares different representation choices. While Requiem uses HOAS instead of de Bruijn, this explains the alternatives and trade-offs.
+
+\item \textbf{Kovács, András}. \href{https://github.com/AndrasKovacs/elaboration-zoo}{\emph{elaboration-zoo}}. GitHub repository.
+
+\textit{Annotation:} Collection of minimal implementations demonstrating elaboration from surface syntax to core. Shows practical techniques for implementing unification, implicit arguments, and metavariables. While Requiem omits elaboration, these examples show the next step in building a practical dependently-typed language.
+
+\end{itemize}
+
+\section{Termination and Structural Recursion}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Abel, Andreas and Altenkirch, Thorsten} (2002). \href{https://www.cse.chalmers.se/~abela/jfp02.pdf}{``A Predicative Analysis of Structural Recursion.''} \emph{Journal of Functional Programming}, Vol. 12, No. 1.
+
+\textit{Annotation:} Introduces the \texttt{foetus} termination checker. Shows how to ensure termination through structural recursion checks on inductive types. Foundations for ensuring that Requiem's evaluation always terminates.
+
+\item \textbf{Lee, Chin Soon; Jones, Neil D.; Ben-Amram, Amir M.} (2001). \href{https://dl.acm.org/doi/10.1145/360204.360210}{``The Size-Change Principle for Program Termination.''} \emph{POPL 2001}.
+
+\textit{Annotation:} Introduces a more general principle for termination based on tracking size changes across recursive calls. A key reference for more advanced termination analysis beyond simple structural recursion.
+\end{itemize}
+
+\section{Research Context}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Univalent Foundations Program} (2013). \href{https://homotopytypetheory.org/book/}{\emph{Homotopy Type Theory: Univalent Foundations of Mathematics}}.
+
+\textit{Annotation:} The HoTT Book. While Requiem implements intensional MLTT (not HoTT), this book motivates why identity types are interesting beyond equality. Shows connections to topology and higher category theory. Relevant for understanding future directions.
+
+\end{itemize}
+
+\section{Video Series and Video Lectures}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Lambda Cube Unboxed}. \href{https://www.youtube.com/watch?v=233A3bN0UBE&list=PLNwzBl6BGLwOKBFVbvp-GFjAA_ESZ--q4}{Full Series Playlist}.
+
+\textit{Annotation:} 13-video series on typed and untyped lambda calculi. Covers the lambda cube, parametric polymorphism, and dependent types. Excellent visual introduction to the foundations.
+
+\item \textbf{Computerphile: Type Theory}. \href{https://www.youtube.com/playlist?list=PL3XL6suc7Hp70kLZVUImSDYXd4GE_E8Ys}{Playlist}.
+
+\textit{Annotation:} Featuring Thorsten Altenkirch and Philip Wadler. Includes ``Propositions as Types'' and ``The Hardest Problem in Type Theory'' (NbE).
+\end{itemize}
+
+\section{Additional Courses and Communities}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Oregon Programming Languages Summer School (OPLSS)}. \href{https://www.cs.uoregon.edu/research/summerschool/}{Course Archive}.
+
+\textit{Annotation:} Annual summer school with archived lectures on dependent types, proof assistants, and verification (e.g., 2015, 2019 sessions).
+
+\item \textbf{HoTTEST Summer School 2022}. \href{https://www.youtube.com/watch?v=fJxWLQaaCX4&list=PLlSe3Yl8WZcdXJBYBVbkXMJMWfBvl5iRs}{YouTube Playlist} and \href{https://github.com/martinescardo/HoTTEST-Summer-School}{GitHub Repository}.
+
+\textit{Annotation:} Comprehensive resources on Homotopy Type Theory and univalent foundations, featuring lectures by leading researchers. Covers both theoretical foundations and practical formalization.
+
+\item \textbf{Proof Assistants Stack Exchange}. \href{https://proofassistants.stackexchange.com/}{Q\&A Community}.
+
+\textit{Annotation:} Active community for technical questions on type theory and implementation.
+\end{itemize}
+
+\end{document}
