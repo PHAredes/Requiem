@@ -1,7 +1,11 @@
 (declare-project
-  :name "requiem"
-  :description "HOAS kernel for Type Theory"
-  :dependencies [])
+  :name "context-bench"
+  :description "Benchmarks for Context Data Structures")
 
-(declare-source
-  :source ["src/coreTT.janet"])
+(declare-native
+  :name "timer"
+  :source @["native/timer.c"])
+
+(declare-native
+  :name "hamt"
+  :source @["native/hamt_hybrid.c"])
