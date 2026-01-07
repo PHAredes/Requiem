@@ -22,4 +22,6 @@ ehthumbs.db
 Thumbs.db
 
 # Agda standard library build cache
-.agda-dir
+.agda-dirbuild/
+.jpm_cache/
+build/
