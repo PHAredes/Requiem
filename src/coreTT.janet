@@ -81,13 +81,13 @@
 (import /build/hamt :as h)
 
 (defn ctx/empty []
-  (h/new-fam))
+  (h/new))
 
 (defn ctx/add [Γ x A]
-  (h/put-fam Γ (string x) A))
+  (h/put Γ (string x) A))
 
 (defn ctx/lookup [Γ x]
-  (def v (h/get-fam Γ (string x)))
+  (def v (h/get Γ (string x)))
   (if (nil? v)
     (errorf "unbound variable: %v" x)
     v))

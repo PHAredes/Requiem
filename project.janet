@@ -8,4 +8,4 @@
 
 (declare-native
   :name "hamt"
-  :source @["native/hamt_hybrid.c"])
+  :source @["native/hamt.c"])
