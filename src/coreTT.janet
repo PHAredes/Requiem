@@ -76,35 +76,21 @@
 (defn nf/refl [x] [:nrefl x])
 
 # ---------------------
-# Context with proper shadowing
+# Context (HAMT-backed)
 # ---------------------
-(def CHUNK_SIZE 32)
+(import /build/hamt :as h)
 
 (defn ctx/empty []
-  (def Γ (table/new (inc CHUNK_SIZE)))
-  (put Γ :count 0)
-  Γ)
+  (h/new-fam))
 
 (defn ctx/add [Γ x A]
-  (def count (get Γ :count 0))
-  
-  (if (< count CHUNK_SIZE)
-    (do
-      (def new-Γ (table/clone Γ))
-      (put new-Γ x A)
-      (put new-Γ :count (inc count))
-      new-Γ)
-    (do
-      (def new-chunk (table/new (inc CHUNK_SIZE)))
-      (put new-chunk x A)
-      (put new-chunk :count 1)
-      (table/setproto new-chunk Γ)
-      new-chunk)))
+  (h/put-fam Γ (string x) A))
 
 (defn ctx/lookup [Γ x]
-  (if (has-key? Γ x)
-    (get Γ x)
-    (errorf "unbound variable: %v" x)))
+  (def v (h/get-fam Γ (string x)))
+  (if (nil? v)
+    (errorf "unbound variable: %v" x)
+    v))
 
 # ---------------------
 # NbE: raise / lower with eta-equality
@@ -161,14 +147,14 @@
            (nf/pair (lower A v1) (lower (B v1) v2)))
 
          [:Id A x y]
-           (match sem
-             [:refl v] (nf/refl (lower A v))
-             [:neutral ne] (nf/neut ne)
-             _ sem)
+         (match sem
+           [:refl v] (nf/refl (lower A v))
+           [:neutral ne] (nf/neut ne)
+           _ sem)
          [:neutral _]
-           (match sem
-             [:neutral ne] (nf/neut ne)
-             _ sem))))
+         (match sem
+           [:neutral ne] (nf/neut ne)
+           _ sem))))
 
 # ---------------------
 # Definitional equality with eta
@@ -184,20 +170,20 @@
            (let [fresh (gensym)
                  arg-sem (raise A1 (ne/var fresh))]
              (sem-eq [:Type l] (B1 arg-sem) (B2 arg-sem))))
-      
+
       # Both are Sigma types
       [[:Sigma A1 B1] [:Sigma A2 B2]]
       (and (sem-eq [:Type l] A1 A2)
            (let [fresh (gensym)
                  arg-sem (raise A1 (ne/var fresh))]
              (sem-eq [:Type l] (B1 arg-sem) (B2 arg-sem))))
-      
+
       # Both are Id types
       [[:Id A1 x1 y1] [:Id A2 x2 y2]]
       (and (sem-eq [:Type l] A1 A2)
            (sem-eq A1 x1 x2)
            (sem-eq A1 y1 y2))
-      
+
       # Otherwise structural equality
       _ (= v1 v2))
 
@@ -234,65 +220,137 @@
 # ---------------------
 # Evaluator (returns semantic values)
 # ---------------------
-(defn eval [Γ tm]
-  "Evaluate a term in context Γ to a semantic value"
-  (match tm
-    [:Type l] [:Type l]
-    [:Pi A B] [:Pi A B]
-    [:Sigma A B] [:Sigma A B]
-    [:Id A x y] [:Id A x y]
-    [:refl x] [:refl x]
-    [:neutral ne] [:neutral ne]
-    [:var x]
-      (if (or (string? x) (symbol? x))
-        [:neutral (ne/var x)]
-        x)
-    [:lam body] (fn [x] (eval Γ (body x)))
-    [:app f x]
-      (let [fv (eval Γ f)
-            xv (eval Γ x)]
-        (match fv
-          [:neutral ne] [:neutral (ne/app ne (lower [:Type 0] xv))]
-          _ (fv xv)))
+(var eval nil)
 
-    [:type l] (ty/type l)
-    [:t-pi A B] (ty/pi (eval Γ A) (fn [x] (eval Γ (B x))))
-    [:t-sigma A B] (ty/sigma (eval Γ A) (fn [x] (eval Γ (B x))))
-    [:pair a b] [(eval Γ a) (eval Γ b)]
-    [:fst p]
-      (let [v (eval Γ p)]
-        (match v
-          [l r] l
-          [:neutral ne] [:neutral (ne/fst ne)]))
-    [:snd p]
-      (let [v (eval Γ p)]
-        (match v
-          [l r] r
-          [:neutral ne] [:neutral (ne/snd ne)]))
-    # Identity type
-    [:t-id A x y] (ty/id (eval Γ A) (eval Γ x) (eval Γ y))
-    [:t-refl x]
-    [:refl (eval Γ x)]
-    # J eliminator
-    [:t-J A x P d y p]
-      (let [Av (eval Γ A)
-            xv (eval Γ x)
-            Pv (eval Γ P)
-            dv (eval Γ d)
-            yv (eval Γ y)
-            pv (eval Γ p)]
-        (match pv
-          # Computation rule: J A x P d x (refl x) ≡ d
-          [:refl zv]
-          (if (sem-eq Av zv xv) dv 
-              [:neutral (ne/J Av xv Pv dv yv pv)])
-          [:neutral ne]
-          [:neutral (ne/J Av xv Pv dv yv pv)]
-          _ (errorf "J applied to non-proof: %v" pv)))
-    _ (if (function? tm) tm tm)))
+(defn- eval/var [Γ x]
+  (if (or (string? x) (symbol? x))
+    [:neutral (ne/var x)]
+    x))
+
+(defn- eval/lam [Γ body]
+  (fn [x] (eval Γ (body x))))
+
+(defn- eval/app [Γ f x]
+  (let [fv (eval Γ f)
+        xv (eval Γ x)]
+    (match fv
+      [:neutral ne] [:neutral (ne/app ne (lower [:Type 0] xv))]
+      _ (fv xv))))
+
+(defn- eval/t-pi [Γ A B]
+  (ty/pi (eval Γ A) (fn [x] (eval Γ (B x)))))
+
+(defn- eval/t-sigma [Γ A B]
+  (ty/sigma (eval Γ A) (fn [x] (eval Γ (B x)))))
+
+(defn- eval/pair [Γ a b]
+  [(eval Γ a) (eval Γ b)])
+
+(defn- eval/fst [Γ p]
+  (let [v (eval Γ p)]
+    (match v
+      [l r] l
+      [:neutral ne] [:neutral (ne/fst ne)])))
+
+(defn- eval/snd [Γ p]
+  (let [v (eval Γ p)]
+    (match v
+      [l r] r
+      [:neutral ne] [:neutral (ne/snd ne)])))
+
+(defn- eval/t-id [Γ A x y]
+  (ty/id (eval Γ A) (eval Γ x) (eval Γ y)))
+
+(defn- eval/t-refl [Γ x]
+  [:refl (eval Γ x)])
+
+(defn- eval/t-J [Γ A x P d y p]
+  (let [pv (eval Γ p)
+        Av (delay (eval Γ A))
+        xv (delay (eval Γ x))
+        Pv (delay (eval Γ P))
+        dv (delay (eval Γ d))
+        yv (delay (eval Γ y))]
+    (match pv
+      # Computation rule: J A x P d x (refl x) ≡ d
+      [:refl zv]
+      (if (sem-eq (Av) zv (xv)) (dv)
+        [:neutral (ne/J (Av) (xv) (Pv) (dv) (yv) pv)])
+      [:neutral ne]
+      [:neutral (ne/J (Av) (xv) (Pv) (dv) (yv) pv)]
+      _ (errorf "J applied to non-proof: %v" pv))))
+
+(defn- get-eval-cache []
+  (if-let [env (fiber/getenv (fiber/current))]
+    (get env :eval-cache)))
+
+(set eval
+     (fn [Γ tm]
+       "Evaluate a term in context Γ to a semantic value"
+       (if-let [cache (get-eval-cache)]
+         (let [k [Γ tm]]
+           (if (has-key? cache k)
+             (get cache k)
+             (let [res (match tm
+                         [:Type l] [:Type l]
+                         [:Pi A B] [:Pi A B]
+                         [:Sigma A B] [:Sigma A B]
+                         [:Id A x y] [:Id A x y]
+                         [:refl x] [:refl x]
+                         [:neutral ne] [:neutral ne]
+                         [:var x] (eval/var Γ x)
+                         [:lam body] (eval/lam Γ body)
+                         [:app f x] (eval/app Γ f x)
+                         [:type l] (ty/type l)
+                         [:t-pi A B] (eval/t-pi Γ A B)
+                         [:t-sigma A B] (eval/t-sigma Γ A B)
+                         [:pair a b] (eval/pair Γ a b)
+                         [:fst p] (eval/fst Γ p)
+                         [:snd p] (eval/snd Γ p)
+                         # Identity type
+                         [:t-id A x y] (eval/t-id Γ A x y)
+                         [:t-refl x] (eval/t-refl Γ x)
+                         # J eliminator
+                         [:t-J A x P d y p] (eval/t-J Γ A x P d y p)
+                         _ (if (function? tm) tm tm))]
+               (put cache k res)
+               res)))
+         # No cache, fall back to standard execution
+         (match tm
+           [:Type l] [:Type l]
+           [:Pi A B] [:Pi A B]
+           [:Sigma A B] [:Sigma A B]
+           [:Id A x y] [:Id A x y]
+           [:refl x] [:refl x]
+           [:neutral ne] [:neutral ne]
+           [:var x] (eval/var Γ x)
+           [:lam body] (eval/lam Γ body)
+           [:app f x] (eval/app Γ f x)
+           [:type l] (ty/type l)
+           [:t-pi A B] (eval/t-pi Γ A B)
+           [:t-sigma A B] (eval/t-sigma Γ A B)
+           [:pair a b] (eval/pair Γ a b)
+           [:fst p] (eval/fst Γ p)
+           [:snd p] (eval/snd Γ p)
+           # Identity type
+           [:t-id A x y] (eval/t-id Γ A x y)
+           [:t-refl x] (eval/t-refl Γ x)
+           # J eliminator
+           [:t-J A x P d y p] (eval/t-J Γ A x P d y p)
+           _ (if (function? tm) tm tm)))))
+
+(defn eval/session [f]
+  "Run a computation in a fresh evaluation session with memoization and deep stack"
+  (let [fib (fiber/new f :p)]
+    (fiber/setmaxstack fib 1000000)
+    (fiber/setenv fib (table/setproto @{:eval-cache @{}} (fiber/getenv (fiber/current))))
+    (let [res (resume fib)]
+      (if (= (fiber/status fib) :error)
+        (error res)
+        res))))
 
 (defn nf [ty tm]
-  (lower ty (eval (ctx/empty) tm)))
+  (eval/session (fn [] (lower ty (eval (ctx/empty) tm)))))
 
 # ---------------------
 # Bidirectional checker (returns semantic type)
@@ -501,4 +559,5 @@
    :infer-top infer-top
    :ctx/empty ctx/empty
    :ctx/add ctx/add
-   :ctx/lookup ctx/lookup})
+   :ctx/lookup ctx/lookup
+   :eval/session eval/session})
