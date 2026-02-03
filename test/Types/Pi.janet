@@ -5,9 +5,7 @@
 
 (test/start-suite "Type Pi")
 
-# ===============================================
 # Test 9: Pi Type Formation (from coreTT.janet)
-# ===============================================
 (let [pi-type [:t-pi
                [:type 0]
                (fn [x] [:type 0])]]
@@ -22,9 +20,7 @@
     (= (c/infer-top pi-type) (c/ty/type 2))
     "Pi formation: (Type₀ → Type₁) : Type₂ (max rule)"))
 
-# ===============================================
 # Test 11: Dependent Function Types (from coreTT.janet)
-# ===============================================
 (let [dep-fn-type [:t-pi
                    [:type 0]
                    (fn [A] [:t-pi A (fn [x] A)])]

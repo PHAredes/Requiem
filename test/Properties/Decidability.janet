@@ -8,9 +8,7 @@
 
 (var rng (gen/rng))
 
-# ===============================================
 # Property Tests: Type Checking is Decidable
-# ===============================================
 (defn prop-check-decidable [n]
   "Property: type checking always terminates (doesn't loop)"
   (var passed true)
@@ -31,9 +29,7 @@
   (prop-check-decidable 10)
   "Property: type checking is decidable")
 
-# ===============================================
 # Property: Check-Infer Consistency
-# ===============================================
 (defn prop-check-infer-consistent [n]
   "Property: If check succeeds, infer should return same type"
   (var passed true)

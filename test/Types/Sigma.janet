@@ -5,9 +5,7 @@
 
 (test/start-suite "Type Sigma")
 
-# ===============================================
 # Test 10: Sigma Type Formation (from coreTT.janet)
-# ===============================================
 (let [sigma-type [:t-sigma
                   [:type 0]
                   (fn [x] [:type 0])]]
@@ -15,9 +13,7 @@
     (= (c/infer-top sigma-type) (c/ty/type 1))
     "Sigma formation: (Type₀ × Type₀) : Type₁"))
 
-# ===============================================
 # Test 7: Pair Projections (from coreTT.janet)
-# ===============================================
 (let [Γ (c/ctx/empty)]
   (test/assert
     (= (c/eval Γ [:fst [:pair [:type 0] [:type 1]]])
@@ -29,9 +25,7 @@
        (c/ty/type 1))
     "Projection: snd (a, b) ≡ b"))
 
-# ===============================================
 # Dependent Types with Sigma (from coreTT.janet)
-# ===============================================
 (let [pair-ty [:t-sigma [:type 0] (fn [A] [:t-pi A (fn [x] A)])]
       # (A : Type₀) × (A → A)
       expected (c/ty/type 1)]
@@ -39,9 +33,7 @@
     (= (c/infer-top pair-ty) expected)
     "Dependent type: (A : Type₀) × (A → A)"))
 
-# ===============================================
-# Property: Sigma Projections Inverse (from coreTT-plus.janet)
-# ===============================================
+# Property: Sigma Projections Inverse
 (var rng (math/rng 42))
 
 (defn gen-univ []

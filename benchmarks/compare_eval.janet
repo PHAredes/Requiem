@@ -49,6 +49,6 @@
 (defn main [&]
   (print "Starting comparison benchmark...")
   (run-suite "Legacy V1 (Single Eval)" legacy/eval legacy/ctx/empty)
-  (run-suite "Current (Split + Delay)" current/eval current/ctx/empty))
+  (run-suite "Current (Split)" current/eval current/ctx/empty))
 
 (main)

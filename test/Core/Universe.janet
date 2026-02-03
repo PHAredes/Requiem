@@ -8,12 +8,8 @@
 
 (var rng (gen/rng))
 
-# ===============================================
 # Test 8: Universe Levels
-# ===============================================
-# ===============================================
 # Test 8: Universe Levels
-# ===============================================
 (test/assert
   (= (c/infer-top [:type 0]) [c/T/Type 1])
   "Universe hierarchy: Type₀ : Type₁")
@@ -22,9 +18,7 @@
   (= (c/infer-top [:type 5]) [c/T/Type 6])
   "Universe hierarchy: Type₅ : Type₆")
 
-# ===============================================
 # Property Tests: Universe Hierarchy
-# ===============================================
 (defn prop-universe-hierarchy [n]
   "Property: Type_l : Type_(l+1)"
   (var passed true)
@@ -45,9 +39,7 @@
   (prop-universe-hierarchy 10)
   "Property: universe hierarchy")
 
-# ===============================================
-# Property: Universe Cumulativity Check (from coreTT-plus.janet)
-# ===============================================
+# Property: Universe Cumulativity Check
 (defn prop-universe-hierarchy-strict [n]
   "Property: Type_i : Type_(i+1)"
   (var passed true)

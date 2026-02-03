@@ -1,6 +1,6 @@
 (declare-project
-  :name "context-bench"
-  :description "Benchmarks for Context Data Structures")
+  :name "requiem"
+  :description "Requiem: A minimal dependently-typed language core")
 
 (declare-native
   :name "timer"

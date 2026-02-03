@@ -9,9 +9,7 @@
 
 (var rng (gen/rng))
 
-# ===============================================
 # Test 5: Type Preservation (from coreTT.janet)
-# ===============================================
 (test/assert
   (a/type-preserves
     (c/ctx/empty)
@@ -27,9 +25,7 @@
       (c/ty/type 1))
     "Type preservation: (Type₀ → Type₀) : Type₁"))
 
-# ===============================================
 # Property Tests: Type Preservation (from coreTT.janet)
-# ===============================================
 (defn prop-type-preservation [n]
   "Property: If Γ ⊢ t : A, then eval(t) has semantic type A"
   (var passed true)

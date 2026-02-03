@@ -8,9 +8,7 @@
 
 (var rng (gen/rng))
 
-# ===============================================
 # Property: Eta for Functions (Extensionality)
-# ===============================================
 (defn prop-eta-functions [n]
   "Property: λx. f x ≡ f (eta-expansion)"
   (var passed true)
@@ -34,9 +32,7 @@
   (prop-eta-functions 20)
   "Property: eta-equality for functions")
 
-# ===============================================
 # Property: Eta for Pairs
-# ===============================================
 (defn prop-eta-pairs [n]
   "Property: (fst p, snd p) ≡ p (eta-expansion)"
   (var passed true)

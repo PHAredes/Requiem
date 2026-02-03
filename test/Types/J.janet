@@ -5,9 +5,7 @@
 
 (test/start-suite "J Eliminator - Advanced Properties")
 
-# ===============================================
 # Test: Transport (J as cast along equality)
-# ===============================================
 (defn test-transport []
   "Given p : Id A x y, transport P from x to y"
   (let [Γ (c/ctx/empty)
@@ -34,9 +32,7 @@
 
 (test-transport)
 
-# ===============================================  
 # Test: Symmetry (full derivation)
-# ===============================================
 (defn test-symmetry-derivation []
   "Derive sym : ∀A x y. Id A x y → Id A y x using J"
   (let [Γ (c/ctx/empty)
@@ -71,9 +67,7 @@
 
 (test-symmetry-derivation)
 
-# ===============================================
 # Test: Transitivity (composition of paths)
-# ===============================================
 (defn test-transitivity []
   "Derive trans : ∀A x y z. Id A x y → Id A y z → Id A x z"
   (let [Γ (c/ctx/empty)
@@ -107,9 +101,7 @@
       "Transitivity: composing refl ∘ refl = refl")))
 
 (test-transitivity)
-# ===============================================
 # Test: Congruence (ap/cong via J)
-# ===============================================
 (defn test-congruence []
   "Derive ap : ∀f x y. Id A x y → Id B (f x) (f y)"
   (let [Γ (c/ctx/empty)
@@ -140,9 +132,7 @@
       "Congruence: J derives ap for functions")))
 (test-congruence)
 
-# ===============================================
 # Test: Subst (substitution principle)
-# ===============================================
 (defn test-subst []
   "Derive subst : ∀P x y. Id A x y → P x → P y"
   (let [Γ (c/ctx/empty)
@@ -171,9 +161,7 @@
 
 (test-subst)
 
-# ===============================================
 # Test: Uniqueness of Identity Proofs (UIP)
-# ===============================================
 (defn test-UIP-k-axiom []
   "In MLTT without K, we can't prove UIP, but test behavior"
   (let [Γ (c/ctx/empty)

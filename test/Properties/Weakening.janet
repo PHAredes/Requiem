@@ -8,9 +8,7 @@
 
 (var rng (gen/rng))
 
-# ===============================================
 # Property Tests: Weakening (Context Extension)
-# ===============================================
 
 (defn prop-weakening [n]
   "Property: If Γ ⊢ t : A, then Γ, x : B ⊢ t : A (x not in t)"
@@ -37,9 +35,7 @@
   (prop-weakening 20)
   "Property: weakening preserves types")
 
-# ===============================================
-# Property: Context Extension Preserves Types (from coreTT-plus.janet)
-# ===============================================
+# Property: Context Extension Preserves Types
 (defn prop-context-extension [n]
   "Property: Extending context preserves well-typedness of closed terms"
   (var passed true)

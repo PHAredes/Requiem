@@ -8,9 +8,7 @@
 
 (var rng (gen/rng))
 
-# ===============================================
 # Property: Confluence (Diamond Property)
-# ===============================================
 (defn prop-confluence [n]
   "Property: Normalization is confluent - all reduction paths lead to same normal form"
   (var passed true)
@@ -42,9 +40,7 @@
   (prop-confluence 50)
   "Property: confluence - all reduction paths converge")
 
-# ===============================================
 # Property: Pi Syntactic Equality
-# ===============================================
 (defn prop-pi-syntactic-equality [n]
   "Property: Syntactically identical Pi types are definitionally equal"
   (var passed true)
@@ -67,9 +63,7 @@
   (prop-pi-syntactic-equality 20)
   "Property: syntactically identical Pi types are equal")
 
-# ===============================================
 # Property Tests: Congruence
-# ===============================================
 (defn prop-app-congruence [n]
   "Property: If t₁ ≡ t₁' and t₂ ≡ t₂', then t₁ t₂ ≡ t₁' t₂'"
   (var passed true)
@@ -92,9 +86,7 @@
   (prop-app-congruence 20)
   "Property: application is congruent")
 
-# ===============================================
 # Property Tests: Extensional Equality
-# ===============================================
 (defn prop-extensionality [n]
   "Property: Functions are equal if they are equal on all arguments"
   (var passed true)
@@ -120,9 +112,7 @@
   (prop-extensionality 10)
   "Property: extensional equality for functions")
 
-# ===============================================
 # Property Tests: Beta-Eta Equivalence
-# ===============================================
 (defn prop-id-function [n]
   "Property: (λx. x) a ≡ a for various a"
   (var passed true)
