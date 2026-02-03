@@ -18,29 +18,11 @@ static inline uint64_t h_hash(const char *key) {
 static inline int h_pop(uint32_t x) { return __builtin_popcount(x); }
 static inline uint32_t h_frag(uint64_t h, int d) { return (h >> ((d * BITS) % 60)) & MASK; }
 
-/* Pointer tagging for values */
-#define T_FULL  1
-#define T_NIL   3
-#define T_TRUE  5
-#define T_FALSE 7
-#define T_MASK  7
+/* Pointer tagging: LSB 1 = Leaf, 0 = Node */
+#define T_LEAF  1
 
-static inline bool is_leaf(void *p) { return ((uintptr_t)p & 1) != 0; }
-static inline bool is_full(void *p) { return ((uintptr_t)p & T_MASK) == T_FULL; }
-static inline void *get_ptr(void *p) { return (void *)((uintptr_t)p & ~T_MASK); }
-
-static Janet get_tagged_val(void *p) {
-    uintptr_t t = (uintptr_t)p & T_MASK;
-    if (t == T_TRUE) return janet_wrap_true();
-    if (t == T_FALSE) return janet_wrap_false();
-    return janet_wrap_nil();
-}
-
-static int can_inline(Janet v, uintptr_t *t) {
-    if (janet_checktype(v, JANET_NIL)) { *t = T_NIL; return 1; }
-    if (janet_checktype(v, JANET_BOOLEAN)) { *t = janet_unwrap_boolean(v) ? T_TRUE : T_FALSE; return 1; }
-    return 0;
-}
+static inline bool is_leaf(void *p) { return ((uintptr_t)p & T_LEAF) != 0; }
+static inline void *get_ptr(void *p) { return (void *)((uintptr_t)p & ~T_LEAF); }
 
 /* Arena allocator */
 #define ARENA_CHUNK (64 * 1024)
@@ -97,23 +79,15 @@ static Node *node_new(Arena *a, uint32_t bits, int count) {
 }
 
 static inline void *mk_leaf(Arena *a, const char *k, Janet v) {
-    uintptr_t t;
-    if (can_inline(v, &t)) return (void *)((uintptr_t)arena_strdup(a, k) | t);
-    return (void *)((uintptr_t)leaf_new(a, k, v) | T_FULL);
+    return (void *)((uintptr_t)leaf_new(a, k, v) | T_LEAF);
 }
 
 /* Core operations */
 static int h_get(void *n, const char *k, uint64_t h, int d, Janet *out) {
     if (!n) return 0;
     if (is_leaf(n)) {
-        char *lk;
-        if (is_full(n)) {
-            Leaf *l = get_ptr(n); lk = l->key;
-            if (!strcmp(lk, k)) { *out = l->val; return 1; }
-        } else {
-            lk = get_ptr(n);
-            if (!strcmp(lk, k)) { *out = get_tagged_val(n); return 1; }
-        }
+        Leaf *l = get_ptr(n);
+        if (!strcmp(l->key, k)) { *out = l->val; return 1; }
         return 0;
     }
     Node *node = n; uint32_t idx = h_frag(h, d);
@@ -126,13 +100,11 @@ static void *h_put(Arena *a, void *n, const char *k, Janet v, uint64_t h, int d,
     if (!n) { *added = true; return mk_leaf(a, k, v); }
     
     if (is_leaf(n)) {
-        char *lk; Janet lv;
-        if (is_full(n)) { Leaf *l = get_ptr(n); lk = l->key; lv = l->val; }
-        else { lk = get_ptr(n); lv = get_tagged_val(n); }
-        
-        if (!strcmp(lk, k)) { *added = false; return mk_leaf(a, k, v); }
+        Leaf *ol = get_ptr(n);
+        if (!strcmp(ol->key, k)) { *added = false; return mk_leaf(a, k, v); }
         
         *added = true;
+        char *lk = ol->key; Janet lv = ol->val;
         uint64_t ho = h_hash(lk);
         uint32_t io = h_frag(ho, d), in = h_frag(h, d);
         
@@ -171,11 +143,9 @@ static void *h_put(Arena *a, void *n, const char *k, Janet v, uint64_t h, int d,
 static void h_collect(void *n, JanetTable *t, JanetArray *keys) {
     if (!n) return;
     if (is_leaf(n)) {
-        char *lk; Janet lv;
-        if (is_full(n)) { Leaf *l = get_ptr(n); lk = l->key; lv = l->val; }
-        else { lk = get_ptr(n); lv = get_tagged_val(n); }
-        Janet k = janet_wrap_string(janet_cstring(lk));
-        if (t) janet_table_put(t, k, lv);
+        Leaf *l = get_ptr(n);
+        Janet k = janet_wrap_string(janet_cstring(l->key));
+        if (t) janet_table_put(t, k, l->val);
         if (keys) janet_array_push(keys, k);
         return;
     }
