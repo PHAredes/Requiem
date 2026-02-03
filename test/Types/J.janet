@@ -1,7 +1,7 @@
-#!/usr/bin/env janet
+# test/coreTT-J-advanced.janet
 
-(import ../Utils/TestRunner :as test)
-(import ../../src/coreTT :as c)
+(import spork/test)
+(import "../../src/coreTT" :as c)
 
 (test/start-suite "J Eliminator - Advanced Properties")
 
@@ -28,7 +28,7 @@
         transported [:t-J A x P id-fn y p]]
 
     (test/assert
-      (c/term-eq Γ [:t-pi [:type 0] (fn [_] [:type 0])]
+      (c/term-eq Γ (c/ty/pi (c/ty/type 0) (fn [_] (c/ty/type 0)))
                  transported id-fn)
       "Transport: J transports functions along equality")))
 
@@ -43,11 +43,11 @@
         A [:type 1]
 
         # Add x, y, p to context
-        Γx (c/ctx/add Γ "x" [:Type 1])
-        Γxy (c/ctx/add Γx "y" [:Type 1])
+        Γx (c/ctx/add Γ "x" (c/ty/type 1))
+        Γxy (c/ctx/add Γx "y" (c/ty/type 1))
         x-sem (c/eval Γx [:var "x"])
         y-sem (c/eval Γxy [:var "y"])
-        id-xy-sem (c/ty/id [:Type 1] x-sem y-sem)
+        id-xy-sem (c/ty/id (c/ty/type 1) x-sem y-sem)
         Γxyp (c/ctx/add Γxy "p" id-xy-sem)
 
         x [:var "x"]
@@ -64,9 +64,9 @@
         sym [:t-J A x motive base y p]]
 
     (test/assert
-      (match (c/infer Γxyp sym)
-        [:Id [:Type 1] _ _] true
-        _ false)
+      (let [res (c/infer Γxyp sym)]
+        (and (= (get res 0) c/T/Id)
+             (= (get (get res 1) 0) c/T/Type)))
       "Symmetry: J derives Id A y x from Id A x y")))
 
 (test-symmetry-derivation)
@@ -102,12 +102,11 @@
         trans [:app j1 q]]
 
     (test/assert
-      (c/term-eq Γ [:Id [:Type 1] [:Type 0] [:Type 0]]
+      (c/term-eq Γ (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0))
                  trans [:t-refl [:type 0]])
       "Transitivity: composing refl ∘ refl = refl")))
 
 (test-transitivity)
-
 # ===============================================
 # Test: Congruence (ap/cong via J)
 # ===============================================
@@ -118,7 +117,7 @@
         B [:type 1]
 
         # f : A → B - add to context instead of bare lambda
-        fn-ty [:Pi [:Type 1] (fn [_] [:Type 1])]
+        fn-ty (c/ty/pi (c/ty/type 1) (fn [_] (c/ty/type 1)))
         Γf (c/ctx/add Γ "f" fn-ty)
         f [:var "f"]
 
@@ -136,11 +135,9 @@
         ap [:t-J A x motive base y p]]
 
     (test/assert
-      (match (c/infer Γf ap) # Use Γf, not Γ
-        [:Id _ _ _] true
-        _ false)
+      (let [res (c/infer Γf ap)]
+        (and (= (get res 0) c/T/Id)))
       "Congruence: J derives ap for functions")))
-
 (test-congruence)
 
 # ===============================================
@@ -169,7 +166,7 @@
         subst [:t-J A x motive px y p]]
 
     (test/assert
-      (c/term-eq Γ [:Type 1] subst px)
+      (c/term-eq Γ (c/ty/type 1) subst px)
       "Subst: J implements type substitution")))
 
 (test-subst)
@@ -189,14 +186,14 @@
 
         # These are not definitionally equal without K
         # But they are propositionally equal via J
-        id-ty [:Id [:Id [:Type 1] [:Type 0] [:Type 0]]
-               [:refl [:Type 0]]
-               [:refl [:Type 0]]]]
+        id-ty (c/ty/id (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0))
+                       [c/T/Refl (c/ty/type 0)]
+                       [c/T/Refl (c/ty/type 0)])]
 
     (test/assert
       # Both are inhabitants of Id A x x
-      (and (c/check-top p [:Id [:Type 1] [:Type 0] [:Type 0]])
-           (c/check-top q [:Id [:Type 1] [:Type 0] [:Type 0]]))
+      (and (c/check-top p (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0)))
+           (c/check-top q (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0))))
       "UIP: Multiple proofs of equality exist")))
 
 (test-UIP-k-axiom)

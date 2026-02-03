@@ -28,7 +28,7 @@
           id-ty [:t-id A x y]]
       (try
         (let [inferred (c/infer-top id-ty)
-              expected [:Type (+ l 2)]] # Id Type_(l+1) _ _ : Type_(l+2)
+              expected (c/ty/type (+ l 2))] # Id Type_(l+1) _ _ : Type_(l+2)
           (unless (= inferred expected)
             (set passed false)
             (printf "Id formation failed: expected Type_%d, got %v"
@@ -45,7 +45,7 @@
 # Sanity check with concrete example
 (test/assert
   (= (c/infer-top [:t-id [:type 1] [:type 0] [:type 0]])
-     [:Type 2])
+     (c/ty/type 2))
   "Id formation: Id Type₁ Type₀ Type₀ : Type₂")
 
 # ===============================================
@@ -65,7 +65,7 @@
           refl-x [:t-refl x]]
       (try
         (let [inferred (c/infer-top refl-x)
-              expected [:Id [:Type (inc l)] [:Type l] [:Type l]]]
+              expected (c/ty/id (c/ty/type (inc l)) (c/ty/type l) (c/ty/type l))]
           (unless (= inferred expected)
             (set passed false)
             (printf "Reflexivity typing failed: expected %v, got %v"
@@ -82,12 +82,12 @@
 # Sanity checks with concrete examples
 (test/assert
   (= (c/infer-top [:t-refl [:type 0]])
-     [:Id [:Type 1] [:Type 0] [:Type 0]])
+     (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0)))
   "Reflexivity: refl Type₀ : Id Type₁ Type₀ Type₀")
 
 (test/assert
   (= (c/infer-top [:t-refl [:type 5]])
-     [:Id [:Type 6] [:Type 5] [:Type 5]])
+     (c/ty/id (c/ty/type 6) (c/ty/type 5) (c/ty/type 5)))
   "Reflexivity: refl Type₅ : Id Type₆ Type₅ Type₅")
 
 # ===============================================
@@ -101,7 +101,7 @@
       p [:t-refl [:type 0]]
       J-term [:t-J A x P d y p]]
   (test/assert
-    (= (c/infer-top J-term) [:Type 1])
+    (= (c/infer-top J-term) (c/ty/type 1))
     "J eliminator: simple application"))
 
 # ===============================================
@@ -114,7 +114,7 @@
       d [:type 0]
       J-refl [:t-J A x P d x [:t-refl x]]]
   (test/assert
-    (c/term-eq Γ [:Type 1] J-refl d)
+    (c/term-eq Γ (c/ty/type 1) J-refl d)
     "J computation: J A x P d x (refl x) ≡ d"))
 
 # ===============================================
@@ -135,23 +135,23 @@
 # Test 6: Identity Type Semantic Equality
 # ===============================================
 (test/assert
-  (c/sem-eq [:Id [:Type 1] [:Type 0] [:Type 0]]
-            [:refl [:Type 0]]
-            [:refl [:Type 0]])
+  (c/sem-eq (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0))
+            [c/T/Refl (c/ty/type 0)]
+            [c/T/Refl (c/ty/type 0)])
   "Semantic equality: refl x ≡ refl x")
 
 (test/assert
-  (not (c/sem-eq [:Id [:Type 1] [:Type 0] [:Type 1]]
-                 [:refl [:Type 0]]
-                 [:refl [:Type 1]]))
+  (not (c/sem-eq (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 1))
+                 [c/T/Refl (c/ty/type 0)]
+                 [c/T/Refl (c/ty/type 1)]))
   "Semantic inequality: different reflexivity proofs are not equal")
 
 # ===============================================
 # Test 7: Normalization of Identity Types
 # ===============================================
 (test/assert
-  (= (c/nf [:Type 2] [:t-id [:type 1] [:type 0] [:type 0]])
-     [:Id [:Type 1] [:Type 0] [:Type 0]])
+  (= (c/nf (c/ty/type 2) [:t-id [:type 1] [:type 0] [:type 0]])
+     (c/nf/id (c/nf/type 1) (c/nf/type 0) (c/nf/type 0)))
   "Normalization: identity type normalizes")
 
 # Normalize refl at the identity type
@@ -165,7 +165,7 @@
       nf-result (c/nf id-ty refl-term)]
   (test/assert
     (and (tuple? nf-result)
-         (= (first nf-result) :nrefl))
+         (= (first nf-result) c/NF/Refl))
     "Normalization: refl normalizes"))
 
 # ===============================================
@@ -209,11 +209,11 @@
 
       (try
         (let [result-ty (c/infer Γxyp symm)]
-          (match result-ty
-            [:Id _ _ _] true # Successfully produces an identity type
-            _ (do
-                (set passed false)
-                (printf "J symmetry failed: expected Id type, got %v" result-ty))))
+          (if (and (tuple? result-ty) (= (get result-ty 0) c/T/Id))
+            true
+            (do
+              (set passed false)
+              (printf "J symmetry failed: expected Id type, got %v" result-ty))))
         ([err]
           (set passed false)
           (printf "J symmetry error at level %d: %v" l err)))))
@@ -244,9 +244,9 @@
       symm [:t-J A x P d y p]]
 
   (test/assert
-    (match (c/infer Γxyp symm)
-      [:Id [:Type 2] _ _] true
-      _ false)
+    (let [res (c/infer Γxyp symm)]
+      (and (= (get res 0) c/T/Id)
+           (= (get res 1) (c/ty/type 2))))
     "J proves symmetry: Id A x y → Id A y x"))
 
 # ===============================================
@@ -263,7 +263,7 @@
           id-ty [:t-id A x y]]
       (try
         (let [inferred (c/infer-top id-ty)
-              expected [:Type (+ l 2)]]
+              expected (c/ty/type (+ l 2))]
           (unless (= inferred expected)
             (set passed false)
             (printf "Universe preservation failed at level %d: expected Type_%d, got %v"
@@ -280,12 +280,12 @@
 # Sanity checks with concrete examples
 (test/assert
   (= (c/infer-top [:t-id [:type 3] [:type 2] [:type 2]])
-     [:Type 4])
+     (c/ty/type 4))
   "Identity preserves universe: Id Type₃ Type₂ Type₂ : Type₄")
 
 (test/assert
   (= (c/infer-top [:t-id [:type 10] [:type 9] [:type 9]])
-     [:Type 11])
+     (c/ty/type 11))
   "Identity preserves universe: larger universes")
 
 # ===============================================
@@ -294,14 +294,14 @@
 (a/assert-throws
   (fn []
     (let [Γ (c/ctx/empty)]
-      (c/check Γ [:t-refl [:type 0]] [:Id [:Type 1] [:Type 0] [:Type 1]])))
+      (c/check Γ [:t-refl [:type 0]] (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 1)))))
   "Error: refl x does not have type Id A x y when x ≠ y")
 
 # ===============================================
 # Test 12: Context with Identity Types
 # ===============================================
 (let [Γ (c/ctx/empty)
-      id-ty [:Id [:Type 1] [:Type 0] [:Type 0]]
+      id-ty (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0))
       Γp (c/ctx/add Γ "p" id-ty)]
   (test/assert
     (= (c/ctx/lookup Γp "p") id-ty)
@@ -324,7 +324,7 @@
       dep-id [:t-id id-ty f g]]
 
   (test/assert
-    (= (c/infer Γfg dep-id) [:Type 1])
+    (= (c/infer Γfg dep-id) (c/ty/type 1))
     "Dependent identity: Id (∀A. A → A) f g"))
 
 # Pi Types property test
@@ -350,8 +350,8 @@
 
       (try
         (let [result (c/infer Γfg id-ty)]
-          (match result
-            [:Type _] true
+          (match (get result 0)
+            c/T/Type true
             _ (do
                 (set passed false)
                 (printf "Id of Pi type failed: got %v" result))))
@@ -371,7 +371,7 @@
       A [:type 0]
       f [:lam (fn [x] [:var x])]
       g [:lam (fn [y] [:var y])]
-      fn-ty [:Pi [:Type 0] (fn [x] [:Type 0])]]
+      fn-ty (c/ty/pi (c/ty/type 0) (fn [x] (c/ty/type 0)))]
   (test/assert
     (c/sem-eq fn-ty (c/eval Γ f) (c/eval Γ g))
     "Eta-equal functions are semantically equal"))
@@ -391,7 +391,7 @@
       P2 (fn [z q] [:t-id A [:type 0] z])
       J2 [:t-J A y P2 J1 z q]]
   (test/assert
-    (c/term-eq Γ [:Id [:Type 1] [:Type 0] [:Type 0]]
+    (c/term-eq Γ (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0))
                J2
                [:t-refl [:type 0]])
     "Multiple J applications compute correctly"))
@@ -456,7 +456,7 @@
       J-refl [:t-J A x P d x [:t-refl x]]
       result (c/eval (c/ctx/empty) J-refl)]
   (test/assert
-    (= result [:Type 0])
+    (= result (c/ty/type 0))
     "J normalizes when proof is refl"))
 
 # ===============================================
@@ -466,7 +466,7 @@
   (a/type-preserves
     (c/ctx/empty)
     [:t-refl [:type 0]]
-    [:Id [:Type 1] [:Type 0] [:Type 0]])
+    (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0)))
   "Type preservation: refl preserves type")
 
 # ===============================================
@@ -481,7 +481,7 @@
       J1 [:t-J A x P d1 x [:t-refl x]]
       J2 [:t-J A x P d2 x [:t-refl x]]]
   (test/assert
-    (c/term-eq Γ [:Type 1] J1 J2)
+    (c/term-eq Γ (c/ty/type 1) J1 J2)
     "J respects semantic equality of base case"))
 
 # ===============================================
@@ -498,7 +498,7 @@
           id-ty [:t-id A x y]]
       (try
         (let [inferred (c/infer-top id-ty)
-              expected [:Type (+ l 2)]]
+              expected (c/ty/type (+ l 2))]
           (unless (= inferred expected)
             (set passed false)
             (printf "High universe Id failed at level %d: expected Type_%d, got %v"
@@ -515,12 +515,12 @@
 # Sanity checks
 (test/assert
   (= (c/infer-top [:t-id [:type 5] [:type 4] [:type 4]])
-     [:Type 6])
+     (c/ty/type 6))
   "Identity works on higher universes")
 
 (test/assert
   (= (c/infer-top [:t-id [:type 10] [:type 9] [:type 9]])
-     [:Type 11])
+     (c/ty/type 11))
   "Identity preserves high universe levels")
 
 # ===============================================
@@ -534,7 +534,7 @@
       J-term [:t-J A x P d x [:t-refl x]]]
   # The key is that J should compute to d
   (test/assert
-    (= (c/eval Γ J-term) [:Type 0])
+    (= (c/eval Γ J-term) (c/ty/type 0))
     "J works with Pi types"))
 
 # ===============================================
@@ -547,7 +547,7 @@
       d [:type 0]
       J-term [:t-J A x P d x [:t-refl x]]]
   (test/assert
-    (c/term-eq Γ [:Type 1] J-term d)
+    (c/term-eq Γ (c/ty/type 1) J-term d)
     "J works with Sigma types"))
 
 # ===============================================
@@ -563,7 +563,7 @@
       yv (c/eval Γ y)
       id-xy (c/ty/id Av xv yv)
       # Verify it has the right type
-      _ (test/assert (= id-xy [:Id [:Type 2] [:Type 1] [:Type 1]])
+      _ (test/assert (= id-xy (c/ty/id (c/ty/type 2) (c/ty/type 1) (c/ty/type 1)))
                      "Inner Id construction correct")
       # Now create proofs
       p [:refl [:Type 1]]
@@ -571,9 +571,9 @@
       # Create outer identity type on the proofs
       id-id (c/ty/id id-xy p q)]
   (test/assert
-    (= id-id [:Id [:Id [:Type 2] [:Type 1] [:Type 1]]
-              [:refl [:Type 1]]
-              [:refl [:Type 1]]])
+    (= id-id (c/ty/id (c/ty/id (c/ty/type 2) (c/ty/type 1) (c/ty/type 1))
+                      [:refl [:Type 1]]
+                      [:refl [:Type 1]]))
     "Nested identity types are well-formed"))
 
 # ===============================================
@@ -582,7 +582,7 @@
 (let [Γ (c/ctx/empty)
       A [:type 1]
       x [:type 0]
-      id-ty [:Id [:Type 1] [:Type 0] [:Type 0]]
+      id-ty (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0))
       refl-x [:t-refl x]
 
       Γp (c/ctx/add Γ "p" id-ty)
@@ -590,7 +590,7 @@
       ty-before (c/infer Γ refl-x)
       ty-after (c/infer Γp refl-x)]
   (test/assert
-    (c/sem-eq [:Type 100] ty-before ty-after)
+    (c/sem-eq (c/ty/type 100) ty-before ty-after)
     "Weakening preserves identity types"))
 
 # ===============================================
@@ -606,9 +606,9 @@
       id-fg (c/ty/id fn-ty-sem fv gv)]
   (test/assert
     (and (tuple? id-fg)
-         (= (first id-fg) :Id)
+         (= (first id-fg) c/T/Id)
          (tuple? (get id-fg 1))
-         (= (first (get id-fg 1)) :Pi))
+         (= (first (get id-fg 1)) c/T/Pi))
     "Well-typed identity between functions"))
 
 (test/end-suite)

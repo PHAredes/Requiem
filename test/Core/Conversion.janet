@@ -1,7 +1,6 @@
 #!/usr/bin/env janet
-
-(import ../Utils/TestRunner :as test)
 (import ../../src/coreTT :as c)
+(import ../Utils/TestRunner :as test)
 
 (test/start-suite "Core Conversion")
 
@@ -33,16 +32,16 @@
 # Semantic Equality Tests
 # ===============================================
 (test/assert
-  (c/sem-eq [:Type 0] [:Type 0] [:Type 0])
+  (c/sem-eq (c/ty/type 0) (c/ty/type 0) (c/ty/type 0))
   "Semantic equality: Type₀ ≡ Type₀")
 
 (test/assert
-  (not (c/sem-eq [:Type 0] [:Type 0] [:Type 1]))
+  (not (c/sem-eq (c/ty/type 0) (c/ty/type 0) (c/ty/type 1)))
   "Semantic inequality: Type₀ ≢ Type₁")
 
 (let [f1 (fn [x] x)
       f2 (fn [x] x)
-      ty [:Pi [:Type 0] (fn [x] [:Type 0])]]
+      ty (c/ty/pi (c/ty/type 0) (fn [x] (c/ty/type 0)))]
   (test/assert
     (c/sem-eq ty f1 f2)
     "Semantic equality: extensional function equality"))

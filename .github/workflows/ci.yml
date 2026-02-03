@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main", "dev" ]
+  pull_request:
+    branches: [ "main", "dev" ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Test Janet project
+        uses: pyrmont/action-janet-test@v5
+        with:
+          # Default janet version (latest)
+          cmd-test: jpm test

@@ -22,13 +22,13 @@
       (try
         (let [A-sem (c/eval Γ A)
               # Check f : A → A
-              _ (c/check Γ f [:Pi A-sem (fn [x] A-sem)])
+              _ (c/check Γ f (c/ty/pi A-sem (fn [x] A-sem)))
               # Check arg : A
               _ (c/check Γ arg A-sem)
               # Infer type of application
               app-ty (c/infer Γ [:app f arg])]
           # Result type should equal A
-          (unless (c/sem-eq [:Type 100] app-ty A-sem)
+          (unless (c/sem-eq (c/ty/type 100) app-ty A-sem)
             (set passed false)
             (print "Application type unsound")))
         ([err] nil))))
@@ -54,7 +54,7 @@
         (let [ty (c/infer Γ tm)]
           # The type should be a universe
           (match ty
-            [:Type _] true
+            [c/T/Type _] true
             _ (do
                 (set passed false)
                 (print "Inferred non-universe type:" ty "for term:" tm))))

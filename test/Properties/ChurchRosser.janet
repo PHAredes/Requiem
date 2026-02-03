@@ -3,6 +3,7 @@
 (import ../Utils/TestRunner :as test)
 (import ../../src/coreTT :as c)
 (import ../Utils/Generators :as gen)
+(import ../Utils/Assertions :as a)
 
 (test/start-suite "Property Church-Rosser")
 
@@ -23,7 +24,7 @@
         (let [ty [:type 1]
               nf-t (c/nf ty t)
               nf-u (c/nf ty u)]
-          (unless (= nf-t nf-u)
+          (unless (a/nf-eq? nf-t nf-u)
             (set passed false)
             (print "Church-Rosser failed:")
             (print "  t =" t)
@@ -46,24 +47,25 @@
   (repeat n
     (let [x (gensym)
           ty (case (math/rng-int rng 3)
-               0 [:Type (math/rng-int rng 3)]
-               1 [:Pi [:Type 0] (fn [_] [:Type 0])]
-               2 [:Sigma [:Type 0] (fn [_] [:Type 0])])
+               0 (c/ty/type (math/rng-int rng 3))
+               1 (c/ty/pi (c/ty/type 0) (fn [_] (c/ty/type 0)))
+               2 (c/ty/sigma (c/ty/type 0) (fn [_] (c/ty/type 0))))
           ne (c/ne/var x)]
       (try
         (let [raised (c/raise ty ne)
-              lowered (c/lower ty raised)]
-          (match lowered
-            [:nneut ne2] (when (not= ne ne2)
-                           (set passed false)
-                           (print "Raise-lower roundtrip failed"))
-            [:nlam body] true # Eta-expansion expected for Pi
-            [:npair _ _] true # Eta-expansion expected for Sigma
-            _ (do
-                (set passed false)
-                (print "Unexpected lowered form:" lowered))))
+              lowered (c/lower ty raised)
+              ltag (if (tuple? lowered) (get lowered 0) 0)]
+          (cond
+            (= ltag c/NF/Neut)
+            (let [ne2 (get lowered 1)]
+              (test/assert (= ne ne2)
+                           (string/format "Raise-lower roundtrip preserves neutrals: ty=%v, %v ≡ %v" ty ne ne2)))
+
+            (= ltag c/NF/Lam) true # Eta-expansion
+            (= ltag c/NF/Pair) true # Eta-expansion
+            (test/assert false (string/format "Unexpected lowered form: tag=%v, val=%v" ltag lowered))))
         ([err]
-          (print "Error in raise-lower:" err)
+          (printf "Error in raise-lower: %v" err)
           (set passed false)))))
   passed)
 
