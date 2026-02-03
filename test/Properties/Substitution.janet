@@ -8,9 +8,7 @@
 
 (var rng (gen/rng))
 
-# ===============================================
 # Property: Substitution Lemma (via HOAS)
-# ===============================================
 (defn prop-substitution [n]
   "Property: Beta reduction implements substitution correctly"
   (var passed true)

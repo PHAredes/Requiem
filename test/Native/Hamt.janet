@@ -3,9 +3,7 @@
 
 (test/start-suite "Native HAMT")
 
-# ===============================================
 # Basic Operations
-# ===============================================
 
 (def h0 (h/new))
 
@@ -23,18 +21,14 @@
 (test/assert (= (h/get h2 "a") 10) "Key 'a' preserved")
 (test/assert (= (h/get h2 "b") 20) "Key 'b' accessible")
 
-# ===============================================
 # Shadowing (Updates)
-# ===============================================
 
 (def h3 (h/put h2 "a" 99))
 (test/assert (= (h/len h3) 2) "Length constant on update")
 (test/assert (= (h/get h3 "a") 99) "New value for 'a'")
 (test/assert (= (h/get h2 "a") 10) "Old HAMT preserves old value")
 
-# ===============================================
 # Keys & Table Conversion
-# ===============================================
 
 (def ks (h/keys h2))
 (test/assert (= (length ks) 2) "Keys array length")
@@ -45,9 +39,7 @@
 (test/assert (= (t "a") 10) "Table conversion 'a'")
 (test/assert (= (t "b") 20) "Table conversion 'b'")
 
-# ===============================================
 # Large Scale & Collisions
-# ===============================================
 
 (var hl (h/new))
 (def N 1000)

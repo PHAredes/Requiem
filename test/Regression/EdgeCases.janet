@@ -6,9 +6,7 @@
 
 (test/start-suite "Regression EdgeCases")
 
-# ===============================================
 # Edge Cases
-# ===============================================
 
 (a/assert-throws
   (fn [] (c/infer-top [:var "undefined"]))

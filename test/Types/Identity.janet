@@ -9,9 +9,7 @@
 
 (def rng (gen/rng)) # Fixed seed for reproducibility
 
-# ===============================================
 # Test 1: Identity Type Formation
-# ===============================================
 # Formation rule (non-cumulative):
 # Γ ⊢ A : Type_l    Γ ⊢ x : A    Γ ⊢ y : A
 # ─────────────────────────────────────────
@@ -48,9 +46,7 @@
      (c/ty/type 2))
   "Id formation: Id Type₁ Type₀ Type₀ : Type₂")
 
-# ===============================================
 # Test 2: Reflexivity
-# ===============================================
 # Reflexivity rule:
 # Γ ⊢ x : A
 # ─────────────────────
@@ -90,9 +86,7 @@
      (c/ty/id (c/ty/type 6) (c/ty/type 5) (c/ty/type 5)))
   "Reflexivity: refl Type₅ : Id Type₆ Type₅ Type₅")
 
-# ===============================================
 # Test 3: J Eliminator Type Formation
-# ===============================================
 (let [A [:type 1]
       x [:type 0]
       P (fn [y p] [:type 1])
@@ -104,9 +98,7 @@
     (= (c/infer-top J-term) (c/ty/type 1))
     "J eliminator: simple application"))
 
-# ===============================================
 # Test 4: J Computation Rule
-# ===============================================
 (let [Γ (c/ctx/empty)
       A [:type 1]
       x [:type 0]
@@ -117,9 +109,7 @@
     (c/term-eq Γ (c/ty/type 1) J-refl d)
     "J computation: J A x P d x (refl x) ≡ d"))
 
-# ===============================================
 # Test 5: Identity is Reflexive
-# ===============================================
 (let [Γ (c/ctx/empty)
       A [:type 1]
       x [:type 0]
@@ -131,9 +121,7 @@
     (c/check-top refl-x id-ty)
     "Every element has reflexive equality: refl x : Id A x x"))
 
-# ===============================================
 # Test 6: Identity Type Semantic Equality
-# ===============================================
 (test/assert
   (c/sem-eq (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0))
             [c/T/Refl (c/ty/type 0)]
@@ -146,9 +134,7 @@
                  [c/T/Refl (c/ty/type 1)]))
   "Semantic inequality: different reflexivity proofs are not equal")
 
-# ===============================================
 # Test 7: Normalization of Identity Types
-# ===============================================
 (test/assert
   (= (c/nf (c/ty/type 2) [:t-id [:type 1] [:type 0] [:type 0]])
      (c/nf/id (c/nf/type 1) (c/nf/type 0) (c/nf/type 0)))
@@ -168,9 +154,7 @@
          (= (first nf-result) c/NF/Refl))
     "Normalization: refl normalizes"))
 
-# ===============================================
 # Test 8: J with Dependent Motive (Symmetry)
-# ===============================================
 (defn prop-j-symmetry [n]
   "Property: J can derive symmetry of identity types"
   (var passed true)
@@ -249,9 +233,7 @@
            (= (get res 1) (c/ty/type 2))))
     "J proves symmetry: Id A x y → Id A y x"))
 
-# ===============================================
 # Test 9: Identity Preserves Universe Levels
-# ===============================================
 (defn prop-id-preserves-universes [n]
   "Property: Id A x y : Type_(l+1) when A : Type_l"
   (var passed true)
@@ -288,18 +270,14 @@
      (c/ty/type 11))
   "Identity preserves universe: larger universes")
 
-# ===============================================
 # Test 11: Type Checking Reflexivity
-# ===============================================
 (a/assert-throws
   (fn []
     (let [Γ (c/ctx/empty)]
       (c/check Γ [:t-refl [:type 0]] (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 1)))))
   "Error: refl x does not have type Id A x y when x ≠ y")
 
-# ===============================================
 # Test 12: Context with Identity Types
-# ===============================================
 (let [Γ (c/ctx/empty)
       id-ty (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0))
       Γp (c/ctx/add Γ "p" id-ty)]
@@ -307,9 +285,7 @@
     (= (c/ctx/lookup Γp "p") id-ty)
     "Context can store identity types"))
 
-# ===============================================
 # Test 13: Identity Types of Dependent Functions
-# ===============================================
 (let [id-ty [:t-pi [:type 0] (fn [A] [:t-pi A (fn [x] A)])]
       Γ (c/ctx/empty)
       id-ty-sem (c/eval Γ id-ty)
@@ -364,9 +340,7 @@
   (prop-id-of-pi-types 20)
   "Property: identity types work for function types")
 
-# ===============================================
 # Test 14: Eta-Equality with Identity
-# ===============================================
 (let [Γ (c/ctx/empty)
       A [:type 0]
       f [:lam (fn [x] [:var x])]
@@ -376,9 +350,7 @@
     (c/sem-eq fn-ty (c/eval Γ f) (c/eval Γ g))
     "Eta-equal functions are semantically equal"))
 
-# ===============================================
 # Test 16: Multiple J Applications (Transitivity)
-# ===============================================
 (let [Γ (c/ctx/empty)
       A [:type 1]
       x [:type 0]
@@ -396,9 +368,7 @@
                [:t-refl [:type 0]])
     "Multiple J applications compute correctly"))
 
-# ===============================================
 # Property Tests: Reflexivity Always Works
-# ===============================================
 (defn prop-reflexivity [n]
   "Property: refl x : Id A x x for any well-typed x : A"
   (var passed true)
@@ -421,9 +391,7 @@
   (prop-reflexivity 20)
   "Property: reflexivity works for all terms")
 
-# ===============================================
 # Property Tests: J Computation
-# ===============================================
 (defn prop-J-computation [n]
   "Property: J A x P d x (refl x) ≡ d"
   (var passed true)
@@ -446,9 +414,7 @@
   (prop-J-computation 20)
   "Property: J computation rule always holds")
 
-# ===============================================
 # Test 17: Normalization of J
-# ===============================================
 (let [A [:type 1]
       x [:type 0]
       P (fn [y p] [:type 1])
@@ -459,9 +425,7 @@
     (= result (c/ty/type 0))
     "J normalizes when proof is refl"))
 
-# ===============================================
 # Test 18: Type Preservation for Identity
-# ===============================================
 (test/assert
   (a/type-preserves
     (c/ctx/empty)
@@ -469,9 +433,7 @@
     (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0)))
   "Type preservation: refl preserves type")
 
-# ===============================================
 # Test 19: Semantic Equality for J
-# ===============================================
 (let [Γ (c/ctx/empty)
       A [:type 1]
       x [:type 0]
@@ -484,9 +446,7 @@
     (c/term-eq Γ (c/ty/type 1) J1 J2)
     "J respects semantic equality of base case"))
 
-# ===============================================
 # Test 20: Identity on Higher Universes
-# ===============================================
 (defn prop-id-higher-universes [n]
   "Property: Identity types work correctly at high universe levels"
   (var passed true)
@@ -523,9 +483,7 @@
      (c/ty/type 11))
   "Identity preserves high universe levels")
 
-# ===============================================
 # Test 21: J with Pi Types
-# ===============================================
 (let [Γ (c/ctx/empty)
       A [:t-pi [:type 0] (fn [x] [:type 0])]
       x [:lam (fn [y] [:var y])]
@@ -537,9 +495,7 @@
     (= (c/eval Γ J-term) (c/ty/type 0))
     "J works with Pi types"))
 
-# ===============================================
 # Test 22: J with Sigma Types
-# ===============================================
 (let [Γ (c/ctx/empty)
       A [:t-sigma [:type 0] (fn [x] [:type 0])]
       x [:pair [:type 0] [:type 0]]
@@ -550,9 +506,7 @@
     (c/term-eq Γ (c/ty/type 1) J-term d)
     "J works with Sigma types"))
 
-# ===============================================
 # Test 23: Nested Identity Types
-# ===============================================
 (let [Γ (c/ctx/empty)
       A [:type 2]
       x [:type 1]
@@ -576,9 +530,7 @@
                       [:refl [:Type 1]]))
     "Nested identity types are well-formed"))
 
-# ===============================================
 # Test 24: Weakening with Identity Types
-# ===============================================
 (let [Γ (c/ctx/empty)
       A [:type 1]
       x [:type 0]
@@ -593,9 +545,7 @@
     (c/sem-eq (c/ty/type 100) ty-before ty-after)
     "Weakening preserves identity types"))
 
-# ===============================================
 # Test 25: Well-Typed Identity Usage
-# ===============================================
 (let [Γ (c/ctx/empty)
       fn-ty [:t-pi [:type 0] (fn [x] [:type 0])]
       fn-ty-sem (c/eval Γ fn-ty)

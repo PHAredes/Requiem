@@ -9,9 +9,7 @@
 
 (var rng (gen/rng))
 
-# ===============================================
 # Property: Church-Rosser
-# ===============================================
 (defn prop-church-rosser [n]
   "Property: If t ≡ u definitionally, then nf(t) = nf(u)"
   (var passed true)
@@ -38,9 +36,7 @@
   (prop-church-rosser 30)
   "Property: Church-Rosser - convertible terms normalize equally")
 
-# ===============================================
 # Property: Raise-Lower Roundtrip
-# ===============================================
 (defn prop-raise-lower-roundtrip [n]
   "Property: lower(ty, raise(ty, ne)) = ne for neutral terms"
   (var passed true)

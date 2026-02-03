@@ -4,9 +4,7 @@
 
 (test/start-suite "Core Conversion")
 
-# ===============================================
 # Test 3: Eta-Equality for Functions
-# ===============================================
 # λx. f x ≡ f (when x not free in f)
 (let [id-ty (c/tm/pi [:type 0] (fn [x] [:type 0]))
       f [:var "f"]
@@ -16,9 +14,7 @@
     (c/term-eq Γ id-ty f eta-expanded)
     "Eta-equality: λx. f x ≡ f"))
 
-# ===============================================
 # Test 4: Eta-Equality for Pairs
-# ===============================================
 # (fst p, snd p) ≡ p
 (let [pair-ty (c/tm/sigma [:type 0] (fn [x] [:type 0]))
       p [:var "p"]
@@ -28,9 +24,7 @@
     (c/term-eq Γ pair-ty p eta-expanded)
     "Eta-equality: (fst p, snd p) ≡ p"))
 
-# ===============================================
 # Semantic Equality Tests
-# ===============================================
 (test/assert
   (c/sem-eq (c/ty/type 0) (c/ty/type 0) (c/ty/type 0))
   "Semantic equality: Type₀ ≡ Type₀")

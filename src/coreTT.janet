@@ -3,9 +3,7 @@
 
 # Requiem CoreTT
 # NbE kernel with HOAS, bidirectional type checking, and J-eliminator
-# ---------------------
-# Semantic Domain
-# ---------------------
+
 # Tags
 (def T/Type 0x01)
 (def T/Pi 0x02)
@@ -60,9 +58,7 @@
 (defn ty/id [A x y] [T/Id A x y])
 (defn ty/pair [v1 v2] [T/Pair v1 v2])
 
-# ---------------------
-# Term constructors (HOAS syntax) - Unchanged (AST)
-# ---------------------
+# Term constructors
 (defn tm/var [x] [:var x])
 (defn tm/lam [body] [:lam body])
 (defn tm/app [f x] [:app f x])
@@ -76,9 +72,7 @@
 (defn tm/refl [x] [:t-refl x])
 (defn tm/J [A x P d y p] [:t-J A x P d y p])
 
-# ---------------------
-# Neutral / normal form constructors
-# ---------------------
+# Neutrals / normal forms
 (defn ne/var [x] [:nvar x])
 (defn ne/app [f x] [:napp f x])
 (defn ne/fst [p] [:nfst p])
@@ -94,9 +88,7 @@
 (defn nf/id [A x y] [NF/Id A x y])
 (defn nf/refl [x] [NF/Refl x])
 
-# ---------------------
-# Context (HAMT-backed)
-# ---------------------
+# Context
 (import /build/hamt :as h)
 
 (defn ctx/empty []
@@ -111,9 +103,7 @@
     (errorf "unbound variable: %v" x)
     v))
 
-# ---------------------
-# NbE: raise / lower with eta-equality
-# ---------------------
+# NbE: raise / lower
 (var raise nil)
 (var lower nil)
 
@@ -204,9 +194,7 @@
            (= tag T/Neutral) (lower/neutral sem)
            true sem))))
 
-# ---------------------
-# Definitional equality with eta
-# ---------------------
+# Definitional equality
 (var sem-eq nil)
 
 (defn- sem-eq/type [ty v1 v2]
@@ -306,9 +294,7 @@
            (= tag T/Id) (let [[_ A x y] ty] (sem-eq/id A x y v1 v2))
            true (= v1 v2)))))
 
-# ---------------------
-# Evaluator (returns semantic values)
-# ---------------------
+# Evaluator
 (var eval nil)
 
 (defn- eval/var [Γ x]
@@ -342,7 +328,7 @@
     (cond
       (= tag T/Pair) (get v 1)
       (= tag T/Neutral) [T/Neutral (ne/fst (get v 1))]
-      true (error "fst expects pair"))))
+      true (errorf "fst expects pair, got: %v" v))))
 
 (defn- eval/snd [Γ p]
   (let [v (eval Γ p)
@@ -350,7 +336,7 @@
     (cond
       (= tag T/Pair) (get v 2)
       (= tag T/Neutral) [T/Neutral (ne/snd (get v 1))]
-      true (error "snd expects pair"))))
+      true (errorf "snd expects pair, got: %v" v))))
 
 (defn- eval/t-id [Γ A x y]
   (ty/id (eval Γ A) (eval Γ x) (eval Γ y)))
@@ -428,9 +414,7 @@
 (defn nf [ty tm]
   (eval/session (fn [] (lower ty (eval (ctx/empty) tm)))))
 
-# ---------------------
 # Bidirectional checker
-# ---------------------
 (var infer nil)
 (var check nil)
 
@@ -453,7 +437,7 @@
 
          [:type l] (ty/type (+ l 1))
 
-         [:lam _] (error "cannot infer type of lambda; requires annotation")
+         [:lam _] (errorf "cannot infer type of lambda %v; requires annotation" t)
 
          [:app f x]
          (let [fA (infer Γ f)
@@ -485,7 +469,7 @@
                tag (if (tuple? pA) (get pA 0) 0)]
            (if (= tag T/Sigma)
              (get pA 1) # A from [T/Sigma A B]
-             (error "fst expects Sigma")))
+             (errorf "fst expects Sigma type, got: %v" pA)))
 
          [:snd p]
          (let [pA (infer Γ p)
@@ -493,10 +477,9 @@
            (if (= tag T/Sigma)
              (let [[_ A B] pA]
                (B (eval Γ [:fst p])))
-             (error "snd expects Sigma")))
+             (errorf "snd expects Sigma type, got: %v" pA)))
 
-         [:pair _ _]
-         (error "cannot infer type of pair; expected Sigma annotation")
+         [:pair _ _] (errorf "cannot infer type of pair %v; expected Sigma annotation" t)
 
          # Identity type: Id A x y : Type_l where A : Type_l
          [:t-id A x y]
@@ -560,7 +543,7 @@
                (check (ctx/add Γ fresh dom)
                       (body [:var fresh])
                       (cod arg-sem)))
-             (error "lambda expected Pi type")))
+             (errorf "lambda expected Pi type, got: %v" A)))
 
          [:pair l r]
          (let [tag (if (tuple? A) (get A 0) 0)]
@@ -568,7 +551,7 @@
              (let [[_ A1 B1] A]
                (do (check Γ l A1)
                  (check Γ r (B1 (eval Γ l)))))
-             (error "pair expects Sigma type")))
+             (errorf "pair expects Sigma type, got: %v" A)))
 
          _
          (let [A1 (infer Γ t)]

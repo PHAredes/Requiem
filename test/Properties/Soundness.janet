@@ -8,9 +8,7 @@
 
 (var rng (gen/rng))
 
-# ===============================================
 # Property: Function Application Type Soundness
-# ===============================================
 (defn prop-app-soundness [n]
   "Property: Application preserves typing"
   (var passed true)
@@ -38,9 +36,7 @@
   (prop-app-soundness 20)
   "Property: function application is type-sound")
 
-# ===============================================
 # Property: Type Well-Formedness
-# ===============================================
 (defn prop-type-well-formed [n]
   "Property: Inferred types are themselves well-formed"
   (var passed true)

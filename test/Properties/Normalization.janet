@@ -9,9 +9,7 @@
 
 (var rng (gen/rng))
 
-# ===============================================
 # Test 12: Normalization Stability
-# ===============================================
 (test/assert
   (a/normalization-stable
     (c/ty/type 1)
@@ -24,9 +22,7 @@
     [:lam (fn [x] [:var x])])
   "Normalization stability: identity function")
 
-# ===============================================
 # Normalization Correctness
-# ===============================================
 (test/assert
   (= (c/nf (c/ty/type 1) [:type 0])
      (c/nf/type 0))
@@ -39,9 +35,7 @@
     _ false)
   "Normalization: λx. x normalizes to [:nlam ...]")
 
-# ===============================================
 # Property Tests: Nested Terms
-# ===============================================
 
 (defn prop-nested-normalization [depth max-terms]
   "Property: Normalization of nested terms terminates"
@@ -62,9 +56,7 @@
   (prop-nested-normalization 3 10)
   "Property: nested terms normalize correctly")
 
-# ===============================================
-# Property: Normalization Idempotence (from coreTT-plus.janet)
-# ===============================================
+# Property: Normalization Idempotence
 (defn prop-normalization-idempotent [n]
   "Property: nf(nf(t)) = nf(t) - normalization is idempotent"
   (var passed true)
@@ -93,9 +85,7 @@
   (prop-normalization-idempotent 50)
   "Property: normalization is idempotent")
 
-# ===============================================
-# Property: Evaluation Determinism (from coreTT-plus.janet)
-# ===============================================
+# Property: Evaluation Determinism
 (defn prop-eval-deterministic [n]
   "Property: Evaluation is deterministic"
   (var passed true)

@@ -5,12 +5,7 @@
 
 (test/start-suite "Core Evaluation")
 
-# ===============================================
 # Test 1: Semantic Domain Separation
-# ===============================================
-# ===============================================
-# Test 1: Semantic Domain Separation
-# ===============================================
 (test/assert
   (= (c/eval (c/ctx/empty) [:type 0]) (c/ty/type 0))
   "eval returns semantic universe [:Type 0], not [:nType 0]")
@@ -24,9 +19,7 @@
      (c/ty/pair (c/ty/type 0) (c/ty/type 1)))
   "eval returns Janet pair for semantic pair")
 
-# ===============================================
 # Test 6: Beta-Reduction
-# ===============================================
 # (λx. t) u ≡ t[u/x]
 (let [id (fn [x] [:var x])
       Γ (c/ctx/empty)
@@ -36,9 +29,7 @@
     (= app-result direct-result)
     "Beta-reduction: (λx. x) Type₀ ≡ Type₀"))
 
-# ===============================================
 # Test 7: Pair Projections
-# ===============================================
 (let [Γ (c/ctx/empty)]
   (test/assert
     (= (c/eval Γ [:fst [:pair [:type 0] [:type 1]]])
@@ -50,14 +41,12 @@
        (c/ty/type 1))
     "Projection: snd (a, b) ≡ b"))
 
-# ===============================================
 # Variable Handling
-# ===============================================
 (let [Γ (c/ctx/empty)
       Γ1 (c/ctx/add Γ "x" (c/ty/type 0))]
   (test/assert
     (= (c/eval Γ1 [:var "x"]) [c/T/Neutral [:nvar "x"]])
-    "String variables evaluate to neutralss"))
+    "String variables evaluate to neutrals"))
 
 (let [Γ (c/ctx/empty)
       fresh (gensym)
