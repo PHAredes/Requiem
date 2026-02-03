@@ -297,6 +297,7 @@
 # Evaluator
 (var eval nil)
 
+
 (defn- eval/var [Γ x]
   (if (or (string? x) (symbol? x))
     [T/Neutral (ne/var x)]

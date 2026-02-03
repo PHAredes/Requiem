@@ -1,7 +1,7 @@
 # test/coreTT-J-advanced.janet
 
-(import spork/test)
-(import "../src/coreTT" :as c)
+(import ./Utils/TestRunner :as test)
+(import ../src/coreTT :as c)
 
 (test/start-suite "J Eliminator - Advanced Properties")
 
