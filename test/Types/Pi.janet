@@ -12,14 +12,14 @@
                [:type 0]
                (fn [x] [:type 0])]]
   (test/assert
-    (= (c/infer-top pi-type) [:Type 1])
+    (= (c/infer-top pi-type) (c/ty/type 1))
     "Pi formation: (Type₀ → Type₀) : Type₁"))
 
 (let [pi-type [:t-pi
                [:type 0]
                (fn [x] [:type 1])]]
   (test/assert
-    (= (c/infer-top pi-type) [:Type 2])
+    (= (c/infer-top pi-type) (c/ty/type 2))
     "Pi formation: (Type₀ → Type₁) : Type₂ (max rule)"))
 
 # ===============================================
@@ -28,7 +28,7 @@
 (let [dep-fn-type [:t-pi
                    [:type 0]
                    (fn [A] [:t-pi A (fn [x] A)])]
-      expected [:Type 1]]
+      expected (c/ty/type 1)]
   (test/assert
     (= (c/infer-top dep-fn-type) expected)
     "Dependent function: ∀(A : Type₀). A → A"))

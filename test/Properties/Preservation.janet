@@ -16,7 +16,7 @@
   (a/type-preserves
     (c/ctx/empty)
     [:type 0]
-    [:Type 1])
+    (c/ty/type 1))
   "Type preservation: [:type 0] : [:Type 1]")
 
 (let [id-ty [:t-pi [:type 0] (fn [x] [:type 0])]]
@@ -24,7 +24,7 @@
     (a/type-preserves
       (c/ctx/empty)
       id-ty
-      [:Type 1])
+      (c/ty/type 1))
     "Type preservation: (Type₀ → Type₀) : Type₁"))
 
 # ===============================================

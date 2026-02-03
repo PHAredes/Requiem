@@ -29,8 +29,10 @@
   threw)
 
 (defn end-suite []
-  (print (string/format "  %d passed, %d failed" *passed* *failed*))
-  (if (> *failed* 0)
-    (print (string/format "test suite %s failed" *suite-name*))
-    (print (string/format "test suite %s finished - %d of %d tests passed."
-                          *suite-name* *passed* (+ *passed* *failed*)))))
+  (let [total (+ *passed* *failed*)]
+    (print (string/format "  %d passed, %d failed" *passed* *failed*))
+    (if (> *failed* 0)
+      (do
+        (print (string/format "test suite %s FAILED" *suite-name*))
+        (os/exit 1))
+      (print (string/format "test suite %s passed (%d tests)" *suite-name* total)))))

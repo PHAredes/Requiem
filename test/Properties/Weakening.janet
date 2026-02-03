@@ -27,7 +27,7 @@
         (let [ty (c/infer Γ tm)
               Γ2 (c/ctx/add Γ x B)
               ty2 (c/infer Γ2 tm)]
-          (unless (c/sem-eq [:Type 100] ty ty2)
+          (unless (c/sem-eq (c/ty/type 100) ty ty2)
             (set passed false)
             (print "Weakening failed for:" tm)))
         ([err] nil)))) # Skip ill-typed terms

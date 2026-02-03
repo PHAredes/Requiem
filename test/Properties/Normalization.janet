@@ -14,13 +14,13 @@
 # ===============================================
 (test/assert
   (a/normalization-stable
-    [:type 1]
+    (c/ty/type 1)
     [:type 0])
   "Normalization stability: simple type")
 
 (test/assert
   (a/normalization-stable
-    [:t-pi [:type 0] (fn [x] [:type 0])]
+    (c/ty/pi (c/ty/type 0) (fn [x] (c/ty/type 0)))
     [:lam (fn [x] [:var x])])
   "Normalization stability: identity function")
 
@@ -28,14 +28,14 @@
 # Normalization Correctness
 # ===============================================
 (test/assert
-  (= (c/nf [:Type 1] [:type 0])
-     [:Type 0])
+  (= (c/nf (c/ty/type 1) [:type 0])
+     (c/nf/type 0))
   "Normalization: Type₀ normalizes to [:Type 0]")
 
 (test/assert
-  (match (c/nf [:Pi [:Type 0] (fn [x] [:Type 0])]
+  (match (c/nf (c/ty/pi (c/ty/type 0) (fn [x] (c/ty/type 0)))
                [:lam (fn [x] [:var x])])
-    [:nlam _] true
+    [c/NF/Lam _] true
     _ false)
   "Normalization: λx. x normalizes to [:nlam ...]")
 

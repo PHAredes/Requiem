@@ -21,7 +21,7 @@
           eta-expanded [:lam (fn [x] [:app f-var [:var x]])]
           Γ (c/ctx/empty)
           A-sem (c/eval Γ A)
-          pi-ty [:Pi A-sem (fn [x] A-sem)]
+          pi-ty (c/ty/pi A-sem (fn [x] A-sem))
           Γ2 (c/ctx/add Γ fresh pi-ty)]
       (try
         (unless (c/term-eq Γ2 pi-ty f-var eta-expanded)
@@ -47,7 +47,7 @@
           eta-expanded [:pair [:fst p-var] [:snd p-var]]
           Γ (c/ctx/empty)
           A-sem (c/eval Γ A)
-          sigma-ty [:Sigma A-sem (fn [x] A-sem)]
+          sigma-ty (c/ty/sigma A-sem (fn [x] A-sem))
           Γ2 (c/ctx/add Γ fresh sigma-ty)]
       (try
         (unless (c/term-eq Γ2 sigma-ty p-var eta-expanded)

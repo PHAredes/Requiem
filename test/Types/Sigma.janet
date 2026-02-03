@@ -12,7 +12,7 @@
                   [:type 0]
                   (fn [x] [:type 0])]]
   (test/assert
-    (= (c/infer-top sigma-type) [:Type 1])
+    (= (c/infer-top sigma-type) (c/ty/type 1))
     "Sigma formation: (Type₀ × Type₀) : Type₁"))
 
 # ===============================================
@@ -21,12 +21,12 @@
 (let [Γ (c/ctx/empty)]
   (test/assert
     (= (c/eval Γ [:fst [:pair [:type 0] [:type 1]]])
-       [:Type 0])
+       (c/ty/type 0))
     "Projection: fst (a, b) ≡ a")
 
   (test/assert
     (= (c/eval Γ [:snd [:pair [:type 0] [:type 1]]])
-       [:Type 1])
+       (c/ty/type 1))
     "Projection: snd (a, b) ≡ b"))
 
 # ===============================================
@@ -34,7 +34,7 @@
 # ===============================================
 (let [pair-ty [:t-sigma [:type 0] (fn [A] [:t-pi A (fn [x] A)])]
       # (A : Type₀) × (A → A)
-      expected [:Type 1]]
+      expected (c/ty/type 1)]
   (test/assert
     (= (c/infer-top pair-ty) expected)
     "Dependent type: (A : Type₀) × (A → A)"))
