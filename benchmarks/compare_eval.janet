@@ -15,7 +15,7 @@
       (repeat iters (thunk))
       (array/push res (/ (- (timer/now) start) iters))))
   (let [s (stats res)]
-    [name (* 1000 (s :mean)) (* 1000 (s :median)) (* 1000 (s :min))]))
+    [name (/ (s :mean) 1000000) (/ (s :median) 1000000) (/ (s :min) 1000000)]))
 
 (defn run-suite [label eval-fn ctx-empty-fn]
   (let [ctx (ctx-empty-fn)
