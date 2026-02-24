@@ -1,5 +1,6 @@
 /* Persistent HAMT (Hash Array Mapped Trie) for Janet
  * Functional/immutable variant only - put returns new HAMT
+ * Optimized: pre-computed hashes stored in leaves
  */
 #include <janet.h>
 #include <string.h>
@@ -64,11 +65,11 @@ static char *arena_strdup(Arena *a, const char *s) {
 
 /* Node structures */
 typedef struct { uint32_t bits; void *kids[]; } Node;
-typedef struct { char *key; Janet val; } Leaf;
+typedef struct { uint64_t hash; char *key; Janet val; } Leaf;
 
-static Leaf *leaf_new(Arena *a, const char *k, Janet v) {
+static Leaf *leaf_new(Arena *a, const char *k, Janet v, uint64_t h) {
     Leaf *l = arena_alloc(a, sizeof(Leaf));
-    l->key = arena_strdup(a, k); l->val = v;
+    l->key = arena_strdup(a, k); l->val = v; l->hash = h;
     return l;
 }
 
@@ -78,16 +79,16 @@ static Node *node_new(Arena *a, uint32_t bits, int count) {
     return n;
 }
 
-static inline void *mk_leaf(Arena *a, const char *k, Janet v) {
-    return (void *)((uintptr_t)leaf_new(a, k, v) | T_LEAF);
+static inline void *mk_leaf(Arena *a, const char *k, Janet v, uint64_t h) {
+    return (void *)((uintptr_t)leaf_new(a, k, v, h) | T_LEAF);
 }
 
-/* Core operations */
+/* Core operations - now using pre-computed hash */
 static int h_get(void *n, const char *k, uint64_t h, int d, Janet *out) {
     if (!n) return 0;
     if (is_leaf(n)) {
         Leaf *l = get_ptr(n);
-        if (!strcmp(l->key, k)) { *out = l->val; return 1; }
+        if (l->hash == h && !strcmp(l->key, k)) { *out = l->val; return 1; }
         return 0;
     }
     Node *node = n; uint32_t idx = h_frag(h, d);
@@ -97,15 +98,15 @@ static int h_get(void *n, const char *k, uint64_t h, int d, Janet *out) {
 }
 
 static void *h_put(Arena *a, void *n, const char *k, Janet v, uint64_t h, int d, bool *added) {
-    if (!n) { *added = true; return mk_leaf(a, k, v); }
+    if (!n) { *added = true; return mk_leaf(a, k, v, h); }
     
     if (is_leaf(n)) {
         Leaf *ol = get_ptr(n);
-        if (!strcmp(ol->key, k)) { *added = false; return mk_leaf(a, k, v); }
+        if (ol->hash == h && !strcmp(ol->key, k)) { *added = false; return mk_leaf(a, k, v, h); }
         
         *added = true;
         char *lk = ol->key; Janet lv = ol->val;
-        uint64_t ho = h_hash(lk);
+        uint64_t ho = ol->hash;
         uint32_t io = h_frag(ho, d), in = h_frag(h, d);
         
         if (io == in) {
@@ -114,7 +115,7 @@ static void *h_put(Arena *a, void *n, const char *k, Janet v, uint64_t h, int d,
             return nn;
         } else {
             Node *nn = node_new(a, (1u << io) | (1u << in), 2);
-            void *l1 = mk_leaf(a, lk, lv), *l2 = mk_leaf(a, k, v);
+            void *l1 = mk_leaf(a, lk, lv, ho), *l2 = mk_leaf(a, k, v, h);
             if (io < in) { nn->kids[0] = l1; nn->kids[1] = l2; }
             else { nn->kids[0] = l2; nn->kids[1] = l1; }
             return nn;
@@ -133,7 +134,7 @@ static void *h_put(Arena *a, void *n, const char *k, Janet v, uint64_t h, int d,
     } else {
         Node *nn = node_new(a, node->bits | bit, count + 1);
         memcpy(nn->kids, node->kids, pos * sizeof(void *));
-        nn->kids[pos] = mk_leaf(a, k, v);
+        nn->kids[pos] = mk_leaf(a, k, v, h);
         memcpy(nn->kids + pos + 1, node->kids + pos, (count - pos) * sizeof(void *));
         *added = true;
         return nn;
