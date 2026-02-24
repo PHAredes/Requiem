@@ -90,48 +90,19 @@
 # Context
 (import /build/hamt :as h)
 
-# Context optimization cache for frequently accessed variables
-# Cache is context-aware: stores [context-ptr, variable-name] -> value
-# Pure functional - returns new cache table on update
-(var ctx/cache (table))
-
+# Simple context operations - no cache (direct HAMT is faster)
+# Keys are converted to strings for HAMT compatibility
 (defn ctx/empty []
-  # Create new empty context with fresh cache
-  (set ctx/cache (table))
   (h/new))
 
 (defn ctx/add [Γ x A]
-  # Don't invalidate cache - different contexts can share cached lookups
-  # Cache key includes context pointer, so lookups are still context-specific
   (h/put Γ (string x) A))
 
 (defn ctx/lookup [Γ x]
-  "Optimized variable lookup with context-aware caching"
-  (def key (string x))
-  
-  # Check cache first - use context pointer as part of key
-  (def cache-key [Γ key])
-  (def cached (get ctx/cache cache-key))
-  (if (nil? cached)
-    # Cache miss - do HAMT lookup
-    (do
-      (def v (h/get Γ key))
-      (if (nil? v)
-        (errorf "unbound variable: %v" x)
-        (do
-          # Update cache (immutable - creates new entry)
-          (set ctx/cache (put ctx/cache cache-key v))
-          v)))
-    # Cache hit
-    cached))
-
-(defn ctx/cache-stats []
-  "Return cache statistics"
-  {:entries (length (keys ctx/cache))})
-
-(defn ctx/cache-clear []
-  "Clear the lookup cache"
-  (set ctx/cache (table)))
+  (def v (h/get Γ (string x)))
+  (if (nil? v)
+    (errorf "unbound variable: %v" x)
+    v))
 
 # NbE: raise / lower
 (var raise nil)
