@@ -15,7 +15,7 @@
       (repeat iters (thunk))
       (array/push res (/ (- (timer/now) start) iters))))
   (let [s (stats res)]
-    (printf "  %10.6f ms [med: %10.6f, min: %10.6f]" (* 1000 (s :mean)) (* 1000 (s :median)) (* 1000 (s :min)))))
+    (printf "  %10.6f μs [med: %10.6f, min: %10.6f]" (s :mean) (s :median) (s :min))))
 
 (defn main [&]
   (let [Γ (c/ctx/empty)

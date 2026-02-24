@@ -25,3 +25,10 @@ Thumbs.db
 .agda-dirbuild/
 .jpm_cache/
 build/
+
+# Janet
+*.so
+*.a
+*.jimage
+*.janet
+!project.janet

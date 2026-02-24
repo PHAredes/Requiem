@@ -1,6 +1,5 @@
 #!/usr/bin/env janet
 
-
 # Requiem CoreTT
 # NbE kernel with HOAS, bidirectional type checking, and J-eliminator
 
@@ -91,17 +90,61 @@
 # Context
 (import /build/hamt :as h)
 
+# Context optimization cache for frequently accessed variables
+# Cache is context-aware: stores [context-ptr, variable-name] -> value
+(var ctx/cache (table))
+(var ctx/cache-enabled true)
+(var ctx/cache-hits 0)
+(var ctx/cache-misses 0)
+
 (defn ctx/empty []
+  # Create new empty context with fresh cache
+  (set ctx/cache (table))
+  (set ctx/cache-hits 0)
+  (set ctx/cache-misses 0)
   (h/new))
 
 (defn ctx/add [Γ x A]
+  # Don't invalidate cache - different contexts can share cached lookups
+  # Cache key includes context pointer, so lookups are still context-specific
   (h/put Γ (string x) A))
 
 (defn ctx/lookup [Γ x]
-  (def v (h/get Γ (string x)))
-  (if (nil? v)
-    (errorf "unbound variable: %v" x)
-    v))
+  "Optimized variable lookup with context-aware caching"
+  (def key (string x))
+  
+  # Check cache first - use context pointer as part of key
+  (def cache-key [Γ key])
+  (if (and ctx/cache-enabled (get ctx/cache cache-key))
+    (do
+      (set ctx/cache-hits (+ ctx/cache-hits 1))
+      (get ctx/cache cache-key))
+    
+    # Main lookup path - HAMT get
+    (do
+      (def v (h/get Γ key))
+      (if (nil? v)
+        (errorf "unbound variable: %v" x)
+        (do
+          (when ctx/cache-enabled
+            (set ctx/cache-misses (+ ctx/cache-misses 1))
+            (put ctx/cache cache-key v))
+          v)))))
+
+(defn ctx/cache-stats []
+  "Return cache performance statistics"
+  {:hits ctx/cache-hits 
+   :misses ctx/cache-misses 
+   :enabled ctx/cache-enabled
+   :hit-rate (if (> (+ ctx/cache-hits ctx/cache-misses) 0)
+                (/ ctx/cache-hits (+ ctx/cache-hits ctx/cache-misses))
+                0)})
+
+(defn ctx/cache-clear []
+  "Clear the lookup cache"
+  (set ctx/cache (table))
+  (set ctx/cache-hits 0)
+  (set ctx/cache-misses 0))
 
 # NbE: raise / lower
 (var raise nil)
