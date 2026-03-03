@@ -112,6 +112,21 @@
   (test/assert (= (length (data/ctors vec)) 2) "selector-style Vec has two constructors"))
 
 (let [src (string
+            "data Nat: Type\n"
+            "  | = zero\n"
+            "  | = succ (n: Nat)\n\n"
+            "def add (n: Nat) (m: Nat): Nat\n"
+            "  | n zero = n\n"
+            "  | n (succ m) = (succ (add n m))")
+      forms (p/parse/text src)
+      lowered (s/lower/program forms)
+      nat (decl/find-data lowered "Nat")
+      add (decl/find-func lowered "add")]
+  (test/assert (= (length lowered) 2) "sweet syntax parses into two top-level decls")
+  (test/assert (= (length (data/ctors nat)) 2) "sweet syntax data clauses lower")
+  (test/assert (= (length (lowered/clauses add)) 2) "sweet syntax def clauses lower"))
+
+(let [src (string
             "(data Nat: Type (| = zero) (| = suc (n: Nat)))"
             " (def keep1 (n: Nat) (m: Nat): Nat (| n = n))"
             " (def keep0 (n: Nat) (m: Nat): Nat (| = n))")
