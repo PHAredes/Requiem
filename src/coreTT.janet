@@ -48,10 +48,12 @@
 #   [:nJ A x P d y p]   - J eliminator (stuck)
 # (Keywords kept for AST readability)
 
+(import ./levels :as lvl)
+
 # ---------------------
 # Type constructors
 # ---------------------
-(defn ty/type [lvl] [T/Type lvl])
+(defn ty/type [lvl] [T/Type (lvl/lvl/value lvl)])
 (defn ty/pi [A B] [T/Pi A B])
 (defn ty/sigma [A B] [T/Sigma A B])
 (defn ty/id [A x y] [T/Id A x y])
@@ -202,6 +204,9 @@
   (let [t1 (if (tuple? v1) (get v1 0) 0)
         t2 (if (tuple? v2) (get v2 0) 0)]
     (cond
+      (and (= t1 T/Type) (= t2 T/Type))
+      (lvl/lvl/eq? (get v1 1) (get v2 1))
+
       (and (= t1 T/Pi) (= t2 T/Pi))
       (let [[_ A1 B1] v1 [_ A2 B2] v2]
         (and (sem-eq ty A1 A2)
@@ -419,6 +424,41 @@
 # Bidirectional checker
 (var infer nil)
 (var check nil)
+(var subtype nil)
+
+(defn- subtype/pi [A1 B1 A2 B2]
+  (and (subtype A2 A1)
+       (let [fresh (gensym)
+             arg-sem (raise A2 (ne/var fresh))]
+         (subtype (B1 arg-sem) (B2 arg-sem)))))
+
+(defn- subtype/sigma [A1 B1 A2 B2]
+  (and (subtype A1 A2)
+       (let [fresh (gensym)
+             arg-sem (raise A1 (ne/var fresh))]
+         (subtype (B1 arg-sem) (B2 arg-sem)))))
+
+(set subtype
+     (fn [A B]
+       "Semantic subtyping with cumulative universes and Pi/Sigma variance."
+       (let [tagA (if (tuple? A) (get A 0) 0)
+             tagB (if (tuple? B) (get B 0) 0)]
+         (cond
+           (and (= tagA T/Type) (= tagB T/Type))
+           (lvl/lvl/<= (get A 1) (get B 1))
+
+           (and (= tagA T/Pi) (= tagB T/Pi))
+           (let [[_ A1 B1] A
+                 [_ A2 B2] B]
+             (subtype/pi A1 B1 A2 B2))
+
+           (and (= tagA T/Sigma) (= tagB T/Sigma))
+           (let [[_ A1 B1] A
+                 [_ A2 B2] B]
+             (subtype/sigma A1 B1 A2 B2))
+
+           true
+           (sem-eq (ty/type 100) A B)))))
 
 (defn check-univ [Γ A]
   "Check that A is a universe and return its level"
@@ -437,7 +477,7 @@
            (ctx/lookup Γ x)
            (errorf "var must be a string or symbol, got: %v" x))
 
-         [:type l] (ty/type (+ l 1))
+          [:type l] (ty/type (lvl/lvl/succ l))
 
          [:lam _] (errorf "cannot infer type of lambda %v; requires annotation" t)
 
@@ -450,21 +490,21 @@
                  (B (eval Γ x))))
              (errorf "application of non-Pi: %v" fA)))
 
-         [:t-pi A B]
-         (let [lvlA (check-univ Γ A)
-               fresh (gensym)
-               A-sem (eval Γ A)
-               Γ2 (ctx/add Γ fresh A-sem)
-               lvlB (check-univ Γ2 (B [:var fresh]))]
-           (ty/type (max lvlA lvlB)))
+          [:t-pi A B]
+          (let [lvlA (check-univ Γ A)
+                fresh (gensym)
+                A-sem (eval Γ A)
+                Γ2 (ctx/add Γ fresh A-sem)
+                lvlB (check-univ Γ2 (B [:var fresh]))]
+            (ty/type (lvl/lvl/max lvlA lvlB)))
 
-         [:t-sigma A B]
-         (let [lvlA (check-univ Γ A)
-               fresh (gensym)
-               A-sem (eval Γ A)
-               Γ2 (ctx/add Γ fresh A-sem)
-               lvlB (check-univ Γ2 (B [:var fresh]))]
-           (ty/type (max lvlA lvlB)))
+          [:t-sigma A B]
+          (let [lvlA (check-univ Γ A)
+                fresh (gensym)
+                A-sem (eval Γ A)
+                Γ2 (ctx/add Γ fresh A-sem)
+                lvlB (check-univ Γ2 (B [:var fresh]))]
+            (ty/type (lvl/lvl/max lvlA lvlB)))
 
          [:fst p]
          (let [pA (infer Γ p)
@@ -555,11 +595,11 @@
                  (check Γ r (B1 (eval Γ l)))))
              (errorf "pair expects Sigma type, got: %v" A)))
 
-         _
-         (let [A1 (infer Γ t)]
-           (if (sem-eq (ty/type 100) A A1)
-             true
-             (errorf "type mismatch: expected %v got %v" A A1))))))
+          _
+          (let [A1 (infer Γ t)]
+            (if (subtype A1 A)
+              true
+              (errorf "type mismatch: expected %v got %v" A A1))))))
 
 # ---------------------
 # Top-level helpers
@@ -637,6 +677,7 @@
    :type-eq type-eq
    :term-eq term-eq
    :check check
+   :subtype subtype
    :infer infer
    :check-top check-top
    :infer-top infer-top
