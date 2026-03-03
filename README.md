@@ -15,22 +15,48 @@ Requiem is a dependently-typed language in the spirit of Agda, implementing:
 The core is ~500 lines of Janet and embeds trivially into C/C++ via Janet's FFI.
 **Zero dependencies.**
 
-## Status: Work in Progress
+## New Features
+
+### Tesla-Style Frontend
+Requiem now includes a complete frontend pipeline:
+- **Parser**: PEG-based parser for Lispy surface syntax
+- **Desugar**: Tesla-style desugaring with pattern-based encoding for indexed types
+- **Elaborate**: Elaboration to core type theory terms
+
+### Enhanced Error Messages
+Type checking errors now provide:
+- Available variables in context for unbound variable errors
+- Expected vs actual format details for projection errors
+- Helpful suggestions for common type checking failures
+- Clear explanations with actionable tips
+
+### Universe Subtyping
+- Cumulative universe hierarchy: `Type₀ <: Type₁ <: Type₂`
+- Semantic subtyping relation for Type, Pi, and Sigma types
+- Pi variance (contravariant domain, covariant codomain)
+- Sigma covariance
+- Checker uses subtyping at check-time for better type inference
+
+## Status: Active Development
 
 **What works:**
 - ✅ Core type theory (Pi, Sigma, Id types)
 - ✅ NbE with eta-equality
 - ✅ Comprehensive property-based test suite (Confluence, Church-Rosser, Normalization)
 - ✅ Context with efficient shadowing
+- ✅ Universe subtyping with cumulative hierarchy (Type₀ <: Type₁)
+- ✅ Tesla-style frontend pipeline (parse → desugar → elaborate)
+- ✅ Enhanced error messages with helpful suggestions
 - ✅ Legacy experiments (`legacy/hoas`, `legacy/phoas`), for documentation
 
-**Currently consolidating:**
-- Finalizing the core (`src/coreTT.janet`)
-- Fixing "gambiarras"
+**Features:**
+- **Universe Subtyping**: Semantic subtyping with Type cumulativity, Pi variance, and Sigma covariance
+- **Frontend Pipeline**: Lispy PEG-based parser, Tesla-style desugaring, elaboration to core TT
+- **Enhanced Error Messages**: Context-aware suggestions, detailed explanations, helpful hints
+- **Performance Optimizations**: Cached normalization (111x speedup for repeated evaluations)
 
 **Not planned (yet):**
-- Parser / surface syntax — write terms directly in Janet s-expressions
-- Elaboration / implicit arguments — pass everything explicitly
+- Implicit arguments — pass everything explicitly
 - Tooling / LSP — REPL + tests are sufficient
 
 ## Why
@@ -58,8 +84,14 @@ jpm build
 # Run the test suite
 jpm test
 
+# Run the frontend pipeline on a file
+janet requiem.janet examples/test.requiem
+
 # Run context benchmarks
 janet benchmarks/Context.janet
+
+# Test enhanced error messages
+janet test/ErrorMessages.janet
 ```
 
 ## License
