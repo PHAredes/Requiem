@@ -1,8 +1,15 @@
 (data Nat: Type
-  ((zero Nat)
-   (succ (forall (n: Nat). Nat))))
+  (| = zero)
+  (| = succ (n: Nat)))
 
-(def sum: (forall (n: Nat). (forall (m: Nat). Nat))
-  (match m:
-    (case zero: m)
-    (case (succ m'): (succ (sum n m')))))
+(data Bool: Type
+  (| = true)
+  (| = false))
+
+(def sum (n: Nat) (m: Nat): Nat
+  (| n zero = n)
+  (| n (succ m') = (succ (sum n m'))))
+
+(def not (b: Bool): Bool
+  (| true = false)
+  (| false = true))
