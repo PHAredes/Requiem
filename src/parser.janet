@@ -54,6 +54,74 @@
   (and (>= (length s) (length prefix))
        (= (string/slice s 0 (length prefix)) prefix)))
 
+(defn- line/indent [line]
+  (defn scan [i acc]
+    (if (>= i (length line))
+      acc
+      (let [ch (string/slice line i (+ i 1))]
+        (cond
+          (= ch " ") (scan (+ i 1) (+ acc 1))
+          (= ch "\t") (scan (+ i 1) (+ acc 2))
+          true acc))))
+  (scan 0 0))
+
+(defn- line/ignored? [line]
+  (let [t (string/trim line)]
+    (or (zero? (length t))
+        (text/starts-with? t "#")
+        (text/starts-with? t "--"))))
+
+(defn- text/wrapped-parens? [s]
+  (and (>= (length s) 2)
+       (= (string/slice s 0 1) "(")
+       (= (string/slice s (- (length s) 1) (length s)) ")")))
+
+(defn- text/pipe? [s]
+  (let [t (string/trim s)]
+    (and (> (length t) 0)
+         (= (string/slice t 0 1) "|"))))
+
+(defn- stack/trim [stack indent]
+  (if (or (<= (length stack) 1)
+          (> indent (get (stack (- (length stack) 1)) :indent)))
+    stack
+    (stack/trim (slice stack 0 (- (length stack) 1)) indent)))
+
+(defn- layout/pipe-split [children]
+  (defn find-pipe [i]
+    (if (= i (length children))
+      i
+      (if (text/pipe? (get (children i) :text))
+        i
+        (find-pipe (+ i 1)))))
+  (find-pipe 0))
+
+(defn- layout/render-node [node]
+  (let [text (get node :text)
+        children (get node :children)]
+    (if (zero? (length children))
+      text
+      (let [split (layout/pipe-split children)
+            head (reduce (fn [acc child]
+                           (string acc " " (layout/render-node child)))
+                         text
+                         (slice children 0 split))
+            args (map (fn [child]
+                        (let [r (layout/render-node child)]
+                          (if (text/wrapped-parens? r)
+                            r
+                            (string "(" r ")"))))
+                      (slice children split (length children)))]
+        (if (zero? (length args))
+          (string "(" head ")")
+          (string "(" head " " (string/join args " ") ")"))))))
+
+(defn- layout/render-top [node]
+  (let [r (layout/render-node node)]
+    (if (text/wrapped-parens? r)
+      r
+      (string "(" r ")"))))
+
 (defn- forms/all-lists? [forms]
   (reduce (fn [acc n]
             (and acc
@@ -63,25 +131,26 @@
           forms))
 
 (defn- layout/block->canonical [block]
-  (let [raw-lines (string/split "\n" (string block))
-        lines @[]]
-    (each line raw-lines
-      (let [t (string/trim line)]
-        (when (> (length t) 0)
-          (array/push lines t))))
-    (when (zero? (length lines))
-      (errorf "invalid layout block: %q" block))
-    (let [[head args]
-          (reduce (fn [state line]
-                    (let [[head args] state]
-                      (if (text/starts-with? line "|")
-                        [head (array/push args (string "(" line ")"))]
-                        [(string head " " line) args])))
-                  [(lines 0) @[]]
-                  (slice lines 1 (length lines)))]
-      (if (zero? (length args))
-        (string "(" head ")")
-        (string "(" head " " (string/join args " ") ")")))))
+  (let [root {:indent -1 :text nil :children @[]}
+        lines (string/split "\n" (string block))]
+    (defn walk [rest stack]
+      (if (zero? (length rest))
+        nil
+        (let [line (first rest)]
+          (if (line/ignored? line)
+            (walk (slice rest 1) stack)
+            (let [indent (line/indent line)
+                  text (string/trim line)
+                  node {:indent indent :text text :children @[]}
+                  trimmed (stack/trim stack indent)
+                  parent (trimmed (- (length trimmed) 1))]
+              (array/push (get parent :children) node)
+              (walk (slice rest 1) [;trimmed node]))))))
+    (walk lines @[root])
+    (let [tops (get root :children)]
+      (when (zero? (length tops))
+        (errorf "invalid layout block: %q" block))
+      (string/join (map layout/render-top tops) "\n"))))
 
 (defn- layout/caps->canonical [caps]
   (if (= (length caps) 1)
