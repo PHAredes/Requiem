@@ -370,53 +370,35 @@
 
       true (errorf "J eliminator requires a proof of identity (Id A x y), but got: %v\nExpected either [T/Refl proof] or [T/Neutral neutral-term]" pv))))
 
-(defn- get-eval-cache []
-  (if-let [env (fiber/getenv (fiber/current))]
-    (get env :eval-cache)))
-
-(defn- eval-impl [Γ tm]
-  (match tm
-    [:Type l] [T/Type l]
-    [:Pi A B] [T/Pi A B]
-    [:Sigma A B] [T/Sigma A B]
-    [:Id A x y] [T/Id A x y]
-    [:refl x] [T/Refl x]
-    [:neutral ne] [T/Neutral ne]
-    [:var x] (eval/var Γ x)
-    [:lam body] (eval/lam Γ body)
-    [:app f x] (eval/app Γ f x)
-    [:type l] (ty/type l)
-    [:t-pi A B] (eval/t-pi Γ A B)
-    [:t-sigma A B] (eval/t-sigma Γ A B)
-    [:pair a b] (eval/pair Γ a b)
-    [:fst p] (eval/fst Γ p)
-    [:snd p] (eval/snd Γ p)
-    [:t-id A x y] (eval/t-id Γ A x y)
-    [:t-refl x] (eval/t-refl Γ x)
-    [:t-J A x P d y p] (eval/t-J Γ A x P d y p)
-    _ (if (function? tm) tm tm)))
-
 (set eval
      (fn [Γ tm]
        "Evaluate a term in context Γ to a semantic value"
-       (if-let [cache (get-eval-cache)]
-         (let [k [Γ tm]]
-           (if (has-key? cache k)
-             (get cache k)
-             (let [res (eval-impl Γ tm)]
-               (put cache k res)
-               res)))
-         (eval-impl Γ tm))))
+       (match tm
+         [:Type l] [T/Type l]
+         [:Pi A B] [T/Pi A B]
+         [:Sigma A B] [T/Sigma A B]
+         [:Id A x y] [T/Id A x y]
+         [:refl x] [T/Refl x]
+         [:neutral ne] [T/Neutral ne]
+         [:var x] (eval/var Γ x)
+         [:lam body] (eval/lam Γ body)
+         [:app f x] (eval/app Γ f x)
+         [:type l] (ty/type l)
+         [:t-pi A B] (eval/t-pi Γ A B)
+         [:t-sigma A B] (eval/t-sigma Γ A B)
+         [:pair a b] (eval/pair Γ a b)
+         [:fst p] (eval/fst Γ p)
+         [:snd p] (eval/snd Γ p)
+         [:t-id A x y] (eval/t-id Γ A x y)
+         [:t-refl x] (eval/t-refl Γ x)
+         [:t-J A x P d y p] (eval/t-J Γ A x P d y p)
+         _ (if (function? tm) tm tm))))
 
 (defn eval/session [f]
-  "Run a computation in a fresh evaluation session with memoization and deep stack"
+  "Run a computation in a fresh evaluation session with deep stack"
   (let [fib (fiber/new f :p)]
     (fiber/setmaxstack fib 1000000)
-    (fiber/setenv fib (table/setproto @{:eval-cache @{}} (fiber/getenv (fiber/current))))
-    (let [res (resume fib)]
-      (if (= (fiber/status fib) :error)
-        (error res)
-        res))))
+    (resume fib)))
 
 (defn nf [ty tm]
   (eval/session (fn [] (lower ty (eval (ctx/empty) tm)))))
