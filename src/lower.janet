@@ -595,6 +595,83 @@
           (find-ctor (slice entries 1))))))
   (find-ctor entries))
 
+(def M/Yes :match/yes)
+(def M/No :match/no)
+(def M/Stuck :match/stuck)
+
+(defn data/ctor-name-set [data-env]
+  (let [out @{}]
+    (each data-name (keys data-env)
+      (let [ctors (get data-env data-name)]
+        (each ctor ctors
+          (put out (ctor 1) true))))
+    out))
+
+(var selector/match-term nil)
+(var selector/match-args nil)
+
+(set selector/match-args
+     (fn [terms pats ctor-name-set subst]
+       (defn walk [i status subst]
+         (if (= i (length terms))
+           [status subst]
+           (let [[next-status next-subst]
+                 (selector/match-term (terms i) (pats i) ctor-name-set subst)]
+             (cond
+               (= next-status M/No) [M/No next-subst]
+               (= next-status M/Stuck) (walk (+ i 1) M/Stuck subst)
+               true (walk (+ i 1) status next-subst)))))
+       (walk 0 M/Yes subst)))
+
+(set selector/match-term
+     (fn [term pat ctor-name-set subst]
+       (match pat
+         [:pat/var x]
+         (if (= x "_")
+           [M/Yes subst]
+           (if-let [bound (get subst x)]
+             (if (= bound term)
+               [M/Yes subst]
+               [M/No subst])
+             (do
+               (put subst x term)
+               [M/Yes subst])))
+
+         [:pat/con ctor pats]
+         (let [[head args] (term/as-head-app term)]
+           (cond
+             (nil? head) [M/Stuck subst]
+             (not= head ctor)
+             (if (has-key? ctor-name-set head)
+               [M/No subst]
+               [M/Stuck subst])
+             (not= (length args) (length pats)) [M/No subst]
+             true (selector/match-args args pats ctor-name-set subst)))
+
+         [:pat/impossible] [M/No subst]
+
+         _ (errorf "invalid selector pattern: %v" pat))))
+
+(defn selector/match-target [target-args selector-pats ctor-name-set]
+  (if (not= (length target-args) (length selector-pats))
+    M/No
+    ((selector/match-args target-args selector-pats ctor-name-set @{}) 0)))
+
+(defn match/check-selector-availability [target target-ty ctors target-args data-env]
+  (let [ctor-name-set (data/ctor-name-set data-env)
+        status-by-ctor @{}]
+    (each ctor ctors
+      (let [status (selector/match-target target-args (ctor 3) ctor-name-set)]
+        (put status-by-ctor (ctor 1) status)
+        (when (= status M/Stuck)
+          (errorf "ambiguous selector matching for constructor %v on match target %v: %v\nTarget type: %v\nConstructor selectors: %v\nSelector matching got stuck (neither definitely matches nor definitely mismatches). Refine the target indices before matching."
+                  (ctor 1)
+                  target
+                  target-args
+                  target-ty
+                  (ctor 3)))))
+    status-by-ctor))
+
 (defn type/ctor-name-set [ty data-env]
   (let [[head _] (term/as-head-app ty)
         out @{}]
@@ -695,11 +772,12 @@
       (when (nil? target-index)
         (errorf "match target %v is not a function parameter\nMatch expressions can only pattern match on parameters of the enclosing function" target))
       (let [target-ty ((params target-index) 2)
-            [data-name _] (term/as-head-app target-ty)]
+            [data-name target-args] (term/as-head-app target-ty)]
         (when (nil? data-name)
           (errorf "match target %v must have an inductive type head, got: %v" target target-ty))
         (if-let [ctors (get data-env data-name)]
-          (let [param-names (map |($ 1) params)
+          (let [_ (match/check-selector-availability target target-ty ctors target-args data-env)
+                param-names (map |($ 1) params)
                 entries (match/cases xs)
                 wildcard-body (match/wildcard-body entries)
                 motive (term/build-lam @[[ :bind target target-ty ]] result)
