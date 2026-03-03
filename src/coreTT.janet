@@ -103,7 +103,7 @@
 (defn ctx/lookup [Γ x]
   (def v (h/get Γ (string x)))
   (if (nil? v)
-    (errorf "unbound variable: %v" x)
+    (errorf "unbound variable '%v' - not found in context.\nAvailable variables: %v" x (map keyword (h/keys Γ)))
     v))
 
 # NbE: raise / lower
@@ -335,7 +335,7 @@
     (cond
       (= tag T/Pair) (get v 1)
       (= tag T/Neutral) [T/Neutral (ne/fst (get v 1))]
-      true (errorf "fst expects pair, got: %v" v))))
+      true (errorf "fst expects a pair value (Σ type), but got: %v\nExpected: [T/Pair first second]\nActual: %v" v v))))
 
 (defn- eval/snd [Γ p]
   (let [v (eval Γ p)
@@ -343,7 +343,7 @@
     (cond
       (= tag T/Pair) (get v 2)
       (= tag T/Neutral) [T/Neutral (ne/snd (get v 1))]
-      true (errorf "snd expects pair, got: %v" v))))
+      true (errorf "snd expects a pair value (Σ type), but got: %v\nExpected: [T/Pair first second]\nActual: %v" v v))))
 
 (defn- eval/t-id [Γ A x y]
   (ty/id (eval Γ A) (eval Γ x) (eval Γ y)))
@@ -368,7 +368,7 @@
       (= tag T/Neutral)
       [T/Neutral (ne/J Av xv Pv dv yv pv)]
 
-      true (errorf "J applied to non-proof: %v" pv))))
+      true (errorf "J eliminator requires a proof of identity (Id A x y), but got: %v\nExpected either [T/Refl proof] or [T/Neutral neutral-term]" pv))))
 
 (defn- get-eval-cache []
   (if-let [env (fiber/getenv (fiber/current))]
@@ -466,7 +466,7 @@
         tag (if (tuple? UA) (get UA 0) 0)]
     (if (= tag T/Type)
       (get UA 1)
-      (errorf "expected a Type, got: %v" UA))))
+      (errorf "expected a universe Type (Type_l), but got: %v\nTip: Make sure your type expression evaluates to a Type, e.g., Type 0, Type 1, etc." UA))))
 
 (set infer
      (fn [Γ t]
@@ -475,11 +475,11 @@
          [:var x]
          (if (or (string? x) (symbol? x))
            (ctx/lookup Γ x)
-           (errorf "var must be a string or symbol, got: %v" x))
+            (errorf "variable must be a string or symbol, but got: %v\nVariable names should be like 'x', 'y', 'myVar', etc." x))
 
           [:type l] (ty/type (lvl/lvl/succ l))
 
-         [:lam _] (errorf "cannot infer type of lambda %v; requires annotation" t)
+          [:lam _] (errorf "cannot infer type of lambda expression %v\nLambda types require annotation because they have principal types.\nSuggestion: Annotate with a Pi type: (λx. body) : (Πx:A. B)" t)
 
          [:app f x]
          (let [fA (infer Γ f)
@@ -488,7 +488,7 @@
              (let [[_ A B] fA]
                (do (check Γ x A)
                  (B (eval Γ x))))
-             (errorf "application of non-Pi: %v" fA)))
+             (errorf "cannot apply function - expected a Pi type (Πx:A. B), but got: %v\nTip: Make sure the function has a proper Pi type annotation or can be inferred as one." fA)))
 
           [:t-pi A B]
           (let [lvlA (check-univ Γ A)
@@ -511,7 +511,7 @@
                tag (if (tuple? pA) (get pA 0) 0)]
            (if (= tag T/Sigma)
              (get pA 1) # A from [T/Sigma A B]
-             (errorf "fst expects Sigma type, got: %v" pA)))
+             (errorf "fst projection requires a Σ (Sigma) type product, but got: %v\nExpected format: Σx:A. B or a term that evaluates to a Sigma type" pA)))
 
          [:snd p]
          (let [pA (infer Γ p)
@@ -519,9 +519,9 @@
            (if (= tag T/Sigma)
              (let [[_ A B] pA]
                (B (eval Γ [:fst p])))
-             (errorf "snd expects Sigma type, got: %v" pA)))
+              (errorf "snd projection requires a Σ (Sigma) type product, but got: %v\nExpected format: Σx:A. B or a term that evaluates to a Sigma type" pA)))
 
-         [:pair _ _] (errorf "cannot infer type of pair %v; expected Sigma annotation" t)
+          [:pair _ _] (errorf "cannot infer type of pair %v\nPairs require explicit Sigma type annotation because they lack principal types.\nSuggestion: (pair a b) : (Σx:A. B)" t)
 
          # Identity type: Id A x y : Type_l where A : Type_l
          [:t-id A x y]
@@ -532,7 +532,7 @@
              (do (check Γ x A-sem)
                (check Γ y A-sem)
                (ty/type (get A-ty 1)))
-             (errorf "Id type expects A to be a Type, got: %v" A-ty)))
+             (errorf "Identity type (Id A x y) expects 'A' to be a universe Type, but got: %v\nThe first argument must evaluate to a Type, e.g., Type 0, Type 1, etc." A-ty)))
 
          # Reflexivity: refl x : Id A x x
          [:t-refl x]
@@ -570,7 +570,7 @@
                (let [pv (eval Γ p)]
                  (eval Γ (P yv pv))))))
 
-         _ (errorf "infer: unknown term %v" t))))
+         _ (errorf "infer: unknown term %v\nThis term is not recognized by the type checker.\nSupported forms: var, type, lambda, application, pi, sigma, pair, fst, snd, id, refl, J" t))))
 
 (set check
      (fn [Γ t A]
@@ -585,7 +585,7 @@
                (check (ctx/add Γ fresh dom)
                       (body [:var fresh])
                       (cod arg-sem)))
-             (errorf "lambda expected Pi type, got: %v" A)))
+             (errorf "lambda checking failed - expected a Pi type (Πx:A. B), but got: %v\nLambda expressions can only be checked against function types." A)))
 
          [:pair l r]
          (let [tag (if (tuple? A) (get A 0) 0)]
@@ -593,13 +593,13 @@
              (let [[_ A1 B1] A]
                (do (check Γ l A1)
                  (check Γ r (B1 (eval Γ l)))))
-             (errorf "pair expects Sigma type, got: %v" A)))
+              (errorf "pair checking failed - expected a Sigma type (Σx:A. B), but got: %v\nPair expressions can only be checked against Sigma product types." A)))
 
           _
           (let [A1 (infer Γ t)]
             (if (subtype A1 A)
               true
-              (errorf "type mismatch: expected %v got %v" A A1))))))
+              (errorf "type mismatch between expected type and inferred type\nExpected: %v\nInferred: %v\nSuggestion: Check if the terms are actually equal or if there's a type annotation issue." A A1))))))
 
 # ---------------------
 # Top-level helpers
