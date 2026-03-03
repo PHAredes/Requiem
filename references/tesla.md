@@ -1,0 +1,685 @@
+A SIMPLER ENCODING OF INDEXED TYPES
+
+arXiv:2103.15408v4 \[cs.PL\] 5 Jul 2021
+
+TESLA ZHANG July 7, 2021
+
+A BSTRACT. In functional programming languages, generalized algebraic
+data types (GADTs) are very useful as the unnecessary pattern matching
+over them can be ruled out by the failure of unification of type
+arguments. In dependent type systems, this is usually called indexed
+types and it's particularly useful as the identity type is a special
+case of it. However, pattern matching over indexed types is very
+complicated as it requires term unification in general. We study a
+simplified version of indexed types (called simpler indexed types) where
+we explicitly specify the selection process of constructors, and we
+discuss its expressiveness, limitations, and properties.
+
+1.  I NTRODUCTION Correct-by-construction data structures are pleasant
+    to work with, such as welltyped and well-scoped syntax trees \[1\].
+    A key aspect of correct-by-construction data structures is that they
+    carry value-level information in their types. We start from two
+    simple instances of such data structures: the finite set type and
+    the sized vector type, which are base on the general notion of
+    indexed types1: data Fin : N → Type0 where fzero : ∀ {n} → Fin
+    (suc n) fsuc : ∀ {n} → Fin n → Fin (suc n) data Vect (A : Type ℓ) :
+    N → Type ℓ where \[\] : Vect A 0 *::* : ∀ {n} → A → Vect A n → Vect
+    A (suc n) The indices of types are the parameters at the
+    right-hand-side of the colons in the signatures of inductive types,
+    which can be specialized by constructors. The two constructors of
+    Fin specify the index as suc n, so when pattern matching over Fin
+    zero requires no clauses. The algorithm for selecting constructors
+    is a process of term unification, extracting a most-general-unifier
+    and apply that to the rest of the telescope. For each constructor,
+    we unify the type arguments with the indices it specifies, and there
+    are three potential results \[4, §2.1\]. • Success positively -- the
+    constructor matches. • Success negatively -- the constructor does
+    not matches. • Failure -- cannot decide, pattern matching cannot be
+    performed. 1 This piece of code is written in Agda \[2\]. The types
+    and functions are in blue while constructors are in green. There are
+    other pieces of code written in Aya \[3\], where types are in green
+    and constructors are in purple. In §2, we use the latter coloring.
+
+1
+
+2
+
+TESLA ZHANG
+
+Users will have to understand the error messages with unification
+failures, which is an accidental complexity brought into dependent type
+systems. The implementation of the unification algorithm also affects
+the selection of constructors. We propose an alternative syntax for
+indexed types. First, for inductive types without indices, we use a
+Haskell-style syntax to describe its arguments, and we allow bindings in
+the parameters since we are working with dependent types: data N : U \|
+zero \| suc ( x : N )
+
+data List ( A : U ) : U \| nil \| cons ( x : A) ( xs : List A)
+
+Then, we allow the constructors to perform a pattern matching over the
+type of the parameters. For instance, we define the sized vector type
+using the following syntax: data Vec ( A : U ) (n : N ) : U \| A, zero ⇒
+vnil \| A, suc n ⇒ vcons ( x : A) ( xs : Vec A n) This pattern matching
+is not a traditional pattern matching, say, it does not need to be
+covering (although in the Vec example it is) and it can contain
+seemingly unreachable patterns (like duplicated patterns). Instead, they
+represent the selection process of constructors directly. The type
+checking of pattern matching consists of two steps: the well-typedness
+of patterns and the exhaustiveness of the patterns. We exemplify the
+type checking of our encoding of indexed types by describing the pattern
+matching over Vec N n. First, it tries to match the terms N, n with the
+patterns A, zero and A, suc n. The pattern matching has three potential
+results, similar to the term unification problem: • Success positively
+-- the patterns are matched, this constructor will be available (needs
+to be matched). • Success negatively -- the patterns do not match, this
+constructor is not available (does not need to be matched). • Failure --
+the pattern matching gets stuck, pattern matching cannot be performed.
+However, pattern matching is a basic construct in dependent type
+systems, and it is decidable and terminating -- unlike the general term
+unification problem, where we normally give up higher-order cases to
+avoid undecidability. It is also more friendly to general users because
+they are required to understand one concept less. Another example is the
+finite set type: data Fin (n : N ) : U \| suc n ⇒ fzero \| suc n ⇒ fsuc
+( x : Fin n) 1.1. Problematic indexed types. We propose the new syntax
+because the term unification problem generated by general indexed types
+could be very complicated. Here are some examples of indexed types in
+Agda that generate such unification problems:
+
+A SIMPLER ENCODING OF INDEXED TYPES
+
+3
+
+data Univ : Type0 → Type1 where univ : ∀ u → Univ (u → N) data Higher :
+(N → N) → Type0 where higher-suc : Higher suc higher-pred : Higher pred
+higher-misc : Higher (λ x → 2 + x - 3) We cannot perform pattern
+matching on the type Univ Bool since Agda cannot unify Bool and N (this
+unification problem is related to the injectivity of type constructors,
+see the discussion in \[5, §1\]). Similarly the unification problem may
+become higher order (like in Higher -- neither Higher suc, Higher pred,
+Higher (λ x → 2 + x - 3) could be pattern matched against!), generating
+more confusing instances. These examples are impossible to construct
+with simpler indexed types. With the proposed syntax, we could avoid not
+only implementing such a complicated unification algorithm, but also
+explaining these unification failures in error messages. 1.2.
+Contributions.
+
+• We present the syntax (§2.1) and the type checking algorithm (§2.3)
+for simpler indexed types in §2. • We discuss their limitations (§3.1),
+provide a translation of simpler indexed types to general indexed types
+(§3.2), and discuss the compilation of simpler indexed types (§3.3) in
+§3. • We explore potential extension to simpler indexed types (§4.1) and
+compare it with similar work (§4.2) in §4. 2. F ORMALIZATION OF SIMPLER
+INDEXED TYPES In this section, we describe the core language syntax and
+the type checking of simpler indexed types. The coverage checking can be
+adapted from any other dependent type systems with indexed types by
+replacing the term unification with pattern matching, so we assume the
+existence of a suitable coverage check. 2.1. Core language syntax. The
+syntax of terms is presented in Fig. 2.1. It has spine-normal
+fully-applied applications on "definitions" (including types D,
+constructors c, and functions definitions f). Normal constructs such as
+λ-abstraction and the Π-type are also available. ⇒ is used in
+λ-abstractions instead of dots for consistency with function definitions
+and pattern matching clauses. We use u to denote a list of expressions,
+and ∅ when the list is empty. Case-split expressions can be encoded as
+functions and can be easily added to our type theory, but they are
+unrelated to simpler indexed types. Therefore, we omit them. We will
+have two syntactic sugars for the Π-type: A → B for ( x : A) → B, and ∆
+→ B for ( x1 : A1 ) → ( x2 : A2 ) → · · · → ( xn : An ) → B where ∆ = (
+x i : Ai )∀ i∈\[1,n\]. The latter is only used in §3.2. The syntax for
+definitions, contexts and signatures is defined in Fig. 2.2. A signature
+is a list of declarations and a context is a list of bindings.
+Constructors are with or without a list of patterns. The variables in
+the same pattern are assumed to be distinct.
+
+4
+
+TESLA ZHANG
+
+x, y ::= A, B, u, v ::= \| \| \| \| \|
+
+fu xu Du cu ( x : A) → B λx ⇒ u
+
+variable names full application to functions application to references
+fully applied inductive type fully applied constructor Π-type lambda
+abstraction
+
+F IGURE 2.1. Syntax of terms Γ, ∆, Θ ::= decl ::= \| cons ::= \| cls ::=
+p, q ::= \| \| Σ ::=
+
+xi : Ai data D ∆ cons func f ∆ : A cls \| p⇒c∆ \|c∆ \|p⇒u cp x
+impossible decl
+
+context simpler indexed type function definition pattern matching
+constructor constructor pattern matching clause constructor patterns
+catch-all patterns absurd patterns signature
+
+F IGURE 2.2. Syntax of signature and declarations We will borrow some
+notational convention from \[6, §3.2\]2: u\[v/x \] for substituting
+occurrences of x with v in term u. We use u\[v/x \] to denote a list of
+substitutions applied sequentially to the term u. Substitution objects
+are denoted as σ. We will assume the substitution operation defined on
+terms, patterns, and substitutions. In the typing rules in §2.3, we will
+omit the vertical bars in cons and cls which are intended to separate
+the clauses and constructors. 2.2. Operations on terms. We also need
+some operations on terms and patterns. All of them are defined by
+induction on the syntax. We define vars(∆) to compute the list of
+variables in ∆: vars(∅) := ∅ vars( x : A, ∆) := x, vars(∆) We define
+vars( p) to compute the list of bindings in pattern p and vars( p) to
+gather all the bindings in the patterns p. This operation requires the
+well-typedness of the patterns because we need the types of the
+bindings. We store these types into the patterns to allow accessing them
+in this operation: 2Other styles of substitution include u \[ x 7 → v\],
+u \[ x/v\], etc. (there is a relevant online discussion \[7\])
+
+A SIMPLER ENCODING OF INDEXED TYPES
+
+5
+
+vars( x : A) := x : A vars(impossible) := ∅ vars(c p) := vars( p)
+vars(∅) := ∅ vars( x : A, p) := x : A, vars( p) We define term( p) to
+compute a term that matches exactly the pattern p and term( p) to
+compute a list of terms matching exactly the patterns p. This requires p
+to contain no impossible sub-patterns: term( x : A) := x term(c p) := c
+term( p) term(∅) := ∅ term(q, p) := term(q), term( p) We define
+matches(u, p) 7→ σ to perform pattern matching, similar to the M ATCH
+and M ATCHES operations in \[8\]. It computes a substitution when the
+pattern matching success positively and produces ⊥ when the pattern
+matching success negatively. We will also define a version of this
+operation to match a list of terms with a list of patterns matches(u, p)
+7→ σ, similar to vars( p) and term( p).
+
+matches(u, x ) 7→ \[u/x \]
+
+matches(∅, ∅) 7→ \[\]
+
+matches(u, p) 7→ ⊥ matches(c u, c p) 7→ ⊥ matches(u, p) 7→ ⊥ matches((v,
+u), (q, p)) 7→ ⊥
+
+matches(u, p) 7→ σ matches(c u, c p) 7→ σ
+
+c1 6 = c2 matches(c1 u, c2 p) 7→ ⊥ matches(v, q) 7→ ⊥ matches((v, u),
+(q, p)) 7→ ⊥
+
+matches(u, p) 7→ σ matches(v, q) 7→ σ ′ matches((v, u), (q, p)) 7→ σ ⊎ σ
+′ F IGURE 2.3. Pattern matching operation Lemma 2.1. For all pattern p,
+matches(term( p), p) 7→ σ and for all list of patterns p, matches(term(
+p), p) 7→ σ. In both formulae, the substitution σ is an identity
+substitution. Proof. By induction on p.
+
+
+
+2.3. Typing rules for terms. Well-typed terms are formed under the
+following type checking judgments:
+
+• Σ; Γ ⊢ ∆ ∆ is a well-formed context under Σ; Γ. • Σ; Γ ⊢ u : A term u
+has type A under Σ; Γ.
+
+6
+
+TESLA ZHANG
+
+• Σ; Γ ⊢ u : ∆ terms u instantiate context ∆ under Σ; Γ. • Σ; Γ ⊢ u = v
+: A terms u and v are equal inhabitants of type A under Σ; Γ. Typing
+rules for types and terms are defined in Fig. 2.4. They are grouped by
+the relevant type formation. For simplicity, we will omit several
+things:
+
+• We assume the conversion check between terms -- the problem is the
+same as other dependent type systems, and the strategies used by other
+systems will apply to ours as well. • We also have the type-in-type rule
+to simplify the universe types, and in practical implementations, we
+could integrate polymorphic universe levels to make the system
+consistent. • In the implementation of Aya and Arend, we also have the
+sigma type and records, but we omit them here for simplicity. Rules
+related to the Π-type. Σ; Γ ⊢ A : U Σ; Γ, x : A ⊢ B : U Σ; Γ ⊢ ( x : A)
+→ B : U Σ; Γ, x : A ⊢ b : B\[ x/y\] Σ; Γ ⊢ λx ⇒ b : (y : A) → B
+
+func f ∆ : A cls ∈ Σ Σ; Γ ⊢ v : ∆ Σ; Γ ⊢ f v : A\[v/vars(∆)\] Σ; Γ ⊢ u :
+( x : A) → B Σ; Γ ⊢ v : A Σ; Γ ⊢ u v : B\[v/x \]
+
+Rules related to indexed types. data D ∆ cons ∈ Σ Σ; Γ ⊢ u : ∆ Σ; Γ ⊢ D
+u : U data D ∆ cons ∈ Σ Σ; Γ ⊢ u : ∆ c ∆c ∈ cons Σ; Γ ⊢ v : ∆c
+\[u/vars(∆)\] C ON C ALL Σ; Γ ⊢ c v : D u data D ∆ cons ∈ Σ Σ; Γ ⊢ u : ∆
+p ⇒ c ∆c ∈ cons matches(u, p) 7→ σ Σ; Γ ⊢ v : ∆c σ \[u/vars(∆)\] I X C
+ALL Σ; Γ ⊢ c v : D u Rule for convertible types and type-in-type. Σ; Γ ⊢
+a : A Σ; Γ ⊢ A = B : U Σ; Γ ⊢ a : B
+
+Σ; Γ ⊢ U : U
+
+F IGURE 2.4. Typing rules for types and terms In the I X C ALL rule, we
+perform a pattern matching between the type arguments and the patterns
+in the constructor to make sure the availability of the selected
+constructor, and apply the resulting substitution to the parameters of
+the constructor as they can access the patterns according to the rules
+in Fig. 2.5. In contrast, the C ON C ALL rule does not perform pattern
+matching and the constructor is directly
+
+A SIMPLER ENCODING OF INDEXED TYPES
+
+7
+
+available. The differences between I X C ALL and C ON C ALL include a
+successful matches(u, p) operation and an extra substitution applied on
+∆c . 2.4. Signature well-formedness. A well-formed signature consists of
+a list of welltyped declarations. We can think of the whole type
+checking algorithm as a signature formation process. To check function
+definitions and pattern matching constructors, we first need to type
+check the patterns and elaborate the pattern matching clauses. The rules
+of pattern type checking, similar to the operations in §2.2, have two
+versions:
+
+• Σ; Γ ⊢ p : A 7→ Θ type-checking a pattern p against a type A. • Σ; Γ ⊢
+p : ∆ 7→ Θ type-checking patterns p against a context ∆. These rules are
+defined in Fig. 2.5. They produce a context Θ containing all of the
+bindings in the give pattern(s). Rules for one pattern. data D ∆ cons ∈
+Σ c ∆c ∈ cons Σ; Γ ⊢ p : ∆c 7→ Θ Σ; Γ ⊢ c p : D u 7→ Θ
+
+Σ; Γ ⊢ x : A 7→ x : A
+
+data D ∆ cons ∈ Σ matches(u, q) 7→ σ Σ; Γ ⊢ p : ∆c σ 7→ Θ Σ; Γ ⊢ c p : D
+u 7→ Θ
+
+q ⇒ c ∆c ∈ cons
+
+data D ∆ cons ∈ Σ
+
+c ∆c ∈ / cons
+
+(matches(u, p) 7→ ⊥)∀ p⇒c ∆c ∈cons Σ; Γ ⊢ impossible : D u 7→ Θ
+
+Rules for a list of patterns. Σ; Γ ⊢ q : A 7→ Θ Σ; Γ ⊢ p : ∆\[term(q)/x
+\] 7→ Θ′ Σ; Γ ⊢ q, p : ( x : A, ∆) 7→ Θ ⊎ Θ′
+
+Σ; Γ ⊢ ∅ : ∅ 7→ ∅
+
+F IGURE 2.5. Type checking of patterns Lemma 2.2. Σ; Γ ⊢ p : ∆ 7→ Θ =⇒
+Σ; Γ ⊢ term( p) : ∆ and Σ; Γ ⊢ p : A 7→ Θ =⇒ Σ; Γ ⊢ term( p) : A. Proof.
+By induction on p.
+
+
+
+Then, we define the rules for type checking pattern matching structures
+as in Fig. 2.6 using the operation defined in Fig. 2.5. Σ; Γ ⊢ p : ∆ 7→
+Θ Σ; Γ, ∆, Θ ⊢ u : A\[term( p)/vars(∆)\] Σ; Γ ⊢ clause( p : ∆, u : A)
+
+Σ; Γ, ∆, Θ ⊢ ∆c Σ; Γ ⊢ p : ∆ 7→ Θ Σ; Γ ⊢ clause( p : ∆, c ∆c )
+
+F IGURE 2.6. Pattern matching structures
+
+8
+
+TESLA ZHANG
+
+Σ; Γ ⊢ Σ; Γ ⊢ ∆ (Σ; Γ, ∆ ⊢ ∆c )∀(c ∆c )∈cons  Σ; Γ, ∆ ⊢ ∆c clause( p :
+∆, c ∆c ) ∀( p⇒c ∆ )∈cons c
+
+Σ, data D ∆ cons; Γ ⊢ Σ; Γ ⊢
+
+Σ; Γ ⊢ ∆
+
+(clause( p : ∆, u : A))∀ p⇒u∈cls
+
+Σ, func f ∆ : A cls; Γ ⊢ F IGURE 2.7. Well-formedness of signature Σ
+With them, we could define the type checking of function definitions and
+simpler indexed types, and form signature by the rules Σ; Γ ⊢ in Fig.
+2.7. The declarations are checked one after another so latter functions
+can depend on former ones. By that, we will lose induction-recursion
+\[9\] and induction-induction \[10\], and we consider it a potential
+future work. 3. M ETATHEORY OF SIMPLER INDEXED TYPES In this section, we
+discuss the limitations of simpler indexed types by examples and provide
+a complete and sound translation from simpler indexed types to general
+indexed types. 3.1. Limitations and workarounds. Many useful indexed
+types cannot be written as simpler indexed types. For instance, as a
+common illustration of the convenience brought by indexed types, the
+normalizer and the syntax tree for an expression language with natural
+numbers and booleans can be defined as a general indexed type in Agda
+\[2\]. The syntax looks like this. We first define the type Term as a
+type indexed by another type, which is the type of the evaluation result
+of each syntax variant. In each constructor, we specialize this type.
+data Term : Type0 → Type0 where nat : N → Term N succ : Term N → Term N
+bool : Bool → Term Bool inv : Term Bool → Term Bool case : Term Bool →
+(x y : Term A) → Term A Then, we define its normalize function, which
+takes an instance of Term A and return an instance of type A. The type
+guarantees that there will never be ill-typed terms like succ (bool x).
+normalize : Term A → A normalize (nat x) =x normalize (bool x) =x
+normalize (succ x) = suc (normalize x) normalize (inv t) = not
+(normalize t) normalize (case b x y) = if (normalize b) then (normalize
+x) else (normalize y)
+
+A SIMPLER ENCODING OF INDEXED TYPES
+
+9
+
+We cannot encode Term as a simpler indexed type because we cannot
+pattern match on types, so the direct translation will not work -- We
+will need an auxiliary type to help us encoding them: data TermTy : U \|
+natT \| boolT func termTy ( x : TermTy) : U \| natT ⇒ N \| boolT ⇒ Bool
+Then, we define the type for terms and the normalize function: data Term
+(n : TermTy) : U \| natT ⇒ nat N \| natT ⇒ succ (Term natT) \| boolT ⇒
+bool boolT \| boolT ⇒ inv (Term boolT) \| A ⇒ case (Term boolT) (Term A)
+(Term A) func normalize (t : TermTy) ( x : Term t) : termTy t \| natT,
+nat n ⇒ n \| natT, succ n ⇒ suc (normalize natT n) \| boolT, bool b ⇒ b
+\| boolT, inv b ⇒ not (normalize boolT b) \| t, case b x y ⇒ ifElse
+(normalize boolT b) (normalize t x ) (normalize t y) In the general
+case, only when the indices are in canonical constructor form (say,
+generated by references to parameters of the constructor and
+applications to constructors) can we translate them into simpler index
+types. Even though we could use auxiliary types to help us encoding
+them, there is still one case where this encoding will fail, where the
+indices contain references to the parameters of the indexed type. The
+simplest case is the identity type: data Id (A : Type ℓ) (x : A) : A →
+Type ℓ where idp : Id A x x The index being x, a reference to the
+parameter of Id, is the essential reason why a general term unification
+needs to be performed during the pattern matching over idp. Pattern
+matching is a mechanism to match terms by patterns, not by terms.
+Simpler indexed type essentially simplifies the problem of constructor
+selection just by turning the term-match-term problem to a
+term-match-pattern problem, which rules out numerous complication but
+also loses the benefit of general indexed types. A potential way to
+bring general indexed types back without introducing them directly is
+discussed as future work in §4.1, requiring the presence of a built-in
+identity type. 3.2. Translation to indexed types. We could translate
+simpler indexed types back to general indexed types. To describe the
+translation, we define the syntax of general indexed types, which is the
+output of the translation, in Fig. 3.1. We do not have type parameters
+as they are just special cases of indices.
+
+10
+
+TESLA ZHANG
+
+decl ′ ::= cons′ ::=
+
+data D ∆ cons′ \|c:A
+
+indexed type constructor
+
+F IGURE 3.1. Syntax of general indexed types Now we can start the
+translation. First, we unify pattern matching constructors with simple
+constructors. For constructor c ∆c in simpler indexed type D ∆, we
+translate it into a pattern matching constructor vars(∆) ⇒ c ∆c . After
+that, we could perform the translation of constructors. In other words,
+we need to construct the type ("A" in Fig. 3.1) of the translated
+constructor. Definition 3.1. For pattern matching constructor p ⇒ c ∆c ,
+we construct the type of the translated constructor as vars( p) ∆c → D
+term( p).
+
+
+
+This type is a pi type consisting of the following major components: (1)
+vars( p): the bindings in the patterns. We turn these bindings into
+parameters of the translated type. (2) ∆c : the constructor parameters.
+They are typed under the bindings in vars( p), so we append the original
+parameters to the tail of these required bindings. (3) D term( p): the
+return type. We specialize the indices of D with the terms correspond to
+p. These terms are typed under vars( p), which is available in the
+domain of this pi type. Theorem 3.2 (Completeness). Every simpler
+indexed type can be translated into general indexed types. Proof. This
+translation is defined for all simpler indexed types, so we get the
+completeness theorem for free.  Theorem 3.3 (Well-typedness). The type
+of the translated constructor is well-scoped and well-typed. Proof.
+First, it indeed returns a specialization of the type D. According to
+Fig. 2.6, types in ∆c are well-typed with references to the bindings in
+p, but not in ∆. These bindings are available in vars( p). According to
+Fig. 2.4, the well-typedness of D term( p) requires term( p) : ∆, and 
+we know it is true by lemma 2.2. Theorem 3.4 (Soundness). The translated
+constructor needs to be matched if and only if the original constructor
+needs to be matched. The translated constructor does not need to be
+matched if and only if the original constructor does not need to be
+matched. The translated constructor cannot be matched if and only if the
+original constructor cannot be matched. Proof. This theorem actually
+requires a bit more information to be well-defined -- we have not given
+the general indexed types typing rules and semantics. However, since the
+result of term( p) is only generated by applications to constructors and
+references (by definition), we only need to deal with the unification
+
+A SIMPLER ENCODING OF INDEXED TYPES
+
+11
+
+of these terms, which are quite simple. They should be structurally
+equivalent to the rules in Fig. 2.5. Restricting the unification problem
+to this smaller subset makes the soundness  theorem provable by
+induction on the patterns p. Remark 3.5. This translation is also useful
+in the type checking of the constructors of simpler indexed types. When
+we have a reference to such constructor without any argument supplied,
+we could synthesize a type for this reference -- and we use the type in
+definition 3.1.
+
+
+
+3.3. Compilation and erasure. The compilation of simpler indexed types
+has an advantage over normal indexed types. In \[11\], they used
+detagging and forcing optimizations to erase the indices during
+compilation. These methods are directly expressible in our syntax as the
+indices are not even quantified in the constructors (see the examples in
+§1, where the implicit argument n in the Agda version of fzero, fsuc are
+not present in the corresponding definition as simpler indexed types).
+In other words, simpler indexed types enjoy the benefit of index erasure
+without any nontrivial compilation technique. One downside is that there
+will not be inaccessible patterns \[11\], so there will be redundant
+pattern matching happening at runtime. Consider the example in §3.1, the
+normalize function using simpler indexed type has two pattern matchings,
+while the normalize function using general indexed types has only one.
+In conclusion, simpler indexed types are more memory efficient than
+general indexed types without optimizations, while they require
+redundant pattern matchings. We think of the latter as a potential
+future work. 4. C ONCLUSION We introduced a simpler encoding of indexed
+types in dependent type systems. It reuses the pattern matching for
+constructor selection to avoid exposing the index unification problem to
+the users. A number of existing indexed types such as Fin and Vect can
+be encoded in this simpler way, but not all (exceptions include the
+identity type in Agda \[2\] and the examples in §1.1). 4.1. Future work.
+We could translate simpler indexed types into an even simpler type
+theory with only products and coproducts, just like in \[12\]. This
+translation requires an algorithm to classify the pattern matching
+clauses with overlapping parts. This is done in \[13\], but in Aya we
+have a better implementation. We decide to describe such translation
+after the overlapping pattern classification algorithm is formalized. We
+could also have a built-in identity type in the type theory and encode
+the indexed types with the identity type. The Image type in \[12\] is a
+great example: data Image (A B : Type ℓ) (f : A → B) : B → Type ℓ where
+image : ∀ x → Image A B f (f x) It can be encoded as an inductive type
+without indices: data Image ( A B : U ) ( f : A → B) (b : B) : U \|
+image ( x : A) ( p : f x = b) We might be able to define a translation
+from general indexed types into simpler indexed types with a built-in
+identity type, and during pattern matching over
+
+12
+
+TESLA ZHANG
+
+the encoded types, we perform a rewriting over the identity proofs that
+we used to encode the indices. By that, we will have a different
+treatment of the index unification problem, and we could study how it
+compares to the general indexed types. This idea (encoding the
+unification of type indices as a rewriting performed during pattern
+matching) is similar to the transpX operation discussed in \[14, §3.2.4,
+§4\] and the "index-fixing" fcoe operation discussed in \[15, §4.2\],
+but we are working in a general type theory with any definition of the
+identity type as long as they support the J operation, including the
+path type in homotopy type theory \[16\], the path type in cubical type
+theories \[17, 15, 18\], the identity type in intuitionistic type theory
+\[19\] (either homogeneous or heterogeneous), and others. The cubical
+path type is a preferred choice as it does not depend on any fancy
+unification mechanism. This means we can develop a type theory
+expressive enough to discuss indexed types without dependent pattern
+matching. Apart from that, we could seek integration with
+induction-recursion \[9\] and induction-induction \[10\] as mentioned in
+§2.4. The compilation technique could be investigated to address the
+limitation discussed in §3.3. 4.2. Related work. Type families in
+dependent types can be regarded as an encoding of GADTs \[20\]. This
+idea was then put into a simpler type system (H-M) in \[21\], and was
+developed further as first-class phantom types in \[22\] and guarded
+recursive type constructors in \[23\]. \[24\] used Leibniz-style
+encoding of equality to reason over the equality among types for
+building well-typed and well-scoped syntax trees. GADTs are integrated
+into GHC Haskell in \[25\]. Indexed types \[26\] are the generalization
+of inductive types with type-equality, where values are also allowed to
+appear as parameters of inductive types. Agda \[2\] and Idris \[27\]
+have a more ergonomic design of indexed types where the equality
+relations are made implicit. In \[12\], the type-family encoding of the
+sized vector type is discussed and is directly related to simpler
+indexed types. However, there are several key advantages of simpler
+indexed types over the record encoding given in \[12\]:
+
+• Simpler indexed types have names for the types and constructors. The
+record encoding anonymizes the type and the constructors, so the error
+messages are harder to understand. • The pattern matching in simpler
+indexed type does not need to be covering. For instance, the simpler
+indexed type Fin zero is implicitly an empty type, while encoding it as
+a function requires writing an explicit pattern matching clause zero =
+⊥. • Similar to coverage, pattern matching in simpler indexed types does
+not need to be structurally recursive. The record encoding uses
+functions so we need to respect the rules for functions, including
+persuading the termination checker. Another work related to the encoding
+of indexed types is \[28, §5\], where they propose an encoding similar
+to the Image example proposed in §4.1 and discuss a potential
+optimization to indexed types similar to \[12\]. The advantages of
+simpler indexed types over \[12\] still applies to the encoding in
+\[28\]. A notable application of indexed types based on \[28\] is
+ornaments \[29, 30\].
+
+REFERENCES
+
+13
+
+The proposed feature has been implemented in two systems individually: •
+The Arend \[31\] proof assistant, an implementation of homotopy type
+theory with a cubical-flavored interval type. • The Aya \[3\] proof
+assistant, an experimental implementation of a type theory similar to
+Arend's, but with other features such as overlapping and
+order-independent patterns \[13\]. All of the operations (except vars(∆)
+-- it is too simple to be a class) in §2.2 have a corresponding class in
+the package org.aya.core.pat in the source code of Aya: vars( p)
+corresponds to PatTyper, term( p) corresponds to PatToTerm, matches(u,
+p) corresponds to PatMatcher. Apart from that, the type checking of
+terms in Fig. 2.4 corresponds to ExprTycker, the type checking of
+patterns in Fig. 2.5 corresponds to PatTycker, and the type checking of
+declarations in Fig. 2.2 corresponds to StmtTycker. The source code of
+Aya could be retrieved from the link in the corresponding reference
+entry. The complete normalizer example in §3.1 is available at
+https://github.com/ayaprover/aya-dev/blob/main/base/src/test/resources/success/type-safe-norm.
+aya as a test-case of the Aya type checker. 4.3. Acknowledgments. We are
+grateful to Yu Zhang and Yiming Zhu for their suggestions on the draft
+version of this paper and Guillaume Allais for their review on an
+earlier version of this paper. We would also like to thank the anonymous
+reviewers from the ICFP TyDe workshop for their valuable suggestions on
+improving the paper. R EFERENCES \[1\] Guillaume Allais et
+al. "Type-and-Scope Safe Programs and Their Proofs". In: Proceedings of
+the 6th ACM SIGPLAN Conference on Certified Programs and Proofs. CPP
+2017. Paris, France: Association for Computing Machinery, 2017,
+pp. 195--207. ISBN: 9781450347051. DOI: 10.1145/3018610.3018613. \[2\]
+Ulf Norell. "Dependently Typed Programming in Agda". In: Proceedings of
+the 4th International Workshop on Types in Language Design and
+Implementation. TLDI '09. Savannah, GA, USA: ACM, 2009, pp. 1--2. ISBN:
+978-1-60558-420-1. DOI: 10.1145/1481861.1481862. \[3\] Aya developers.
+The Aya Proof Assistant. https://github.com/aya-prover/ aya-dev. 2021.
+\[4\] Jesper Cockx, Dominique Devriese, and Frank Piessens. "Pattern
+Matching without K". In: Proceedings of the 19th ACM SIGPLAN
+International Conference on Functional Programming. ICFP '14.
+Gothenburg, Sweden: Association for Computing Machinery, 2014,
+pp. 257--268. ISBN: 9781450328739. DOI: 10.1145/2628136.2628139. \[5\]
+Jesper Cockx, Dominique Devriese, and Frank Piessens. "Unifiers as
+Equivalences: Proof-Relevant Unification of Dependently Typed Data". In:
+Proceedings of the 21st ACM SIGPLAN International Conference on
+Functional Programming. ICFP 2016. Nara, Japan: Association for
+Computing Machinery, 2016, pp. 270--283. ISBN: 9781450342193. DOI:
+10.1145/2951913.2951917. \[6\] Jesper Cockx and Andreas Abel.
+"Elaborating Dependent (Co)Pattern Matching". In: Proc. ACM Program.
+Lang. 2.ICFP (July 2018). DOI: 10.1145/3236770.
+
+14
+
+REFERENCES
+
+\[7\] Kaveh (https://mathoverflow.net/users/7507/kaveh). History of the
+notation for substitution. MathOverflow. 2018. URL:
+https://mathoverflow.net/ q/243084. \[8\] Healfdene Goguen, Conor
+McBride, and James McKinna. "Eliminating Dependent Pattern Matching".
+In: Algebra, Meaning, and Computation: Essays dedicated to Joseph A.
+Goguen on the Occasion of His 65th Birthday. Ed. by Kokichi Futatsugi,
+Jean-Pierre Jouannaud, and José Meseguer. Berlin, Heidelberg: Springer
+Berlin Heidelberg, 2006, pp. 521--540. ISBN: 978-3-540-35464-2. DOI:
+10.1007/11780274_27. \[9\] Peter Dybjer. "A General Formulation of
+Simultaneous Inductive-Recursive Definitions in Type Theory". In:
+Journal of Symbolic Logic 65 (June 2003). DOI: 10.2307/2586554. \[10\]
+Fredrik Nordvall Forsberg and Anton Setzer. "Inductive-inductive
+definitions". In: International Workshop on Computer Science Logic.
+Springer. 2010, pp. 454--468. \[11\] Edwin Brady, Conor McBride, and
+James McKinna. "Inductive Families Need Not Store Their Indices". In:
+Types for Proofs and Programs. Ed. by Stefano Berardi, Mario Coppo, and
+Ferruccio Damiani. Berlin, Heidelberg: Springer Berlin Heidelberg, 2004,
+pp. 115--129. ISBN: 978-3-540-24849-1. \[12\] Jesper Cockx, Gaëtan
+Gilbert, and Nicolas Tabareau. "Vectors are records, too". In: TYPES
+2018 (2018). \[13\] Jesper Cockx, Frank Piessens, and Dominique
+Devriese. "Overlapping and Order-Independent Patterns". In: Programming
+Languages and Systems. Ed. by Zhong Shao. Berlin, Heidelberg: Springer
+Berlin Heidelberg, 2014, pp. 87-- 106. ISBN: 978-3-642-54833-8. \[14\]
+Andrea Vezzosi, Anders Mörtberg, and Andreas Abel. "Cubical Agda: A
+Dependently Typed Programming Language with Univalence and Higher
+Inductive Types". Preprint available at https://staff.math.su.se/anders.
+mortberg/papers/cubicalagda2.pdf. 2020. \[15\] Evan Cavallo and Robert
+Harper. "Higher Inductive Types in Cubical Computational Type Theory".
+In: Proc. ACM Program. Lang. 3.POPL (Jan. 2019). DOI: 10.1145/3290314.
+\[16\] The Univalent Foundations Program. Homotopy Type Theory:
+Univalent Foundations of Mathematics. Institute for Advanced Study:
+https://homotopytypetheory. org/book, 2013. \[17\] Cyril Cohen et
+al. "Cubical Type Theory: A Constructive Interpretation of the
+Univalence Axiom". In: FLAP 4 (2015), pp. 3127--3170. \[18\] Andrea
+Vezzosi, Anders Mörtberg, and Andreas Abel. "Cubical Agda: A Dependently
+Typed Programming Language with Univalence and Higher Inductive Types".
+In: Proc. ACM Program. Lang. 3.ICFP (July 2019). DOI: 10.1145/3341691.
+\[19\] Per Martin-Löf. "An intuitionistic theory of types: predicative
+part". In: Logic Colloquium '73, Proceedings of the Logic Colloquium.
+Ed. by H.E. Rose and J.C. Shepherdson. Vol. 80. Studies in Logic and the
+Foundations of Mathematics. North-Holland, 1975, pp. 73--118. \[20\]
+Thierry Coquand. "Pattern matching with dependent types". In:
+Proceedings of the Workshop on Types for Proofs and Programs. Citeseer.
+1992, pp. 71--83. \[21\] Lennart Augustsson and Kent Petersson. "Silly
+Type Families DRAFT". In: (1994).
+
+REFERENCES
+
+15
+
+\[22\] Hongwei Xi, Chiyan Chen, and Gang Chen. "Guarded Recursive
+Datatype Constructors". In: Proceedings of the 30th ACM SIGPLAN-SIGACT
+Symposium on Principles of Programming Languages. POPL '03. New Orleans,
+Louisiana, USA: Association for Computing Machinery, 2003, pp. 224--235.
+ISBN: 1581136285. DOI: 10.1145/604131.604150. \[23\] James Cheney and
+Ralf Hinze. First-class phantom types. Tech. rep. Cornell University,
+2003. \[24\] Tim Sheard and Emir Pasalic. "Meta-programming With
+Built-in Type Equality". In: Electronic Notes in Theoretical Computer
+Science 199 (2008). Proceedings of the Fourth International Workshop on
+Logical Frameworks and MetaLanguages (LFM 2004), pp. 49--65. ISSN:
+1571-0661. DOI: 10.1016/j.entcs.2007.11.012. \[25\] Dimitrios
+Vytiniotis, Stephanie Weirich, and Simon Peyton Jones. "Simple
+unification-based type inference for GADTs". In: International
+Conference on Functional Programming (ICFP'06). 2016 ACM SIGPLAN Most
+Influential ICFP Paper Award. ACM SIGPLAN. Apr. 2006. URL:
+https://www.microsoft.
+com/en-us/research/publication/simple-unification-based-type-inferencefor-gadts/.
+\[26\] Christoph Zenger. "Indexed Types". In: Theor. Comput. Sci.
+187.1--2 (Nov. 1997), pp. 147--165. ISSN: 0304-3975. DOI:
+10.1016/S0304-3975(97)00062-5. \[27\] Edwin Brady. "Idris, a
+general-purpose dependently typed programming language: Design and
+implementation". In: Journal of Functional Programming 23 (05
+Sept. 2013), pp. 552--593. ISSN: 1469-7653. DOI:
+10.1017/S095679681300018X. URL :
+http://journals.cambridge.org/article%5C_S095679681300018X. \[28\] James
+Chapman et al. "The Gentle Art of Levitation". In: Proceedings of the
+15th ACM SIGPLAN International Conference on Functional Programming.
+ICFP '10. Baltimore, Maryland, USA: Association for Computing Machinery,
+2010, pp. 3--14. ISBN: 9781605587943. DOI: 10.1145/1863543.1863547.
+\[29\] Pierre-Évariste Dagand and Conor McBride. "Transporting functions
+across ornaments". In: Journal of Functional Programming 24.2-3 (2014),
+pp. 316--383. DOI: 10.1017/S0956796814000069. \[30\] HsiangShang Ko and
+Jeremy Gibbons. "Programming with ornaments". In: Journal of Functional
+Programming 27 (2016), e2. DOI: 10.1017/S0956796816000307. \[31\] Group
+for Dependent Types and HoTT. The Arend Proof Assistant. https://
+arend-lang.github.io. JetBrains Research, 2015. T HE P ENNSYLVANIA S
+TATE U NIVERSITY Email address: yqz5714@psu.edu
+
+

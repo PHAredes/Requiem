@@ -1,8 +1,8 @@
 #!/usr/bin/env janet
 
 (import ./src/parser :as p)
-(import ./src/desugar :as d)
-(import ./src/elaborate :as e)
+(import ./src/surface :as s)
+(import ./src/elab :as e)
 
 (defn decl/summary [decl]
   (match decl
@@ -20,11 +20,11 @@
   (def forms (p/parse/text src))
   (def interactions (length forms))
   (print "Parsed " interactions " interaction(s)")
-  (def tesla (d/desugar/program forms))
-  (print "Desugared to Tesla-style declarations: " (length tesla))
-  (each decl tesla
+  (def lowered (s/lower/program forms))
+  (print "Lowered surface declarations: " (length lowered))
+  (each decl lowered
     (print "  - " (decl/summary decl)))
-  (def core (e/elaborate/program tesla))
+  (def core (e/elab/program lowered))
   (print "Elaborated core declarations: " (length core))
   (def elapsed (- (os/clock) start))
   (printf "Done. %d interaction(s) in %.3fs" interactions elapsed))
