@@ -11,7 +11,7 @@ Requiem implements:
 - **Bidirectional type checking** with universe subtyping (`Type₀ <: Type₁ <: ...`)
 - **Identity types** with J eliminator
 - **Pi, Sigma, Id** as core type formers
-- **Frontend pipeline** — PEG parser -> surface lowering -> core elaboration
+- **Frontend pipeline** — PEG parser -> lowering -> core elaboration
 
 The core is ~500 lines of Janet. Zero dependencies beyond Janet itself.
 
@@ -28,8 +28,8 @@ janet requiem.janet examples/test.requiem   # run frontend on a file
 ```
 src/
   coreTT.janet      # NbE kernel, bidirectional checker, J eliminator
-  elab.janet        # Elaboration from lowered surface terms to core terms
-  surface.janet     # Surface lowering (pattern matching, indexed constructors)
+  elab.janet        # Elaboration from lowered terms to core terms
+  lower.janet       # Lowering (pattern matching, indexed constructors)
   parser.janet      # PEG-based s-expression parser
   levels.janet      # Universe level algebra
 native/
