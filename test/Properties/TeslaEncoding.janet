@@ -127,6 +127,25 @@
   (test/assert (= (length (lowered/clauses add)) 2) "layout syntax def clauses lower"))
 
 (let [src (string
+            "data Nat: Type\n"
+            "  | zero\n"
+            "  -- comment inside block\n"
+            "  | succ Nat")
+      forms (p/parse/text src)
+      lowered (l/lower/program forms)
+      nat (decl/find-data lowered "Nat")]
+  (test/assert (= (length (data/ctors nat)) 2)
+               "layout syntax ignores indented comment lines in blocks"))
+
+(let [src (string
+            "def demo: Nat\n"
+            "  body\n"
+            "    child")
+      canonical (p/layout/canonicalize src)]
+  (test/assert (= canonical "(def demo: Nat (body child))")
+               "layout canonicalization preserves nested indentation structure"))
+
+(let [src (string
             "data List (A: Type): Type\n"
             "  | nil\n"
             "  | cons A (List A)")
