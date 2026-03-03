@@ -1,10 +1,10 @@
 data Nat: Type
-  | = zero
-  | = succ (n: Nat)
+  | zero
+  | succ Nat
 
 data Bool: Type
-  | = true
-  | = false
+  | true
+  | false
 
 def sum (n: Nat) (m: Nat): Nat
   | n zero = n
