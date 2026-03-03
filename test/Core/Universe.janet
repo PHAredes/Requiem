@@ -18,6 +18,22 @@
   (= (c/infer-top [:type 5]) [c/T/Type 6])
   "Universe hierarchy: Type₅ : Type₆")
 
+(test/assert
+  (c/check-top [:type 0] (c/ty/type 3))
+  "Cumulativity: Type₀ checks against Type₃")
+
+(test/assert-error
+  (fn [] (c/check-top [:type 3] (c/ty/type 1)))
+  "Cumulativity is not symmetric")
+
+(test/assert
+  (c/subtype (c/ty/type 0) (c/ty/type 4))
+  "Subtype: Type₀ <: Type₄")
+
+(test/assert
+  (not (c/subtype (c/ty/type 4) (c/ty/type 0)))
+  "Subtype: Type₄ is not a subtype of Type₀")
+
 # Property Tests: Universe Hierarchy
 (defn prop-universe-hierarchy [n]
   "Property: Type_l : Type_(l+1)"
@@ -65,5 +81,35 @@
 (test/assert
   (prop-universe-hierarchy-strict 20)
   "Property: universe hierarchy Type_i : Type_(i+1)")
+
+# Property: cumulative universe subsumption chains
+(defn prop-universe-subsumption-chains [n]
+  "Property: Type_i <: Type_j <: Type_k implies Type_i <: Type_k"
+  (var passed true)
+  (repeat n
+    (let [i (math/rng-int rng 6)
+          d1 (inc (math/rng-int rng 4))
+          d2 (inc (math/rng-int rng 4))
+          j (+ i d1)
+          k (+ j d2)
+          Ti (c/ty/type i)
+          Tj (c/ty/type j)
+          Tk (c/ty/type k)]
+      (try
+        (unless (and (c/subtype Ti Ti)
+                     (c/subtype Ti Tj)
+                     (c/subtype Tj Tk)
+                     (c/subtype Ti Tk)
+                     (not (c/subtype Tk Ti)))
+          (set passed false)
+          (print "Universe subsumption chain failed:" i j k))
+        ([err]
+          (set passed false)
+          (print "Universe subsumption chain error:" err)))))
+  passed)
+
+(test/assert
+  (prop-universe-subsumption-chains 40)
+  "Property: cumulative universe subsumption chains")
 
 (test/end-suite)
