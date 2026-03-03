@@ -1,7 +1,7 @@
 #!/usr/bin/env janet
 
 (import ./parser :as p)
-(import ./surface :as s)
+(import ./lower :as l)
 
 (defn env/lookup [env name]
   (defn scan [i]
@@ -68,8 +68,8 @@
       [:lam (fn [x] (elab/lam-chain (env/extend env name x) rest body))])))
 
 (defn list/head [xs]
-  (if (and (> (length xs) 0) (s/node/atom? (xs 0)))
-    (s/node/atom (xs 0))
+  (if (and (> (length xs) 0) (l/node/atom? (xs 0)))
+    (l/node/atom (xs 0))
     nil))
 
 (defn list/expect-arity [form xs expected]
@@ -84,7 +84,7 @@
 (defn list/parse-body [rest form]
   (when (zero? (length rest))
     (errorf "%v is missing a body" form))
-  (if (s/node/atom= (rest 0) ".")
+  (if (l/node/atom= (rest 0) ".")
     (do
       (when (= (length rest) 1)
         (errorf "%v has dot but no body" form))
@@ -99,7 +99,7 @@
   (when (< (length xs) 3)
     (errorf "%v needs binders and a body: %v" form [:list xs]))
   (let [tail (slice xs 1)
-        binders (s/binders/from-spec (tail 0))
+        binders (l/binders/from-spec (tail 0))
         body (list/parse-body (slice tail 1) form)]
     [binders body]))
 
@@ -107,15 +107,15 @@
   (match node
     [:list xs]
     (if (and (= (length xs) 3)
-             (s/node/atom= (xs 0) "Ann")
-             (s/node/atom? (xs 1)))
-      [:bind (s/node/atom (xs 1)) (xs 2)]
+             (l/node/atom= (xs 0) "Ann")
+             (l/node/atom? (xs 1)))
+      [:bind (l/node/atom (xs 1)) (xs 2)]
       (errorf "invalid Ann binder: %v\nExpected form: (Ann x A)" node))
     _
     (errorf "invalid Ann binder: %v\nExpected form: (Ann x A)" node)))
 
 (defn elab/list-pi [env node]
-  (let [[binders body] (s/term/split-pi node)]
+  (let [[binders body] (l/term/split-pi node)]
     (elab/pi-chain env binders body)))
 
 (defn elab/list-lam [env xs]
@@ -142,7 +142,7 @@
 
 (defn elab/list-let [env xs]
   (list/expect-arity "let" xs 4)
-  (let [bind (s/bind/from-node (xs 1))
+  (let [bind (l/bind/from-node (xs 1))
         name (bind 1)
         val-core (elab/term env (xs 2))]
     (elab/term (env/extend env name val-core) (xs 3))))
@@ -206,7 +206,7 @@
    "J" elab/list-j})
 
 (defn elab/list [env node xs]
-  (if (or (s/term/forall? node) (s/term/arrow? node))
+  (if (or (l/term/forall? node) (l/term/arrow? node))
     (elab/list-pi env node)
     (if-let [handler (get elab/list-dispatch (list/head xs))]
       (handler env xs)
@@ -293,7 +293,7 @@
   (map decl/elab decls))
 
 (defn elab/forms [forms]
-  (elab/program (s/lower/program forms)))
+  (elab/program (l/lower/program forms)))
 
 (defn elab/text [src]
   (elab/forms (p/parse/text src)))

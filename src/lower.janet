@@ -97,38 +97,43 @@
         n (length xs)]
     (when (< n 3)
       (errorf "forall form is too short: %v\nMinimum format: (forall (x: A) . B) or (forall (x: A) B)\nYou need at least variable and type annotations" node))
-    (let [binder-spec (xs 1)]
-      (var dot-index nil)
-      (for i 2 n
-        (when (and (nil? dot-index) (node/atom= (xs i) "."))
-          (set dot-index i)))
+    (let [binder-spec (xs 1)
+          dot-index (find-index |(node/atom= $ ".") (slice xs 2 n))]
       (let [body
             (if dot-index
-              (if (= dot-index (- n 2))
-                (xs (- n 1))
-                [:list (slice xs (+ dot-index 1) n)])
+              (let [actual-index (+ dot-index 2)]
+                (if (= actual-index (- n 2))
+                  (xs (- n 1))
+                  [:list (slice xs (+ actual-index 1) n)]))
               (if (= n 3)
                 (xs 2)
                 [:list (slice xs 2 n)]))]
         [(binders/from-spec binder-spec) body]))))
 
+(defn find-index [pred xs]
+  (defn find-iter [i xs]
+    (if (empty? xs)
+      nil
+      (if (pred (first xs))
+        i
+        (find-iter (+ i 1) (slice xs 1)))))
+  (find-iter 0 xs))
+
 (defn term/split-pi [node]
-  (let [binders @[]]
-    (var index 0)
-    (var cur node)
-    (while true
-      (if (term/forall? cur)
-        (let [[bs body] (term/unpack-forall cur)]
-          (each b bs (array/push binders b))
-          (set cur body))
-        (if (term/arrow? cur)
-          (let [[dom cod] (term/unpack-arrow cur)
-                name (string "_arg" index)]
-            (++ index)
-            (array/push binders [:bind name dom])
-            (set cur cod))
-          (break))))
-    [binders cur]))
+  (defn split-loop [cur index binders]
+    (cond
+      (term/forall? cur)
+      (let [[bs body] (term/unpack-forall cur)]
+        (split-loop body index (reduce |(array/push $0 $1) binders bs)))
+
+      (term/arrow? cur)
+      (let [[dom cod] (term/unpack-arrow cur)
+            name (string "_arg" index)]
+        (split-loop cod (+ index 1) (array/push binders [:bind name dom])))
+
+      true
+      [binders cur]))
+  (split-loop node 0 @[]))
 
 (defn term/as-head-app [node]
   (cond
@@ -218,16 +223,12 @@
       [:list xs])))
 
 (defn term/build-forall [binders body]
-  (var out body)
-  (var i (- (length binders) 1))
-  (while (>= i 0)
-    (let [b (binders i)
-          name (b 1)
-          ty (b 2)
+  (defn fold-binders [acc binder]
+    (let [name (if (>= (length binder) 2) (binder 1) "_")
+          ty (if (>= (length binder) 3) (binder 2) [:atom "Type"])
           binder-node [:list @[(node/atom/new (string name ":")) ty]]]
-      (set out [:list @[(node/atom/new "forall") binder-node (node/atom/new ".") out]]))
-    (-- i))
-  out)
+      [:list @[(node/atom/new "forall") binder-node (node/atom/new ".") acc]]))
+  (reduce fold-binders body (reverse binders)))
 
 (defn decl/parse-name-and-ann [nodes]
   (when (zero? (length nodes))
@@ -261,30 +262,37 @@
       (errorf "invalid declaration head: %v\nDeclaration must start with:\n- A variable name\n- An annotated binder (x: Type)\n- A list declaration" head))))
 
 (defn decl/parse-telescope-head [nodes kind]
-  (if (and (> (length nodes) 0)
-           (node/atom? (nodes 0))
-           (not (token/colon? (node/atom (nodes 0)))))
+  (when (and (> (length nodes) 0)
+             (node/atom? (nodes 0))
+             (not (token/colon? (node/atom (nodes 0)))))
     (let [name (node/atom (nodes 0))
-          n (length nodes)
-          params @[]]
-      (var i 1)
-      (while (and (< i n) (bind/single-spec? (nodes i)))
-        (array/push params (bind/from-node (nodes i)))
-        (++ i))
-      (if (and (< i n) (node/atom= (nodes i) ":"))
-        (do
-          (when (>= (+ i 1) n)
-            (errorf "%v %v is missing result sort/type after ':'" kind name))
-          [name params (nodes (+ i 1)) (+ i 2)])
-        nil))
-    nil))
+          n (length nodes)]
+      (defn collect-params [i params]
+        (cond
+          (and (< i n) (bind/single-spec? (nodes i)))
+          (collect-params (+ i 1) (array/push params (bind/from-node (nodes i))))
+          
+          (and (< i n) (node/atom= (nodes i) ":"))
+          (do
+            (when (>= (+ i 1) n)
+              (errorf "%v %v is missing result sort/type after ':'" kind name))
+            [name params (nodes (+ i 1)) (+ i 2)])
+          
+          true nil))
+      (collect-params 1 @[]))))
 
 (defn data/parse-head [nodes]
-  (if-let [tel (decl/parse-telescope-head nodes "data")]
-    tel
-    (let [[name ann consumed] (decl/parse-name-and-ann nodes)
-          [params sort] (term/split-pi ann)]
-      [name params sort consumed])))
+  # Handle the case where first node is "data" keyword (from selector syntax)
+  (if (and (> (length nodes) 0) 
+           (node/atom? (nodes 0)) 
+           (= (node/atom (nodes 0)) "data"))
+    (let [[name params sort consumed] (data/parse-head (slice nodes 1 (length nodes)))]
+      [name params sort (+ consumed 1)])
+    (if-let [tel (decl/parse-telescope-head nodes "data")]
+      tel
+      (let [[name ann consumed] (decl/parse-name-and-ann nodes)
+            [params sort] (term/split-pi ann)]
+        [name params sort consumed]))))
 
 (defn func/parse-head [nodes]
   (if-let [tel (decl/parse-telescope-head nodes "def")]
@@ -300,11 +308,12 @@
               (node/atom= (xs 0) "|")))))
 
 (defn clause/eq-index [xs start]
-  (var idx nil)
-  (for i start (length xs)
-    (when (and (nil? idx) (node/atom= (xs i) "="))
-      (set idx i)))
-  idx)
+  (defn find-eq-iter [i xs]
+    (when (not (empty? xs))
+      (if (node/atom= (first xs) "=")
+        i
+        (find-eq-iter (+ i 1) (slice xs 1)))))
+  (find-eq-iter start (slice xs start)))
 
 (defn clause/body-from [xs eq-index kind]
   (let [rest (slice xs (+ eq-index 1) (length xs))]
@@ -314,17 +323,35 @@
       (rest 0)
       [:list rest])))
 
+(defn params/default-selector-terms [params]
+  (let [out @[]]
+    (each p params
+      (array/push out [:atom (p 1)]))
+    out))
+
+(defn ctor/arg->binder [arg i]
+  (if (bind/single-spec? arg)
+    (bind/from-node arg)
+    [:bind (string "_arg" i) arg]))
+
+(defn ctor/args->binders [args]
+  (let [out @[]]
+    (for i 0 (length args)
+      (array/push out (ctor/arg->binder (args i) i)))
+    out))
+
 (defn args/simple-return? [args data-params]
   (and (= (length args) (length data-params))
-       (do
-         (var ok true)
-         (for i 0 (length args)
-           (let [a (args i)
-                 p (data-params i)]
-             (if (and (node/atom? a) (= (node/atom a) (p 1)))
-               nil
-               (set ok false))))
-         ok)))
+       (let [n (length args)]
+         (defn check-index [i]
+           (if (= i n)
+             true
+             (let [a (args i)
+                   p (data-params i)]
+               (and (node/atom? a)
+                    (= (node/atom a) (p 1))
+                    (check-index (+ i 1))))))
+         (check-index 0))))
 
 (defn ctor/lower-indexed [data-name data-params name ctor-binders ret-args]
   (let [var-types (binders/name->type data-params)]
@@ -357,7 +384,16 @@
     (let [name (node/atom (xs 0))
           ctor-type (xs 1)
           [ctor-binders ret] (term/split-pi ctor-type)
-          [head ret-args] (term/as-head-app ret)]
+          [head0 ret-args0] (term/as-head-app ret)
+          [head ret-args]
+          (if (nil? head0)
+            (if (node/atom? ret)
+              (let [atom-name (node/atom ret)]
+                (if (= atom-name data-name)
+                  [data-name @[]]
+                  (errorf "constructor %v must return %v, but got %v\nConstructors must return their parent data type" name data-name ret)))
+              (errorf "constructor %v has invalid return type structure: %v\nExpected an application of %v, but got malformed type" name ret data-name))
+            [head0 ret-args0])]
       (when (not= head data-name)
         (errorf "constructor %v must return %v, but got %v\nConstructors must return their parent data type" name data-name ret))
       (when (not= (length ret-args) (length data-params))
@@ -369,32 +405,34 @@
 (defn ctor/lower-selector-clause [data-name data-params clause-node]
   (let [xs (node/list-items clause-node)]
     (when (or (zero? (length xs)) (not (node/atom= (xs 0) "|")))
-      (errorf "invalid data constructor clause: %v\nExpected: (| selectors... = C (x: A) ...)" clause-node))
-    (if-let [eq-index (clause/eq-index xs 1)]
-      (let [selectors (slice xs 1 eq-index)
-            rhs (slice xs (+ eq-index 1) (length xs))]
-        (when (not= (length selectors) (length data-params))
-          (errorf "constructor selector arity mismatch in %v\nExpected %d selector(s), got %d"
-                  clause-node
-                  (length data-params)
-                  (length selectors)))
-        (when (zero? (length rhs))
-          (errorf "constructor clause has no constructor on right-hand side: %v" clause-node))
-        (when (not (node/atom? (rhs 0)))
-          (errorf "constructor name must be an atom in clause: %v" clause-node))
-        (let [ctor-name (node/atom (rhs 0))
-              ctor-binders @[]]
-          (for i 1 (length rhs)
-            (array/push ctor-binders (bind/from-node (rhs i))))
-          (let [ret-term (term/build-data-app data-name selectors)
-                ctor-type (term/build-forall ctor-binders ret-term)
-                synthetic [:list @[(node/atom/new ctor-name) ctor-type]]]
-            (ctor/lower data-name data-params synthetic))))
-      (errorf "constructor clause is missing '=': %v" clause-node))))
+      (errorf "invalid data constructor clause: %v\nExpected: (| selectors... = C args...) or (| C args...)" clause-node))
+    (let [eq-index (clause/eq-index xs 1)
+          selectors (if eq-index
+                      (slice xs 1 eq-index)
+                      (params/default-selector-terms data-params))
+          rhs (if eq-index
+                (slice xs (+ eq-index 1) (length xs))
+                (slice xs 1 (length xs)))]
+      (when (not= (length selectors) (length data-params))
+        (errorf "constructor selector arity mismatch in %v\nExpected %d selector(s), got %d"
+                clause-node
+                (length data-params)
+                (length selectors)))
+      (when (zero? (length rhs))
+        (errorf "constructor clause has no constructor on right-hand side: %v" clause-node))
+      (when (not (node/atom? (rhs 0)))
+        (errorf "constructor name must be an atom in clause: %v" clause-node))
+      (let [ctor-name (node/atom (rhs 0))
+            ctor-binders (ctor/args->binders (slice rhs 1 (length rhs)))]
+        (let [ret-term (term/build-data-app data-name selectors)
+              ctor-type (term/build-forall ctor-binders ret-term)
+              synthetic [:list @[(node/atom/new ctor-name) ctor-type]]]
+          (ctor/lower data-name data-params synthetic))))))
 
 (defn data/lower [nodes]
   (let [[name params sort consumed] (data/parse-head nodes)
-        tail (slice nodes consumed (length nodes))]
+        tail-raw (slice nodes consumed (length nodes))
+        tail (if (tuple? tail-raw) (array ;tail-raw) tail-raw)]
     (if (zero? (length tail))
       [:decl/data name params sort @[]]
       (if (clause/pipe? (tail 0))
@@ -456,16 +494,16 @@
   (let [[head args] (term/as-head-app node)]
     (and (= head func-name)
          (= (length args) (length param-names))
-         (do
-           (var ok true)
-           (for i 0 (length args)
-             (let [arg (args i)]
-               (if (and (node/atom? arg)
-                        (= (node/atom arg)
-                           (if (= i target-index) rec-var (param-names i))))
-                 nil
-                 (set ok false))))
-           ok))))
+         (let [n (length args)]
+           (defn check-index [i]
+             (if (= i n)
+               true
+               (let [arg (args i)
+                     expected (if (= i target-index) rec-var (param-names i))]
+                 (and (node/atom? arg)
+                      (= (node/atom arg) expected)
+                      (check-index (+ i 1))))))
+           (check-index 0)))))
 
 (defn term/replace-self-call [node func-name param-names target-index rec-var ih-name]
   (if (term/self-call? node func-name param-names target-index rec-var)
@@ -501,11 +539,12 @@
     true (errorf "invalid match target: %v\nMatch target must be a variable or annotated variable like 'x:Type'" node)))
 
 (defn match/param-index [params name]
-  (var idx nil)
-  (for i 0 (length params)
-    (when (and (nil? idx) (= ((params i) 1) name))
-      (set idx i)))
-  idx)
+  (defn find-param-iter [i params]
+    (when (not (empty? params))
+      (if (= ((first params) 1) name)
+        i
+        (find-param-iter (+ i 1) (slice params 1)))))
+  (find-param-iter 0 params))
 
 (defn case/split [case-node]
   (let [xs (node/list-items case-node)]
@@ -517,11 +556,7 @@
       (if (and (node/atom? (rest 0))
                (token/colon? (node/atom (rest 0))))
         [[:atom (token/strip-colon (node/atom (rest 0)))] (rest 1)]
-        (do
-          (var colon-index nil)
-          (for i 0 (length rest)
-            (when (and (nil? colon-index) (node/atom= (rest i) ":"))
-              (set colon-index i)))
+        (let [colon-index (find-index |(node/atom= $ ":") rest)]
           (if colon-index
             (let [pat-node
                   (if (= colon-index 1)
@@ -542,21 +577,23 @@
     out))
 
 (defn match/wildcard-body [entries]
-  (var out nil)
-  (each e entries
-    (when (and (nil? out)
-               (= ((e 0) 0) :pat/var)
-               (= ((e 0) 1) "_"))
-      (set out (e 1))))
-  out)
+  (defn find-wildcard [entries]
+    (when (not (empty? entries))
+      (let [e (first entries)]
+        (if (and (= ((e 0) 0) :pat/var)
+                 (= ((e 0) 1) "_"))
+          (e 1)
+          (find-wildcard (slice entries 1))))))
+  (find-wildcard entries))
 
 (defn match/find-ctor-entry [entries ctor-name]
-  (var out nil)
-  (each e entries
-    (when (and (nil? out)
-               (ctor/case-args (e 0) ctor-name))
-      (set out e)))
-  out)
+  (defn find-ctor [entries]
+    (when (not (empty? entries))
+      (let [e (first entries)]
+        (if (ctor/case-args (e 0) ctor-name)
+          e
+          (find-ctor (slice entries 1))))))
+  (find-ctor entries))
 
 (defn type/ctor-name-set [ty data-env]
   (let [[head _] (term/as-head-app ty)
@@ -641,11 +678,13 @@
             (let [ih-name (string "ih-" name)]
               (put rec-map name ih-name)
               (array/push branch-binders [:bind ih-name result])))))
-      (var body body0)
-      (each rec-var (keys rec-map)
-        (let [ih-name (get rec-map rec-var)]
-          (set body (term/replace-self-call body func-name param-names target-index rec-var ih-name))))
-      (term/build-lam branch-binders body))))
+      (let [body
+            (reduce (fn [acc rec-var]
+                      (let [ih-name (get rec-map rec-var)]
+                        (term/replace-self-call acc func-name param-names target-index rec-var ih-name)))
+                    body0
+                    (keys rec-map))]
+        (term/build-lam branch-binders body)))))
 
 (defn match/lower-elim [func-name params result body data-env]
   (let [xs (node/list-items body)]
