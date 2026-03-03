@@ -1,7 +1,7 @@
 #!/usr/bin/env janet
 
 (import ./src/parser :as p)
-(import ./src/surface :as s)
+(import ./src/lower :as l)
 (import ./src/elab :as e)
 
 (defn decl/summary [decl]
@@ -20,8 +20,8 @@
   (def forms (p/parse/text src))
   (def interactions (length forms))
   (print "Parsed " interactions " interaction(s)")
-  (def lowered (s/lower/program forms))
-  (print "Lowered surface declarations: " (length lowered))
+  (def lowered (l/lower/program forms))
+  (print "Lowered declarations: " (length lowered))
   (each decl lowered
     (print "  - " (decl/summary decl)))
   (def core (e/elab/program lowered))

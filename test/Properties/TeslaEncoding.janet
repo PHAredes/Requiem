@@ -2,7 +2,7 @@
 
 (import ../Utils/TestRunner :as test)
 (import ../../src/parser :as p)
-(import ../../src/surface :as s)
+(import ../../src/lower :as l)
 (import ../../src/elab :as e)
 
 (defn decl/find-func [decls name]
@@ -81,7 +81,7 @@
     (let [rec-var (string "r" (math/rng-int rng 10000))
           src (mk-sum-src rec-var)
           forms (p/parse/text src)
-          lowered (s/lower/program forms)
+          lowered (l/lower/program forms)
           sum-decl (decl/find-func lowered "sum")
           body (lowered/body sum-decl)]
       (test/assert (p/has/atom? body "Nat-elim") "match lowers to Nat-elim")
@@ -90,7 +90,7 @@
       (test/assert (not (p/has/atom? body "sum")) "structural branch removes direct recursive call"))))
 
 (let [forms (p/parse/text (slurp "examples/test.requiem"))
-      lowered (s/lower/program forms)
+      lowered (l/lower/program forms)
       core (e/elab/program lowered)
       sum-decl (decl/find-func lowered "sum")
       not-decl (decl/find-func lowered "not")
@@ -106,32 +106,62 @@
             "  (| A zero = vnil)"
             "  (| A (succ n) = vcons (x: A) (xs: (Vec A n))))")
       forms (p/parse/text src)
-      lowered (s/lower/program forms)
+      lowered (l/lower/program forms)
       vec (decl/find-data lowered "Vec")]
   (test/assert (not (nil? vec)) "selector-style indexed data parses")
   (test/assert (= (length (data/ctors vec)) 2) "selector-style Vec has two constructors"))
 
 (let [src (string
             "data Nat: Type\n"
-            "  | = zero\n"
-            "  | = succ (n: Nat)\n\n"
+            "  | zero\n"
+            "  | succ Nat\n\n"
             "def add (n: Nat) (m: Nat): Nat\n"
             "  | n zero = n\n"
             "  | n (succ m) = (succ (add n m))")
       forms (p/parse/text src)
-      lowered (s/lower/program forms)
+      lowered (l/lower/program forms)
       nat (decl/find-data lowered "Nat")
       add (decl/find-func lowered "add")]
-  (test/assert (= (length lowered) 2) "sweet syntax parses into two top-level decls")
-  (test/assert (= (length (data/ctors nat)) 2) "sweet syntax data clauses lower")
-  (test/assert (= (length (lowered/clauses add)) 2) "sweet syntax def clauses lower"))
+  (test/assert (= (length lowered) 2) "layout syntax parses into two top-level decls")
+  (test/assert (= (length (data/ctors nat)) 2) "layout syntax data clauses lower")
+  (test/assert (= (length (lowered/clauses add)) 2) "layout syntax def clauses lower"))
+
+(let [src (string
+            "data Nat: Type\n"
+            "  | zero\n"
+            "  -- comment inside block\n"
+            "  | succ Nat")
+      forms (p/parse/text src)
+      lowered (l/lower/program forms)
+      nat (decl/find-data lowered "Nat")]
+  (test/assert (= (length (data/ctors nat)) 2)
+               "layout syntax ignores indented comment lines in blocks"))
+
+(let [src (string
+            "def demo: Nat\n"
+            "  body\n"
+            "    child")
+      canonical (p/layout/canonicalize src)]
+  (test/assert (= canonical "(def demo: Nat (body child))")
+               "layout canonicalization preserves nested indentation structure"))
+
+(let [src (string
+            "data List (A: Type): Type\n"
+            "  | nil\n"
+            "  | cons A (List A)")
+      forms (p/parse/text src)
+      lowered (l/lower/program forms)
+      list-decl (decl/find-data lowered "List")
+      ctors (data/ctors list-decl)]
+  (test/assert (= (length ctors) 2) "constructor shorthand works for parameterized data")
+  (test/assert (= ((ctors 1) 1) "cons") "constructor shorthand keeps constructor name"))
 
 (let [src (string
             "(data Nat: Type (| = zero) (| = suc (n: Nat)))"
             " (def keep1 (n: Nat) (m: Nat): Nat (| n = n))"
             " (def keep0 (n: Nat) (m: Nat): Nat (| = n))")
       forms (p/parse/text src)
-      lowered (s/lower/program forms)
+      lowered (l/lower/program forms)
       keep1 (decl/find-func lowered "keep1")
       keep0 (decl/find-func lowered "keep0")
       keep1-clause (lowered/first-clause keep1)
@@ -209,7 +239,7 @@
           [func-name func-src] (mk-random-match-func rng data-name)
           full-src (string data-src " " func-src)]
       (let [forms (p/parse/text full-src)
-            lowered (s/lower/program forms)
+            lowered (l/lower/program forms)
             data-decl (decl/find-data lowered data-name)]
         (let [func-decl (decl/find-func lowered func-name)]
           (test/assert (not (nil? data-decl)) "random data declaration parsed correctly")

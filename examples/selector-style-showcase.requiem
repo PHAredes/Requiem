@@ -1,34 +1,34 @@
 data Nat: Type
-  | = zero
-  | = succ (n: Nat)
+  | zero
+  | succ Nat
 
 data Bool: Type
-  | = true
-  | = false
+  | true
+  | false
 
 data Unit: Type
-  | = tt
+  | tt
 
 data Void: Type
 
 data List (A: Type): Type
-  | A = nil
-  | A = cons (x: A) (xs: (List A))
+  | nil
+  | cons A (List A)
 
 data Maybe (A: Type): Type
-  | A = none
-  | A = some (x: A)
+  | none
+  | some A
 
 data Either (A: Type) (B: Type): Type
-  | A B = left (x: A)
-  | A B = right (y: B)
+  | left A
+  | right B
 
 data Pair (A: Type) (B: Type): Type
-  | A B = pair (fst: A) (snd: B)
+  | pair A B
 
 data Tree (A: Type): Type
-  | A = leaf
-  | A = node (val: A) (left: (Tree A)) (right: (Tree A))
+  | leaf
+  | node A (Tree A) (Tree A)
 
 data Vec (A: Type) (n: Nat): Type
   | A zero = vnil
@@ -93,9 +93,9 @@ def trans
   | A x x x refl refl = refl
 
 data Ty: Type
-  | = natT
-  | = boolT
-  | = arrT (a: Ty) (b: Ty)
+  | natT
+  | boolT
+  | arrT Ty Ty
 
 def interp (t: Ty): Type
   | natT = Nat
@@ -103,8 +103,8 @@ def interp (t: Ty): Type
   | (arrT a b) = (interp a -> interp b)
 
 data Term (t: Ty): Type
-  | natT = litN (n: Nat)
-  | boolT = litB (b: Bool)
+  | natT = litN Nat
+  | boolT = litB Bool
   | (arrT a b) = lam (a: Ty) (b: Ty) (body: (Term b))
   | b = app (a: Ty) (b: Ty) (f: (Term (arrT a b))) (x: (Term a))
 

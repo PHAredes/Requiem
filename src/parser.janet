@@ -1,7 +1,5 @@
 #!/usr/bin/env janet
 
-# Lispy parser for the surface language (no precedence / associativity)
-
 (def grammar
   '{:ws (drop :s*)
     :stop (+ :s "(" ")" "[" "]")
@@ -20,6 +18,22 @@
 (def grammar/compiled
   (peg/compile grammar))
 
+(def layout/grammar
+  '{:nl (+ "\r\n" "\n" "\r")
+    :hspace (set " \t")
+    :line-body (any (if-not :nl 1))
+    :top-head (+ "data" "def")
+    :top-line (* :top-head :line-body)
+    :cont-line (* (some :hspace) :line-body)
+    :block (<- (* :top-line (any (* :nl :cont-line)) (? :nl)))
+    :comment (* (any :hspace) (+ "#" "--") :line-body (? :nl))
+    :blank (* (any :hspace) :nl)
+    :skip (any (+ :blank :comment))
+    :main (* :skip (group (any (* :block :skip))) -1)})
+
+(def layout/compiled
+  (peg/compile layout/grammar))
+
 (defn- node/raw->ast [raw]
   (let [tag (raw 0)
         payload (raw 1)]
@@ -27,7 +41,7 @@
       :atom [:atom payload]
       :list [:list (map node/raw->ast payload)]
       :brackets [:brackets (map node/raw->ast payload)]
-      _ (errorf "invalid raw AST node: %v\nExpected nodes are tagged :atom, :list, or :brackets\nCheck the parser grammar for valid node types" raw))))
+      _ (errorf "invalid raw AST node: %v" raw))))
 
 (defn- parse/all [p src]
   (if-let [caps (peg/match p src)]
@@ -36,31 +50,26 @@
       (errorf "unexpected parser capture shape: %v" caps))
     nil))
 
+(defn- text/starts-with? [s prefix]
+  (and (>= (length s) (length prefix))
+       (= (string/slice s 0 (length prefix)) prefix)))
+
 (defn- line/indent [line]
-  (var i 0)
-  (var acc 0)
-  (while (< i (length line))
-    (let [ch (string/slice line i (+ i 1))]
-      (if (= ch " ")
-        (do (++ i) (++ acc))
-        (if (= ch "\t")
-          (do (++ i) (set acc (+ acc 2)))
-          (break)))))
-  acc)
+  (defn scan [i acc]
+    (if (>= i (length line))
+      acc
+      (let [ch (string/slice line i (+ i 1))]
+        (cond
+          (= ch " ") (scan (+ i 1) (+ acc 1))
+          (= ch "\t") (scan (+ i 1) (+ acc 2))
+          true acc))))
+  (scan 0 0))
 
 (defn- line/ignored? [line]
   (let [t (string/trim line)]
     (or (zero? (length t))
-        (and (> (length t) 0) (= (string/slice t 0 1) "#"))
-        (and (>= (length t) 2)
-             (= (string/slice t 0 2) "--")))))
-
-(defn- stack/top [stack]
-  (stack (- (length stack) 1)))
-
-(defn- text/starts-with? [s prefix]
-  (and (>= (length s) (length prefix))
-       (= (string/slice s 0 (length prefix)) prefix)))
+        (text/starts-with? t "#")
+        (text/starts-with? t "--"))))
 
 (defn- text/wrapped-parens? [s]
   (and (>= (length s) 2)
@@ -72,57 +81,46 @@
     (and (> (length t) 0)
          (= (string/slice t 0 1) "|"))))
 
-(var layout/render-node nil)
+(defn- stack/trim [stack indent]
+  (if (or (<= (length stack) 1)
+          (> indent (get (stack (- (length stack) 1)) :indent)))
+    stack
+    (stack/trim (slice stack 0 (- (length stack) 1)) indent)))
 
-(defn- layout/render-arg [node]
-  (let [r (layout/render-node node)]
-    (if (text/wrapped-parens? r)
-      r
-      (string "(" r ")"))))
+(defn- layout/pipe-split [children]
+  (defn find-pipe [i]
+    (if (= i (length children))
+      i
+      (if (text/pipe? (get (children i) :text))
+        i
+        (find-pipe (+ i 1)))))
+  (find-pipe 0))
+
+(defn- layout/render-node [node]
+  (let [text (get node :text)
+        children (get node :children)]
+    (if (zero? (length children))
+      text
+      (let [split (layout/pipe-split children)
+            head (reduce (fn [acc child]
+                           (string acc " " (layout/render-node child)))
+                         text
+                         (slice children 0 split))
+            args (map (fn [child]
+                        (let [r (layout/render-node child)]
+                          (if (text/wrapped-parens? r)
+                            r
+                            (string "(" r ")"))))
+                      (slice children split (length children)))]
+        (if (zero? (length args))
+          (string "(" head ")")
+          (string "(" head " " (string/join args " ") ")"))))))
 
 (defn- layout/render-top [node]
   (let [r (layout/render-node node)]
     (if (text/wrapped-parens? r)
       r
       (string "(" r ")"))))
-
-(set layout/render-node
-     (fn [node]
-       (let [text (get node :text)
-             children (get node :children)]
-         (if (zero? (length children))
-           text
-           (let [head text
-                 n (length children)]
-             (var head head)
-             (var split n)
-             (for i 0 n
-               (when (and (= split n) (text/pipe? (get (children i) :text)))
-                 (set split i)))
-             (for i 0 split
-               (set head (string head " " (layout/render-node (children i)))))
-             (let [args @[]]
-               (for i split n
-                 (array/push args (layout/render-arg (children i))))
-               (if (zero? (length args))
-                 (string "(" head ")")
-                 (string "(" head " " (string/join args " ") ")"))))))))
-
-(defn layout/desweet [src]
-  (let [txt (string src)
-        root {:indent -1 :text nil :children @[]}
-        stack @[root]]
-    (each line (string/split "\n" txt)
-      (when (not (line/ignored? line))
-        (let [indent (line/indent line)
-              text (string/trim line)
-              node {:indent indent :text text :children @[]}]
-          (while (and (> (length stack) 1)
-                      (<= indent (get (stack/top stack) :indent)))
-            (array/pop stack))
-          (array/push (get (stack/top stack) :children) node)
-          (array/push stack node))))
-    (string/join (map layout/render-top (get root :children)) "\n")))
 
 (defn- forms/all-lists? [forms]
   (reduce (fn [acc n]
@@ -132,29 +130,61 @@
           true
           forms))
 
+(defn- layout/block->canonical [block]
+  (let [root {:indent -1 :text nil :children @[]}
+        lines (string/split "\n" (string block))]
+    (defn walk [rest stack]
+      (if (zero? (length rest))
+        nil
+        (let [line (first rest)]
+          (if (line/ignored? line)
+            (walk (slice rest 1) stack)
+            (let [indent (line/indent line)
+                  text (string/trim line)
+                  node {:indent indent :text text :children @[]}
+                  trimmed (stack/trim stack indent)
+                  parent (trimmed (- (length trimmed) 1))]
+              (array/push (get parent :children) node)
+              (walk (slice rest 1) [;trimmed node]))))))
+    (walk lines @[root])
+    (let [tops (get root :children)]
+      (when (zero? (length tops))
+        (errorf "invalid layout block: %q" block))
+      (string/join (map layout/render-top tops) "\n"))))
+
+(defn- layout/caps->canonical [caps]
+  (if (= (length caps) 1)
+    (string/join (map layout/block->canonical (caps 0)) "\n")
+    (errorf "unexpected layout parser capture shape: %v" caps)))
+
+(defn layout/canonicalize [src]
+  (let [txt (string src)]
+    (if-let [caps (peg/match layout/compiled txt)]
+      (layout/caps->canonical caps)
+      (errorf "parse failed"))))
+
 (defn parse/text [src]
-  "Parse all top-level forms from source text (compiled PEG), with sweet-layout fallback."
-  (let [txt (string src)
-        sweet? (not (nil? (string/find "\n" txt)))]
+  "Parse all top-level forms from source text, using PEG layout fallback."
+  (let [txt (string src)]
     (if-let [forms (parse/all grammar/compiled txt)]
-      (if (or (forms/all-lists? forms) (not sweet?))
+      (if (forms/all-lists? forms)
         forms
-        (let [rewritten (layout/desweet txt)]
-          (if-let [fallback (parse/all grammar/compiled rewritten)]
-            (if (forms/all-lists? fallback)
-              fallback
+        (if (nil? (string/find "\n" txt))
+          forms
+          (if-let [caps (peg/match layout/compiled txt)]
+            (if-let [layout-forms (parse/all grammar/compiled (layout/caps->canonical caps))]
+              layout-forms
               forms)
             forms)))
-      (if sweet?
-        (let [rewritten (layout/desweet txt)]
-          (if-let [fallback (parse/all grammar/compiled rewritten)]
-            fallback
-            (errorf "parse failed")))
+      (if-let [caps (peg/match layout/compiled txt)]
+        (if-let [layout-forms (parse/all grammar/compiled (layout/caps->canonical caps))]
+          layout-forms
+          (errorf "parse failed"))
         (errorf "parse failed")))))
 
 (defn parse/text-raw [src]
   "Parse all top-level forms from source text (source PEG)."
-  (if-let [forms (parse/all grammar src)]
+  (if-let [forms (parse/all grammar (string src))]
     forms
     (errorf "parse failed")))
 
@@ -206,5 +236,5 @@
    :render/program render/program
    :norm/layout norm/layout
    :norm/program norm/program
-   :layout/desweet layout/desweet
+   :layout/canonicalize layout/canonicalize
    :has/atom? has/atom?})
