@@ -354,7 +354,41 @@
                (and (node/atom? a)
                     (= (node/atom a) (p 1))
                     (check-index (+ i 1))))))
-         (check-index 0))))
+          (check-index 0))))
+
+(defn binders/unique-by-name [binders]
+  (let [step (fn [[seen out] b]
+               (let [name (b 1)]
+                 (if (seq/contains? seen name)
+                   [seen out]
+                   [[;seen name] [;out b]])))
+        [_ out] (reduce step [@[] @[]] binders)]
+    out))
+
+(defn term/build-id [ty lhs rhs]
+  [:list @[(node/atom/new "Id") ty lhs rhs]])
+
+(defn ctor/ford-eq-binders [data-params ret-args]
+  (let [n (length data-params)]
+    (reduce (fn [acc i]
+              (let [p (data-params i)
+                    name (p 1)
+                    ty (p 2)
+                    lhs [:atom name]
+                    rhs (ret-args i)
+                    eq-name (string "_eq" i)
+                    eq-ty (term/build-id ty lhs rhs)]
+                [;acc [:bind eq-name eq-ty]]))
+            @[]
+            (range n))))
+
+(defn ctor/forded-encoded [data-name data-params pat-binders ctor-params ret-args]
+  (let [data-param-terms (map |[:atom ($ 1)] data-params)
+        result-term (term/build-data-app data-name data-param-terms)
+        base-binders (binders/unique-by-name (seq/concat data-params (seq/concat pat-binders ctor-params)))
+        eq-binders (ctor/ford-eq-binders data-params ret-args)
+        all-binders (seq/concat base-binders eq-binders)]
+    (term/build-forall all-binders result-term)))
 
 (defn ctor/lower-indexed [data-name data-params name ctor-binders ret-args]
   (let [var-types (binders/name->type data-params)]
@@ -374,8 +408,7 @@
         (let [patterns @[]]
           (each a ret-args
             (array/push patterns (pat/from-term a pat-var-set)))
-          (let [ret-term (term/build-data-app data-name (map pat/to-term patterns))
-                encoded (term/build-forall (seq/concat pat-binders ctor-params) ret-term)]
+          (let [encoded (ctor/forded-encoded data-name data-params pat-binders ctor-params ret-args)]
             [:ctor name pat-binders patterns ctor-params encoded]))))))
 
 (defn ctor/lower [data-name data-params ctor-node]

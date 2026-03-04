@@ -56,6 +56,9 @@
 (defn data/ctors [data-decl]
   (data-decl 4))
 
+(defn ctor/encoded [ctor]
+  (ctor 5))
+
 (defn core/first-clause-body [func-decl]
   (let [clauses (func-decl 5)
         c0 (clauses 0)]
@@ -107,9 +110,15 @@
             "  (| A (succ n) = vcons (x: A) (xs: (Vec A n))))")
       forms (p/parse/text src)
       lowered (l/lower/program forms)
-      vec (decl/find-data lowered "Vec")]
+      vec (decl/find-data lowered "Vec")
+      ctors (data/ctors vec)
+      vnil (ctors 0)
+      vnil-encoded (ctor/encoded vnil)]
   (test/assert (not (nil? vec)) "selector-style indexed data parses")
-  (test/assert (= (length (data/ctors vec)) 2) "selector-style Vec has two constructors"))
+  (test/assert (= (length ctors) 2) "selector-style Vec has two constructors")
+  (test/assert (p/has/atom? vnil-encoded "Id") "indexed constructor uses ford-style equality witness")
+  (test/assert (p/has/atom? vnil-encoded "n") "ford-style constructor quantifies data index variable")
+  (test/assert (p/has/atom? vnil-encoded "zero") "ford-style constructor keeps selector target term"))
 
 (let [src (string
             "data Nat: Type\n"
