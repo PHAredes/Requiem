@@ -79,6 +79,14 @@
     "    (case vnil: zero) "
     "    (case (vcons x xs'): (succ zero))))"))
 
+(defn mk-shadowed-later-binder-decidable [suffix]
+  (string
+    (mk-base-prefix)
+    "(def okLaterShadow" suffix ": (forall (A: Type). (forall (xs: (Vec A zero)). (forall (zero: Nat). Nat))) "
+    "  (match xs: "
+    "    (case vnil: zero) "
+    "    (case (vcons x xs'): zero)))"))
+
 (test/start-suite "Property Selector Matching")
 
 (let [rng (math/rng 789)]
@@ -128,5 +136,13 @@
       (test/assert
        (lower/error-contains? src "ambiguous selector matching")
        "shadowed constructor names in indices are treated as ambiguous"))))
+
+(let [rng (math/rng 795)]
+  (for _ 0 40
+    (let [suffix (string (math/rng-int rng 100000))
+          src (mk-shadowed-later-binder-decidable suffix)]
+      (test/assert
+       (lower/ok? src)
+       "later binders do not shadow constructor heads in target indices"))))
 
 (test/end-suite)
