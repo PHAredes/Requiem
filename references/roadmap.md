@@ -6,8 +6,8 @@ This roadmap is ordered for correctness first, then ergonomics.
 
 - [x] Implement 3-way selector matching result (`yes` / `no` / `stuck`) for constructor availability checks.
 - [x] Reject `match` lowering when selector matching is `stuck` (ambiguous constructor availability).
-- [ ] Use selector result to drive branch obligations (`yes` constructors required, `no` constructors optional/unreachable diagnostics).
-- [ ] Add dedicated diagnostics for unreachable constructor clauses under `no`.
+- [x] Use selector result to drive branch obligations (`yes` constructors required, `no` constructors optional/unreachable diagnostics).
+- [x] Add dedicated diagnostics for unreachable constructor clauses under `no`.
 
 ## M1 - Coverage and Overlap for Selector Clauses
 
