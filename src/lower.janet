@@ -132,10 +132,10 @@
 (defn assoc/has? [pairs key]
   (not (nil? (assoc/get pairs key))))
 
-(defn data-env/get [data-env name]
+(defn data/env-get [data-env name]
   (assoc/get data-env name))
 
-(defn data-env/extend [data-env name ctors]
+(defn data/env-extend [data-env name ctors]
   [;data-env [name ctors]])
 
 (defn seq/concat [xs ys]
@@ -362,7 +362,7 @@
 (defn term/build-id [ty lhs rhs]
   [:list @[(node/atom/new "Id") ty lhs rhs]])
 
-(defn ctor/ford-eq-binders [data-params ret-args]
+(defn ctor/ford-eqs [data-params ret-args]
   (let [n (length data-params)]
     (reduce (fn [acc i]
               (let [p (data-params i)
@@ -376,11 +376,10 @@
             @[]
             (range n))))
 
-(defn ctor/forded-encoded [data-name data-params pat-binders ctor-params ret-args]
+(defn ctor/ford-encoded [data-name data-params pat-binders ctor-params eq-binders]
   (let [data-param-terms (map |[:atom ($ 1)] data-params)
         result-term (term/build-data-app data-name data-param-terms)
         base-binders (binders/unique-by-name (seq/concat data-params (seq/concat pat-binders ctor-params)))
-        eq-binders (ctor/ford-eq-binders data-params ret-args)
         all-binders (seq/concat base-binders eq-binders)]
     (term/build-forall all-binders result-term)))
 
@@ -390,9 +389,10 @@
         pat-var-set ordered-vars
         pat-binders (map |[:bind $ (assoc/get var-types $)] ordered-vars)
         ctor-params (filter |(not (seq/contains? pat-var-set ($ 1))) ctor-binders)
+        eq-binders (ctor/ford-eqs data-params ret-args)
         patterns (map |(pat/from-term $ pat-var-set) ret-args)
-        encoded (ctor/forded-encoded data-name data-params pat-binders ctor-params ret-args)]
-    [:ctor name pat-binders patterns ctor-params encoded]))
+        encoded (ctor/ford-encoded data-name data-params pat-binders ctor-params eq-binders)]
+    [:ctor name pat-binders patterns ctor-params encoded eq-binders]))
 
 (defn ctor/lower [data-name data-params ctor-node]
   (let [xs (node/list-items ctor-node)]
@@ -418,7 +418,7 @@
       (when (not= (length ret-args) (length data-params))
         (errorf "constructor %v returns wrong number of index arguments: %v\nExpected %d arguments to match data type parameters" name ret (length data-params)))
       (if (args/simple-return? ret-args data-params)
-        [:ctor name @[] @[] ctor-binders ctor-type]
+        [:ctor name @[] @[] ctor-binders ctor-type @[]]
         (ctor/lower-indexed data-name data-params name ctor-binders ret-args)))))
 
 (defn ctor/lower-selector-clause [data-name data-params clause-node]
@@ -634,12 +634,12 @@
 (defn subst/extend [subst x term]
   [;subst [x term]])
 
-(defn selector/head-definitely-ctor? [head ctor-names var-names]
+(defn selector/head-ctor? [head ctor-names var-names]
   (and (seq/contains? ctor-names head)
        (not (seq/contains? var-names head))))
 
-(defn selector/mismatch-status [head ctor-names var-names]
-  (if (selector/head-definitely-ctor? head ctor-names var-names)
+(defn selector/mismatch [head ctor-names var-names]
+  (if (selector/head-ctor? head ctor-names var-names)
     M/No
     M/Stuck))
 
@@ -649,15 +649,15 @@
     (= next-status M/Stuck) [M/Stuck subst]
     true [status next-subst]))
 
-(defn selector/term-eq-status [lhs rhs ctor-names var-names]
+(defn selector/term-eq [lhs rhs ctor-names var-names]
   (if (= lhs rhs)
     M/Yes
     (let [[lhead largs] (term/as-head-app lhs)
           [rhead rargs] (term/as-head-app rhs)]
       (cond
         (or (nil? lhead) (nil? rhead)) M/Stuck
-        (or (not (selector/head-definitely-ctor? lhead ctor-names var-names))
-            (not (selector/head-definitely-ctor? rhead ctor-names var-names)))
+        (or (not (selector/head-ctor? lhead ctor-names var-names))
+            (not (selector/head-ctor? rhead ctor-names var-names)))
         M/Stuck
         (not= lhead rhead) M/No
         (not= (length largs) (length rargs)) M/No
@@ -666,7 +666,7 @@
           (defn walk [i]
             (if (= i n)
               M/Yes
-              (let [status (selector/term-eq-status (largs i) (rargs i) ctor-names var-names)]
+              (let [status (selector/term-eq (largs i) (rargs i) ctor-names var-names)]
                 (if (= status M/Yes)
                   (walk (+ i 1))
                   status))))
@@ -678,7 +678,7 @@
     (if (= x "_")
       [M/Yes subst]
       (if-let [bound (subst/lookup subst x)]
-        (let [eq-status (selector/term-eq-status bound term ctor-names var-names)]
+        (let [eq-status (selector/term-eq bound term ctor-names var-names)]
           (if (= eq-status M/Yes)
             [M/Yes subst]
             (if (= eq-status M/No)
@@ -690,8 +690,8 @@
     (let [[head args] (term/as-head-app term)]
       (cond
         (nil? head) [M/Stuck subst]
-        (not (selector/head-definitely-ctor? head ctor-names var-names)) [M/Stuck subst]
-        (not= head ctor) [(selector/mismatch-status head ctor-names var-names) subst]
+        (not (selector/head-ctor? head ctor-names var-names)) [M/Stuck subst]
+        (not= head ctor) [(selector/mismatch head ctor-names var-names) subst]
         (not= (length args) (length pats)) [M/No subst]
         true
         (let [n (length args)]
@@ -727,7 +727,7 @@
               (walk (+ i 1) merged-status merged-subst)))))
       (walk 0 M/Yes @[]))))
 
-(defn match/check-selector-availability [target target-ty ctors target-args data-env var-names]
+(defn match/check-selectors [target target-ty ctors target-args data-env var-names]
   (let [ctor-names (data/ctor-names data-env)]
     (reduce (fn [acc ctor]
               (let [status (selector/match-target target-args (ctor 3) ctor-names var-names)]
@@ -754,7 +754,7 @@
 
 (defn type/ctor-names [ty data-env]
   (let [[head _] (term/as-head-app ty)]
-    (if-let [ctors (data-env/get data-env head)]
+    (if-let [ctors (data/env-get data-env head)]
       (map |($ 1) ctors)
       @[])))
 
@@ -843,6 +843,9 @@
             (walk (+ i 1) binders1 rec-pairs)))))
     (walk 0 @[] @[])))
 
+(defn branch/with-obligations [branch-binders obligations]
+  (seq/concat branch-binders obligations))
+
 (defn branch/rewrite-self-calls [body rec-pairs func-name param-names target-index]
   (reduce (fn [acc pair]
             (term/replace-self-call acc func-name param-names target-index (pair 0) (pair 1)))
@@ -854,6 +857,7 @@
     (reduce (fn [branches ctor]
               (let [ctor-name (ctor 1)
                     ctor-params (ctor 4)
+                    ctor-obligations (if (> (length ctor) 6) (ctor 6) @[])
                     case-entry (match/find-ctor-entry entries ctor-name)
                     pat-args (if case-entry (ctor/case-args (case-entry 0) ctor-name) nil)
                     ctor-status (selector/status-for status-by-ctor ctor-name)
@@ -864,8 +868,9 @@
                           (length pat-args)
                           (length ctor-params)))
                 (let [[branch-binders rec-pairs] (branch/build-binders ctor-params pat-args data-name result)
+                      full-binders (branch/with-obligations branch-binders ctor-obligations)
                       body (branch/rewrite-self-calls body0 rec-pairs func-name param-names target-index)]
-                  [;branches (term/build-lam branch-binders body)])))
+                  [;branches (term/build-lam full-binders body)])))
             @[]
             ctors)))
 
@@ -881,9 +886,9 @@
             [data-name target-args] (term/as-head-app target-ty)]
         (when (nil? data-name)
           (errorf "match target %v must have an inductive type head, got: %v" target target-ty))
-        (if-let [ctors (data-env/get data-env data-name)]
+        (if-let [ctors (data/env-get data-env data-name)]
           (let [param-name-set (params/name-set-prefix params target-index)
-                status-by-ctor (match/check-selector-availability target target-ty ctors target-args data-env param-name-set)
+                status-by-ctor (match/check-selectors target target-ty ctors target-args data-env param-name-set)
                 param-names (map |($ 1) params)
                 entries (match/cases xs)
                 wildcard-body (match/wildcard-body entries)
@@ -935,7 +940,7 @@
         (reduce (fn [[acc data-env] form]
                   (let [decl (decl/lower form data-env)
                         next-data-env (if (= (decl 0) :decl/data)
-                                        (data-env/extend data-env (decl 1) (decl 4))
+                                        (data/env-extend data-env (decl 1) (decl 4))
                                         data-env)]
                     [[;acc decl] next-data-env]))
                 [@[] @[]]
