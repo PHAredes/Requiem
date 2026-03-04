@@ -43,6 +43,15 @@
     (scan-number (string/slice tok 4))
     true nil))
 
+(defn token/hole-name [tok]
+  (cond
+    (= tok "_") "_"
+    (= tok "?") "_"
+    (and (> (length tok) 1)
+         (= (string/slice tok 0 1) "?"))
+    (string/slice tok 1)
+    true nil))
+
 (varfn elab/term [env sig-env node]
   (errorf "elab/term not yet defined"))
 
@@ -245,9 +254,11 @@
             bound
             (if-let [lvl (token/type-level tok)]
               [:type lvl]
-              (if-let [params (sig/lookup sig-env tok)]
-                (elab/function-ref tok params)
-                [:var tok])))
+              (if-let [hole (token/hole-name tok)]
+                [:hole hole]
+                (if-let [params (sig/lookup sig-env tok)]
+                  (elab/function-ref tok params)
+                  [:var tok]))))
 
           [:list xs]
           (elab/list env sig-env node xs)
