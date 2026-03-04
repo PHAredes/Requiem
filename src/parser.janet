@@ -55,15 +55,14 @@
        (= (string/slice s 0 (length prefix)) prefix)))
 
 (defn- line/indent [line]
-  (defn scan [i acc]
-    (if (>= i (length line))
-      acc
-      (let [ch (string/slice line i (+ i 1))]
-        (cond
-          (= ch " ") (scan (+ i 1) (+ acc 1))
-          (= ch "\t") (scan (+ i 1) (+ acc 2))
-          true acc))))
-  (scan 0 0))
+  (reduce (fn [acc i]
+            (let [ch (string/slice line i (+ i 1))]
+              (cond
+                (= ch " ") (+ acc 1)
+                (= ch "\t") (+ acc 2)
+                true acc)))
+          0
+          (range 0 (length line))))
 
 (defn- line/ignored? [line]
   (let [t (string/trim line)]
