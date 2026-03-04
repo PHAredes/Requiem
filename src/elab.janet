@@ -4,13 +4,11 @@
 (import ./lower :as l)
 
 (defn env/lookup [env name]
-  (defn scan [i]
-    (if (< i 0) nil
-      (let [entry (env i)]
-        (if (= (entry 0) name)
-          (entry 1)
-          (scan (- i 1))))))
-  (scan (- (length env) 1)))
+  (get (reduce (fn [acc entry]
+                 (if (= (entry 0) name) entry acc))
+               nil
+               env)
+       1))
 
 (defn env/extend [env name value]
   [;env [name value]])
