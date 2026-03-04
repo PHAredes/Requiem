@@ -46,7 +46,7 @@
                 (node/atom= (xs 0) ":")
                 (node/atom? (xs 1)))))))
 
-(defn bind/from-node [node]
+(defn bind/from [node]
   (let [xs (node/list-items node)]
     (cond
       (and (= (length xs) 2)
@@ -64,9 +64,9 @@
 
 (defn binders/from-spec [spec]
   (if (bind/single-spec? spec)
-    @[(bind/from-node spec)]
+    @[(bind/from spec)]
     (if (node/list? spec)
-      (map bind/from-node (node/list-items spec))
+      (map bind/from (node/list-items spec))
       (errorf "invalid forall binder specification: %v\nSupported formats:\n  (x: Type) - single binder\n  (x: Type y: Type) - multiple binders in a list\n  ((x: Type) (y: Type)) - multiple binders as separate specs" spec))))
 
 (defn term/forall? [node]
@@ -119,27 +119,16 @@
 (defn seq/contains? [xs x]
   (not (nil? (find-index |(= $ x) xs))))
 
-(defn assoc/get [pairs key]
-  (defn scan [i]
-    (if (< i 0)
-      nil
-      (let [entry (pairs i)]
-        (if (= (entry 0) key)
-          (entry 1)
-          (scan (- i 1))))))
-  (scan (- (length pairs) 1)))
-
-(defn assoc/has? [pairs key]
-  (not (nil? (assoc/get pairs key))))
-
 (defn data/env-get [data-env name]
-  (assoc/get data-env name))
+  (get data-env name))
 
 (defn data/env-extend [data-env name ctors]
-  [;data-env [name ctors]])
+  (let [new-env (table/clone data-env)]
+    (put new-env name ctors)
+    new-env))
 
 (defn seq/concat [xs ys]
-  (reduce (fn [acc y] [;acc y]) xs ys))
+  (array/concat @[] xs ys))
 
 (defn term/split-pi [node]
   (defn split-loop [cur index binders]
@@ -170,16 +159,18 @@
 
     true [nil @[]]))
 
-(defn binders/name->type [binders]
-  (map |[($ 1) ($ 2)] binders))
+(defn binders/by-type [bs]
+  (let [t @{}]
+    (each b bs
+      (put t (b 1) (b 2)))
+    t))
 
 (defn term/collect-var-order [terms var-types]
   (defn walk [node seen out]
     (cond
       (node/atom? node)
       (let [tok (node/atom node)]
-        (if (and (assoc/has? var-types tok)
-                 (not (seq/contains? seen tok)))
+        (if (and (has-key? var-types tok) (not (has-key? seen tok)))
           [[;seen tok] [;out tok]]
           [seen out]))
 
@@ -199,11 +190,12 @@
       [:pat/con tok @[]])
 
     [:list xs]
-    (if (and (> (length xs) 0) (node/atom? (xs 0)))
-      (let [head (node/atom (xs 0))
-            args (map |(pat/from-term $ pat-var-set) (slice xs 1 (length xs)))]
-        [:pat/con head args])
-(errorf "cannot convert term to pattern: %v\nOnly simple patterns are supported:\n  Variables (x, y, etc.)\n  Constructor applications (C pattern1 pattern2)" term))
+    (if (zero? (length xs))
+      (errorf "cannot convert empty list to pattern: %v" term)
+      (let [[h & t] xs]
+        (match h
+          [:atom c] [:pat/con c (map |(pat/from-term $ pat-var-set) t)]
+          _ (errorf "cannot convert term to pattern: %v" term))))
 
     _
     (errorf "cannot convert term to pattern: %v\nOnly simple patterns are supported:\n  Variables (x, y, etc.)\n  Constructor applications (C pattern1 pattern2)" term)))
@@ -273,7 +265,7 @@
       (defn collect-params [i params]
         (cond
           (and (< i n) (bind/single-spec? (nodes i)))
-          (collect-params (+ i 1) [;params (bind/from-node (nodes i))])
+          (collect-params (+ i 1) [;params (bind/from (nodes i))])
           
           (and (< i n) (node/atom= (nodes i) ":"))
           (do
@@ -304,7 +296,7 @@
           [params result] (term/split-pi ann)]
       [name params result consumed])))
 
-(defn clause/pipe? [node]
+(defn clause/pipe-block? [node]
   (and (node/list? node)
        (let [xs (node/list-items node)]
          (and (> (length xs) 0)
@@ -331,7 +323,7 @@
 
 (defn ctor/arg->binder [arg i]
   (if (bind/single-spec? arg)
-    (bind/from-node arg)
+    (bind/from arg)
     [:bind (string "_arg" i) arg]))
 
 (defn ctor/args->binders [args]
@@ -385,11 +377,11 @@
     (term/build-forall all-binders result-term)))
 
 (defn ctor/lower-indexed [data-name data-params name ctor-binders ret-args]
-  (let [var-types (binders/name->type (binders/unique-by-name (seq/concat data-params ctor-binders)))
+  (let [var-types (binders/by-type (binders/unique-by-name (seq/concat data-params ctor-binders)))
         ordered-vars (term/collect-var-order ret-args var-types)
         pat-var-set ordered-vars
-        pat-binders (map |[:bind $ (assoc/get var-types $)] ordered-vars)
-        ctor-params (filter |(not (seq/contains? pat-var-set ($ 1))) ctor-binders)
+        pat-binders (map |[:bind $ (get var-types $)] ordered-vars)
+        ctor-params (filter |(not (has-value? pat-var-set ($ 1))) ctor-binders)
         eq-binders (ctor/ford-eqs data-params ret-args)
         patterns (map |(pat/from-term $ pat-var-set) ret-args)
         encoded (ctor/ford-encoded data-name data-params pat-binders ctor-params eq-binders)]
@@ -449,24 +441,42 @@
               synthetic [:list @[(node/atom/new ctor-name) ctor-type]]]
           (ctor/lower data-name data-params synthetic))))))
 
+(defn clause/pipe-sep? [node] (and (node/atom? node) (= (node/atom node) "|")))
+
+(defn clause/group-pipes [nodes]
+  (let [out @[]]
+    (var cur @[])
+    (each n nodes
+      (if (clause/pipe-sep? n)
+        (do
+          (when (not (empty? cur)) (array/push out [:list cur]))
+          (set cur @[n]))
+        (array/push cur n)))
+    (when (not (empty? cur)) (array/push out [:list cur]))
+    out))
+
 (defn data/lower [nodes]
   (let [[name params sort consumed] (data/parse-head nodes)
-        tail-raw (slice nodes consumed (length nodes))
-        tail (if (tuple? tail-raw) (array ;tail-raw) tail-raw)]
+        raw-tail (slice nodes consumed (length nodes))
+        # Handle the case where constructors are wrapped in a single list
+        raw-tail (if (and (= (length raw-tail) 1)
+                          (node/list? (raw-tail 0))
+                          (not (clause/pipe-block? (raw-tail 0))))
+                   (node/list-items (raw-tail 0))
+                   raw-tail)
+        has-pipe (some clause/pipe-sep? raw-tail)
+        tail (if has-pipe (clause/group-pipes raw-tail) raw-tail)]
     (if (zero? (length tail))
       [:decl/data name params sort @[]]
-      (if (clause/pipe? (tail 0))
-        (let [ctors (map (fn [c]
-                           (when (not (clause/pipe? c))
-                             (errorf "all constructor clauses must use the '|' form in data %v" name))
-                           (ctor/lower-selector-clause name params c))
-                         tail)]
-          [:decl/data name params sort ctors])
-        (let [ctor-block (tail 0)]
-          (when (not (node/list? ctor-block))
-            (errorf "data %v constructors must be grouped in a list\nExpected: (data Name: Type) ((C1 ...) (C2 ...) ...)" name))
-          (let [ctors (map |(ctor/lower name params $) (node/list-items ctor-block))]
-            [:decl/data name params sort ctors]))))))
+      (let [ctors (map (fn [c]
+                         (if (node/list? c)
+                           (let [items (node/list-items c)]
+                             (if (and (> (length items) 0) (clause/pipe-sep? (items 0)))
+                               (ctor/lower-selector-clause name params c)
+                               (ctor/lower name params c)))
+                           (ctor/lower name params c)))
+                       tail)]
+        [:decl/data name params sort ctors]))))
 
 (defn pat/from-case [node depth]
   (match node
@@ -482,7 +492,7 @@
       (let [head (node/atom (xs 0))
             args (map |(pat/from-case $ (+ depth 1)) (slice xs 1 (length xs)))]
         [:pat/con head args])
-(errorf "invalid case pattern: %v\nSupported patterns:\n  Variables: x, y, _ (wildcard)\n  Constructor patterns: (Cons x xs)\n  Impossible: impossible" node))
+      (errorf "invalid case pattern: %v\nSupported patterns:\n  Variables: x, y, _ (wildcard)\n  Constructor patterns: (Cons x xs)\n  Impossible: impossible" node))
 
     _
     (errorf "invalid case pattern: %v\nOnly atom or list patterns are supported in case expressions" node)))
@@ -531,6 +541,9 @@
 (defn type/returns-data? [ty data-name]
   (let [[head _] (term/as-head-app ty)]
     (= head data-name)))
+
+(defn match/ctor-case [entries cname]
+  (some |(match $ [[:pat/con c args] body] (when (= c cname) $) _ nil) entries))
 
 (defn ctor/case-args [pat ctor-name]
   (match pat
@@ -614,26 +627,25 @@
 (def M/Stuck :match/stuck)
 
 (defn data/ctor-names [data-env]
-  (reduce (fn [acc entry]
-            (reduce (fn [inner ctor]
-                      [;inner (ctor 1)])
-                    acc
-                    (entry 1)))
-          @[]
-          data-env))
+  (mapcat (fn [entry] (map |($ 1) entry))
+          (values data-env)))
 
 (defn subst/lookup [subst x]
-  (defn scan [i]
-    (if (< i 0)
-      nil
-      (let [entry (subst i)]
-        (if (= (entry 0) x)
-          (entry 1)
-          (scan (- i 1))))))
-  (scan (- (length subst) 1)))
+  (get subst x))
+
+(defn sel/solve [eqs]
+  (prompt :stuck
+    (let [subst @{}]
+      (each [t p] eqs
+        (if-let [v (get subst p)]
+          (when (not= v t) (return :stuck M/Stuck))
+          (put subst p t)))
+      subst)))
 
 (defn subst/extend [subst x term]
-  [;subst [x term]])
+  (let [new-subst (table/clone subst)]
+    (put new-subst x term)
+    new-subst))
 
 (defn selector/head-ctor? [head ctor-names var-names]
   (and (seq/contains? ctor-names head)
@@ -726,32 +738,20 @@
             (if (= merged-status M/No)
               M/No
               (walk (+ i 1) merged-status merged-subst)))))
-      (walk 0 M/Yes @[]))))
+      (walk 0 M/Yes @{}))))
 
-(defn match/check-selectors [target target-ty ctors target-args data-env var-names]
-  (let [ctor-names (data/ctor-names data-env)]
+(defn sel/check [target ty ctors targs env vars]
+  (let [cnames (data/ctor-names env)]
     (reduce (fn [acc ctor]
-              (let [status (selector/match-target target-args (ctor 3) ctor-names var-names)]
-                (when (= status M/Stuck)
-                  (errorf "ambiguous selector matching for constructor %v on match target %v: %v\nTarget type: %v\nConstructor selectors: %v\nSelector matching got stuck (neither definitely matches nor definitely mismatches). Refine the target indices before matching."
-                          (ctor 1)
-                          target
-                          target-args
-                          target-ty
-                          (ctor 3)))
-                [;acc [(ctor 1) status]]))
-            @[]
+              (let [s (selector/match-target targs (ctor 3) cnames vars)]
+                (when (= s M/Stuck)
+                  (errorf "ambiguous selector matching for %v" (ctor 1)))
+                (put acc (ctor 1) s)))
+            @{}
             ctors)))
 
 (defn selector/status-for [status-by-ctor ctor-name]
-  (defn scan [i]
-    (if (< i 0)
-      M/Yes
-      (let [entry (status-by-ctor i)]
-        (if (= (entry 0) ctor-name)
-          (entry 1)
-          (scan (- i 1))))))
-  (scan (- (length status-by-ctor) 1)))
+  (get status-by-ctor ctor-name M/Yes))
 
 (defn type/ctor-names [ty data-env]
   (let [[head _] (term/as-head-app ty)]
@@ -769,11 +769,12 @@
       true [:pat/var tok])
 
     [:list xs]
-    (if (and (> (length xs) 0) (node/atom? (xs 0)))
-      (let [head (node/atom (xs 0))
-            args (map |(pat/from-clause $ (+ depth 1) ctor-names) (slice xs 1 (length xs)))]
-        [:pat/con head args])
-      (errorf "invalid function clause pattern: %v" node))
+    (if (zero? (length xs))
+      (errorf "invalid clause pattern: %v" node)
+      (let [[h & t] xs]
+        (match h
+          [:atom c] [:pat/con c (map |(pat/from-clause $ (+ depth 1) ctor-names) t)]
+          _ (errorf "invalid clause pattern: %v" node))))
 
     _
     (errorf "invalid function clause pattern: %v" node)))
@@ -809,17 +810,13 @@
   (if case-entry
     (do
       (when (= ctor-status M/No)
-        (errorf "unreachable constructor case for %v under match target indices\nConstructor %v is impossible for target %v : %v\nRemove this clause or replace it with a wildcard case."
-                ctor-name
-                ctor-name
-                target-name
-                data-name))
+        (errorf "unreachable case for %v" ctor-name))
       (case-entry 1))
     (if wildcard-body
       wildcard-body
       (if (= ctor-status M/Yes)
         (errorf "missing reachable match case for constructor %v" ctor-name)
-        (errorf "constructor %v is unreachable for this match target; add a wildcard case to provide a fallback branch" ctor-name)))))
+        (errorf "unreachable case for %v" ctor-name)))))
 
 (defn branch/pattern-name [pat default-name]
   (if (and pat (= (pat 0) :pat/var) (not= (pat 1) "_"))
@@ -844,7 +841,10 @@
             (walk (+ i 1) binders1 rec-pairs)))))
     (walk 0 @[] @[])))
 
-(defn term/rewrite-self [body rec-pairs func-name param-names target-index]
+(defn branch/with-obligations [branch-binders obligations]
+  (seq/concat branch-binders obligations))
+
+(defn branch/rewrite-self-calls [body rec-pairs func-name param-names target-index]
   (reduce (fn [acc pair]
             (term/replace-self-call acc func-name param-names target-index (pair 0) (pair 1)))
           body
@@ -854,7 +854,6 @@
   (let [target-name (param-names target-index)]
     (reduce (fn [branches ctor]
               (let [ctor-name (ctor 1)
-                    pat-binders (ctor 2)
                     ctor-params (ctor 4)
                     ctor-obligations (if (> (length ctor) 6) (ctor 6) @[])
                     case-entry (match/find-ctor-entry entries ctor-name)
@@ -867,9 +866,8 @@
                           (length pat-args)
                           (length ctor-params)))
                 (let [[branch-binders rec-pairs] (branch/build-binders ctor-params pat-args data-name result)
-                      branch-binders (seq/concat pat-binders branch-binders)
-                      full-binders (seq/concat branch-binders ctor-obligations)
-                      body (term/rewrite-self body0 rec-pairs func-name param-names target-index)]
+                      full-binders (branch/with-obligations branch-binders ctor-obligations)
+                      body (branch/rewrite-self-calls body0 rec-pairs func-name param-names target-index)]
                   [;branches (term/build-lam full-binders body)])))
             @[]
             ctors)))
@@ -888,7 +886,7 @@
           (errorf "match target %v must have an inductive type head, got: %v" target target-ty))
         (if-let [ctors (data/env-get data-env data-name)]
           (let [param-name-set (params/name-set-prefix params target-index)
-                status-by-ctor (match/check-selectors target target-ty ctors target-args data-env param-name-set)
+                status-by-ctor (sel/check target target-ty ctors target-args data-env param-name-set)
                 param-names (map |($ 1) params)
                 entries (match/cases xs)
                 wildcard-body (match/wildcard-body entries)
@@ -905,9 +903,9 @@
         tail (slice nodes consumed (length nodes))]
     (when (zero? (length tail))
       (errorf "def %v missing body\nExpected format: (def name: Type = expression)\nFunction definitions require a body after the type annotation" name))
-    (if (clause/pipe? (tail 0))
+    (if (or (clause/pipe-sep? (tail 0)) (clause/pipe-block? (tail 0)))
       (let [clauses (map (fn [c]
-                           (when (not (clause/pipe? c))
+                           (when (not (or (clause/pipe-sep? c) (clause/pipe-block? c)))
                              (errorf "all clauses in def %v must use the '|' form" name))
                            (func/lower-selector-clause c params data-env))
                          tail)]
@@ -943,14 +941,14 @@
                                         (data/env-extend data-env (decl 1) (decl 4))
                                         data-env)]
                     [[;acc decl] next-data-env]))
-                [@[] @[]]
+                [@[] @{}]
                 forms)]
     decls))
 
 (def exports
   {:lower/program lower/program
    :decl/lower decl/lower
-   :bind/from-node bind/from-node
+   :bind/from bind/from
    :binders/from-spec binders/from-spec
    :term/split-pi term/split-pi
    :term/as-head-app term/as-head-app

@@ -102,7 +102,7 @@
     (let [suffix (string (math/rng-int rng 100000))
           src (mk-match-src-ambiguous suffix)]
       (test/assert
-       (lower/error-contains? src "ambiguous selector matching")
+       (lower/error-contains? src "ambiguous selector")
        "variable index match is rejected with stuck selector diagnostics"))))
 
 (let [rng (math/rng 790)]
@@ -126,7 +126,7 @@
     (let [suffix (string (math/rng-int rng 100000))
           src (mk-repeat-selector-ambiguous suffix)]
       (test/assert
-       (lower/error-contains? src "ambiguous selector matching")
+       (lower/error-contains? src "ambiguous selector")
        "repeated selector vars over unresolved indices are ambiguous"))))
 
 (let [rng (math/rng 793)]
@@ -142,7 +142,7 @@
     (let [suffix (string (math/rng-int rng 100000))
           src (mk-shadowed-ctor-name-ambiguous suffix)]
       (test/assert
-       (lower/error-contains? src "ambiguous selector matching")
+       (lower/error-contains? src "ambiguous selector")
        "shadowed constructor names in indices are treated as ambiguous"))))
 
 (let [rng (math/rng 795)]
@@ -158,7 +158,7 @@
     (let [suffix (string (math/rng-int rng 100000))
           src (mk-unreachable-explicit-case suffix)]
       (test/assert
-       (lower/error-contains? src "unreachable constructor case")
+       (lower/error-contains? src "unreachable case")
        "explicit clauses for selector-no constructors are rejected"))))
 
 (test/end-suite)

@@ -2,15 +2,14 @@
 
 (import ./parser :as p)
 (import ./lower :as l)
+(import ./util :as u)
 
 (defn env/lookup [env name]
-  (defn scan [i]
-    (if (< i 0) nil
-      (let [entry (env i)]
-        (if (= (entry 0) name)
-          (entry 1)
-          (scan (- i 1))))))
-  (scan (- (length env) 1)))
+  (get (reduce (fn [acc entry]
+                 (if (= (entry 0) name) entry acc))
+               nil
+               env)
+       1))
 
 (defn env/extend [env name value]
   [;env [name value]])
@@ -194,7 +193,7 @@
 
 (defn elab/list-let [env sig-env xs]
   (list/expect-arity "let" xs 4)
-  (let [bind (l/bind/from-node (xs 1))
+  (let [bind (l/bind/from (xs 1))
         name (bind 1)
         val-core (elab/term env sig-env (xs 2))]
     (elab/term (env/extend env name val-core) sig-env (xs 3))))
@@ -288,15 +287,12 @@
                 binders)]
     [out final-env]))
 
-(defn seq/contains? [xs x]
-  (not (nil? (find-index |(= $ x) xs))))
-
 (defn clause/vars [patterns]
   "Collect unique pattern variables from clause patterns."
   (defn collect [pat seen]
     (match pat
       [:pat/var x]
-      (if (or (= x "_") (seq/contains? seen x))
+      (if (or (= x "_") (u/seq/contains? seen x))
         seen
         [;seen x])
       [:pat/con _ args]
