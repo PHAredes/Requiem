@@ -478,6 +478,12 @@
       (array/push out [:pat/var (p 1)]))
     out))
 
+(defn params/name-set-prefix [params end-exclusive]
+  (let [out @{}]
+    (for i 0 end-exclusive
+      (put out ((params i) 1) true))
+    out))
+
 (defn node/binder [name ty]
   [:list @[(node/atom/new (string name ":")) ty]])
 
@@ -830,8 +836,7 @@
         (when (nil? data-name)
           (errorf "match target %v must have an inductive type head, got: %v" target target-ty))
         (if-let [ctors (get data-env data-name)]
-          (let [param-name-set @{}
-                _ (each p params (put param-name-set (p 1) true))
+          (let [param-name-set (params/name-set-prefix params target-index)
                 _ (match/check-selector-availability target target-ty ctors target-args data-env param-name-set)
                 param-names (map |($ 1) params)
                 entries (match/cases xs)
