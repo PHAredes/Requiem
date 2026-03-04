@@ -66,10 +66,7 @@
   (if (bind/single-spec? spec)
     @[(bind/from-node spec)]
     (if (node/list? spec)
-      (let [out @[]]
-        (each b (node/list-items spec)
-          (array/push out (bind/from-node b)))
-        out)
+      (map bind/from-node (node/list-items spec))
       (errorf "invalid forall binder specification: %v\nSupported formats:\n  (x: Type) - single binder\n  (x: Type y: Type) - multiple binders in a list\n  ((x: Type) (y: Type)) - multiple binders as separate specs" spec))))
 
 (defn term/forall? [node]
@@ -122,17 +119,39 @@
 (defn seq/contains? [xs x]
   (not (nil? (find-index |(= $ x) xs))))
 
+(defn assoc/get [pairs key]
+  (defn scan [i]
+    (if (< i 0)
+      nil
+      (let [entry (pairs i)]
+        (if (= (entry 0) key)
+          (entry 1)
+          (scan (- i 1))))))
+  (scan (- (length pairs) 1)))
+
+(defn assoc/has? [pairs key]
+  (not (nil? (assoc/get pairs key))))
+
+(defn data-env/get [data-env name]
+  (assoc/get data-env name))
+
+(defn data-env/extend [data-env name ctors]
+  [;data-env [name ctors]])
+
+(defn seq/concat [xs ys]
+  (reduce (fn [acc y] [;acc y]) xs ys))
+
 (defn term/split-pi [node]
   (defn split-loop [cur index binders]
     (cond
       (term/forall? cur)
       (let [[bs body] (term/unpack-forall cur)]
-        (split-loop body index (reduce |(array/push $0 $1) binders bs)))
+        (split-loop body index (seq/concat binders bs)))
 
       (term/arrow? cur)
       (let [[dom cod] (term/unpack-arrow cur)
             name (string "_arg" index)]
-        (split-loop cod (+ index 1) (array/push binders [:bind name dom])))
+        (split-loop cod (+ index 1) [;binders [:bind name dom]]))
 
       true
       [binders cur]))
@@ -151,51 +170,38 @@
 
     true [nil @[]]))
 
-(defn seq/concat [xs ys]
-  (let [out @[]]
-    (each x xs (array/push out x))
-    (each y ys (array/push out y))
-    out))
-
 (defn binders/name->type [binders]
-  (let [m @{}]
-    (each b binders
-      (put m (b 1) (b 2)))
-    m))
+  (map |[($ 1) ($ 2)] binders))
 
 (defn term/collect-var-order [terms var-types]
-  (let [out @[]
-        seen @{}]
-    (defn walk [node]
-      (cond
-        (node/atom? node)
-        (let [tok (node/atom node)]
-          (when (and (has-key? var-types tok)
-                     (not (has-key? seen tok)))
-            (put seen tok true)
-            (array/push out tok)))
+  (defn walk [node seen out]
+    (cond
+      (node/atom? node)
+      (let [tok (node/atom node)]
+        (if (and (assoc/has? var-types tok)
+                 (not (seq/contains? seen tok)))
+          [[;seen tok] [;out tok]]
+          [seen out]))
 
-        (node/list? node)
-        (each x (node/list-items node)
-          (walk x))
+      (node/list? node)
+      (reduce (fn [[s o] x] (walk x s o)) [seen out] (node/list-items node))
 
-        true nil))
-    (each t terms (walk t))
+      true [seen out]))
+  (let [[_ out]
+        (reduce (fn [[seen out] t] (walk t seen out)) [@[] @[]] terms)]
     out))
 
 (defn pat/from-term [term pat-var-set]
   (match term
     [:atom tok]
-    (if (has-key? pat-var-set tok)
+    (if (seq/contains? pat-var-set tok)
       [:pat/var tok]
       [:pat/con tok @[]])
 
     [:list xs]
     (if (and (> (length xs) 0) (node/atom? (xs 0)))
       (let [head (node/atom (xs 0))
-            args @[]]
-        (for i 1 (length xs)
-          (array/push args (pat/from-term (xs i) pat-var-set)))
+            args (map |(pat/from-term $ pat-var-set) (slice xs 1 (length xs)))]
         [:pat/con head args])
 (errorf "cannot convert term to pattern: %v\nOnly simple patterns are supported:\n  Variables (x, y, etc.)\n  Constructor applications (C pattern1 pattern2)" term))
 
@@ -208,10 +214,7 @@
     [:pat/con c args]
     (if (zero? (length args))
       [:atom c]
-      (let [xs @[]]
-        (array/push xs [:atom c])
-        (each a args (array/push xs (pat/to-term a)))
-        [:list xs]))
+      [:list (seq/concat @[[:atom c]] (map pat/to-term args))])
     [:pat/impossible]
     (errorf "cannot convert impossible pattern to term\nThe 'impossible' pattern is internal-only and cannot be converted back to a term")
     _
@@ -220,10 +223,7 @@
 (defn term/build-data-app [name args]
   (if (zero? (length args))
     [:atom name]
-    (let [xs @[]]
-      (array/push xs [:atom name])
-      (each a args (array/push xs a))
-      [:list xs])))
+    [:list (seq/concat @[[:atom name]] args)]))
 
 (defn term/build-forall [binders body]
   (defn fold-binders [acc binder]
@@ -273,7 +273,7 @@
       (defn collect-params [i params]
         (cond
           (and (< i n) (bind/single-spec? (nodes i)))
-          (collect-params (+ i 1) (array/push params (bind/from-node (nodes i))))
+          (collect-params (+ i 1) [;params (bind/from-node (nodes i))])
           
           (and (< i n) (node/atom= (nodes i) ":"))
           (do
@@ -327,10 +327,7 @@
       [:list rest])))
 
 (defn params/default-selector-terms [params]
-  (let [out @[]]
-    (each p params
-      (array/push out [:atom (p 1)]))
-    out))
+  (map |[:atom ($ 1)] params))
 
 (defn ctor/arg->binder [arg i]
   (if (bind/single-spec? arg)
@@ -338,10 +335,7 @@
     [:bind (string "_arg" i) arg]))
 
 (defn ctor/args->binders [args]
-  (let [out @[]]
-    (for i 0 (length args)
-      (array/push out (ctor/arg->binder (args i) i)))
-    out))
+  (map |(ctor/arg->binder (args $) $) (range (length args))))
 
 (defn args/simple-return? [args data-params]
   (and (= (length args) (length data-params))
@@ -391,25 +385,14 @@
     (term/build-forall all-binders result-term)))
 
 (defn ctor/lower-indexed [data-name data-params name ctor-binders ret-args]
-  (let [var-types (binders/name->type data-params)]
-    (each b ctor-binders
-      (put var-types (b 1) (b 2)))
-    (let [ordered-vars (term/collect-var-order ret-args var-types)
-          pat-var-set @{}
-          pat-binders @[]]
-      (each v ordered-vars
-        (do
-          (put pat-var-set v true)
-          (array/push pat-binders [:bind v (get var-types v)])))
-      (let [ctor-params @[]]
-        (each b ctor-binders
-          (when (not (has-key? pat-var-set (b 1)))
-            (array/push ctor-params b)))
-        (let [patterns @[]]
-          (each a ret-args
-            (array/push patterns (pat/from-term a pat-var-set)))
-          (let [encoded (ctor/forded-encoded data-name data-params pat-binders ctor-params ret-args)]
-            [:ctor name pat-binders patterns ctor-params encoded]))))))
+  (let [var-types (binders/name->type (binders/unique-by-name (seq/concat data-params ctor-binders)))
+        ordered-vars (term/collect-var-order ret-args var-types)
+        pat-var-set ordered-vars
+        pat-binders (map |[:bind $ (assoc/get var-types $)] ordered-vars)
+        ctor-params (filter |(not (seq/contains? pat-var-set ($ 1))) ctor-binders)
+        patterns (map |(pat/from-term $ pat-var-set) ret-args)
+        encoded (ctor/forded-encoded data-name data-params pat-binders ctor-params ret-args)]
+    [:ctor name pat-binders patterns ctor-params encoded]))
 
 (defn ctor/lower [data-name data-params ctor-node]
   (let [xs (node/list-items ctor-node)]
@@ -472,19 +455,16 @@
     (if (zero? (length tail))
       [:decl/data name params sort @[]]
       (if (clause/pipe? (tail 0))
-        (let [ctors @[]]
-          (each c tail
-            (do
-              (when (not (clause/pipe? c))
-                (errorf "all constructor clauses must use the '|' form in data %v" name))
-              (array/push ctors (ctor/lower-selector-clause name params c))))
+        (let [ctors (map (fn [c]
+                           (when (not (clause/pipe? c))
+                             (errorf "all constructor clauses must use the '|' form in data %v" name))
+                           (ctor/lower-selector-clause name params c))
+                         tail)]
           [:decl/data name params sort ctors])
         (let [ctor-block (tail 0)]
           (when (not (node/list? ctor-block))
             (errorf "data %v constructors must be grouped in a list\nExpected: (data Name: Type) ((C1 ...) (C2 ...) ...)" name))
-          (let [ctors @[]]
-            (each c (node/list-items ctor-block)
-              (array/push ctors (ctor/lower name params c)))
+          (let [ctors (map |(ctor/lower name params $) (node/list-items ctor-block))]
             [:decl/data name params sort ctors]))))))
 
 (defn pat/from-case [node depth]
@@ -499,9 +479,7 @@
     [:list xs]
     (if (and (> (length xs) 0) (node/atom? (xs 0)))
       (let [head (node/atom (xs 0))
-            args @[]]
-        (for i 1 (length xs)
-          (array/push args (pat/from-case (xs i) (+ depth 1))))
+            args (map |(pat/from-case $ (+ depth 1)) (slice xs 1 (length xs)))]
         [:pat/con head args])
 (errorf "invalid case pattern: %v\nSupported patterns:\n  Variables: x, y, _ (wildcard)\n  Constructor patterns: (Cons x xs)\n  Impossible: impossible" node))
 
@@ -509,10 +487,7 @@
     (errorf "invalid case pattern: %v\nOnly atom or list patterns are supported in case expressions" node)))
 
 (defn params/default-patterns [params]
-  (let [out @[]]
-    (each p params
-      (array/push out [:pat/var (p 1)]))
-    out))
+  (map |[:pat/var ($ 1)] params))
 
 (defn params/name-set-prefix [params end-exclusive]
   (map |($ 1) (slice params 0 end-exclusive)))
@@ -609,11 +584,10 @@
             [(rest 0) (rest 1)]))))))
 
 (defn match/cases [xs]
-  (let [out @[]]
-    (for i 2 (length xs)
-      (let [[pat-node body] (case/split (xs i))]
-        (array/push out [(pat/from-case pat-node 0) body])))
-    out))
+  (map (fn [i]
+         (let [[pat-node body] (case/split (xs i))]
+           [(pat/from-case pat-node 0) body]))
+       (range 2 (length xs))))
 
 (defn match/wildcard-body [entries]
   (defn find-wildcard [entries]
@@ -639,15 +613,13 @@
 (def M/Stuck :match/stuck)
 
 (defn data/ctor-names [data-env]
-  (reduce (fn [acc data-name]
-            (if-let [ctors (get data-env data-name)]
-              (reduce (fn [inner ctor]
-                        [;inner (ctor 1)])
-                      acc
-                      ctors)
-              acc))
+  (reduce (fn [acc entry]
+            (reduce (fn [inner ctor]
+                      [;inner (ctor 1)])
+                    acc
+                    (entry 1)))
           @[]
-          (keys data-env)))
+          data-env))
 
 (defn subst/lookup [subst x]
   (defn scan [i]
@@ -782,7 +754,7 @@
 
 (defn type/ctor-names [ty data-env]
   (let [[head _] (term/as-head-app ty)]
-    (if-let [ctors (get data-env head)]
+    (if-let [ctors (data-env/get data-env head)]
       (map |($ 1) ctors)
       @[])))
 
@@ -909,7 +881,7 @@
             [data-name target-args] (term/as-head-app target-ty)]
         (when (nil? data-name)
           (errorf "match target %v must have an inductive type head, got: %v" target target-ty))
-        (if-let [ctors (get data-env data-name)]
+        (if-let [ctors (data-env/get data-env data-name)]
           (let [param-name-set (params/name-set-prefix params target-index)
                 status-by-ctor (match/check-selector-availability target target-ty ctors target-args data-env param-name-set)
                 param-names (map |($ 1) params)
@@ -929,12 +901,11 @@
     (when (zero? (length tail))
       (errorf "def %v missing body\nExpected format: (def name: Type = expression)\nFunction definitions require a body after the type annotation" name))
     (if (clause/pipe? (tail 0))
-      (let [clauses @[]]
-        (each c tail
-          (do
-            (when (not (clause/pipe? c))
-              (errorf "all clauses in def %v must use the '|' form" name))
-            (array/push clauses (func/lower-selector-clause c params data-env))))
+      (let [clauses (map (fn [c]
+                           (when (not (clause/pipe? c))
+                             (errorf "all clauses in def %v must use the '|' form" name))
+                           (func/lower-selector-clause c params data-env))
+                         tail)]
         [:decl/func name params result clauses])
       (let [body (tail 0)
             lowered-body (if (term/match? body)
@@ -960,13 +931,15 @@
       (errorf "top-level form must be a list (s-expression): %v\nAll top-level forms must be properly parenthesized" norm))))
 
 (defn lower/program [forms]
-  (let [decls @[]
-        data-env @{}]
-    (each form forms
-      (let [decl (decl/lower form data-env)]
-        (array/push decls decl)
-        (when (= (decl 0) :decl/data)
-          (put data-env (decl 1) (decl 4)))))
+  (let [[decls _]
+        (reduce (fn [[acc data-env] form]
+                  (let [decl (decl/lower form data-env)
+                        next-data-env (if (= (decl 0) :decl/data)
+                                        (data-env/extend data-env (decl 1) (decl 4))
+                                        data-env)]
+                    [[;acc decl] next-data-env]))
+                [@[] @[]]
+                forms)]
     decls))
 
 (def exports
