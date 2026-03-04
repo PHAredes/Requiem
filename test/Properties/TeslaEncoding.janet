@@ -111,6 +111,21 @@
   (test/assert (not (nil? vec)) "selector-style indexed data parses")
   (test/assert (= (length (data/ctors vec)) 2) "selector-style Vec has two constructors"))
 
+(test/assert-error
+ (fn []
+   (let [src (string
+               "(data Nat: Type ((zero Nat) (succ (forall (k: Nat). Nat))))"
+               " (data Vec (A: Type) (n: Nat): Type"
+               "   (| A zero = vnil)"
+               "   (| A (succ n) = vcons (x: A) (xs: (Vec A n))))"
+               " (def bad: (forall (A: Type). (forall (n: Nat). (forall (xs: (Vec A n)). Nat)))"
+               "   (match xs:"
+               "     (case vnil: zero)"
+               "     (case (vcons x xs'): zero)))")
+         forms (p/parse/text src)]
+     (l/lower/program forms)))
+ "selector matching rejects stuck/ambiguous indexed match targets")
+
 (let [src (string
             "data Nat: Type\n"
             "  | zero\n"
