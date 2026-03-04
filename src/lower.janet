@@ -629,15 +629,41 @@
     (= next-status M/Stuck) [M/Stuck subst]
     true [status next-subst]))
 
+(defn selector/term-eq-status [lhs rhs ctor-name-set]
+  (if (= lhs rhs)
+    M/Yes
+    (let [[lhead largs] (term/as-head-app lhs)
+          [rhead rargs] (term/as-head-app rhs)]
+      (cond
+        (or (nil? lhead) (nil? rhead)) M/Stuck
+        (or (not (has-key? ctor-name-set lhead))
+            (not (has-key? ctor-name-set rhead)))
+        M/Stuck
+        (not= lhead rhead) M/No
+        (not= (length largs) (length rargs)) M/No
+        true
+        (let [n (length largs)]
+          (defn walk [i]
+            (if (= i n)
+              M/Yes
+              (let [status (selector/term-eq-status (largs i) (rargs i) ctor-name-set)]
+                (if (= status M/Yes)
+                  (walk (+ i 1))
+                  status))))
+          (walk 0))))))
+
 (defn selector/match-term [term pat ctor-name-set subst]
   (match pat
     [:pat/var x]
     (if (= x "_")
       [M/Yes subst]
       (if-let [bound (subst/lookup subst x)]
-        (if (= bound term)
-          [M/Yes subst]
-          [M/No subst])
+        (let [eq-status (selector/term-eq-status bound term ctor-name-set)]
+          (if (= eq-status M/Yes)
+            [M/Yes subst]
+            (if (= eq-status M/No)
+              [M/No subst]
+              [M/Stuck subst])))
         [M/Yes (subst/extend subst x term)]))
 
     [:pat/con ctor pats]
