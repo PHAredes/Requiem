@@ -287,20 +287,21 @@
                 binders)]
     [out final-env]))
 
+(defn seq/contains? [xs x]
+  (not (nil? (find-index |(= $ x) xs))))
+
 (defn clause/vars [patterns]
-  (let [seen @{}
-        out @[]]
-    (defn collect [pat]
-      (match pat
-        [:pat/var x]
-        (when (and (not= x "_") (not (has-key? seen x)))
-          (put seen x true)
-          (array/push out x))
-        [:pat/con _ args]
-        (each a args (collect a))
-        _ nil))
-    (each p patterns (collect p))
-    out))
+  "Collect unique pattern variables from clause patterns."
+  (defn collect [pat seen]
+    (match pat
+      [:pat/var x]
+      (if (or (= x "_") (seq/contains? seen x))
+        seen
+        [;seen x])
+      [:pat/con _ args]
+      (reduce collect seen args)
+      seen))
+  (reduce collect @[] patterns))
 
 (defn clause/elab [base-env sig-env clause]
   (match clause
