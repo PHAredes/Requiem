@@ -351,13 +351,14 @@
           (check-index 0))))
 
 (defn binders/unique-by-name [binders]
+  "Keep last binder for each name (reverse first so last wins)."
   (let [step (fn [[seen out] b]
                (let [name (b 1)]
                  (if (seq/contains? seen name)
                    [seen out]
                    [[;seen name] [;out b]])))
-        [_ out] (reduce step [@[] @[]] binders)]
-    out))
+        [_ out] (reduce step [@[] @[]] (reverse binders))]
+    (reverse out)))
 
 (defn term/build-id [ty lhs rhs]
   [:list @[(node/atom/new "Id") ty lhs rhs]])
