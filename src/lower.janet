@@ -844,10 +844,7 @@
             (walk (+ i 1) binders1 rec-pairs)))))
     (walk 0 @[] @[])))
 
-(defn branch/with-obligations [branch-binders obligations]
-  (seq/concat branch-binders obligations))
-
-(defn branch/rewrite-self-calls [body rec-pairs func-name param-names target-index]
+(defn term/rewrite-self [body rec-pairs func-name param-names target-index]
   (reduce (fn [acc pair]
             (term/replace-self-call acc func-name param-names target-index (pair 0) (pair 1)))
           body
@@ -857,6 +854,7 @@
   (let [target-name (param-names target-index)]
     (reduce (fn [branches ctor]
               (let [ctor-name (ctor 1)
+                    pat-binders (ctor 2)
                     ctor-params (ctor 4)
                     ctor-obligations (if (> (length ctor) 6) (ctor 6) @[])
                     case-entry (match/find-ctor-entry entries ctor-name)
@@ -869,8 +867,9 @@
                           (length pat-args)
                           (length ctor-params)))
                 (let [[branch-binders rec-pairs] (branch/build-binders ctor-params pat-args data-name result)
-                      full-binders (branch/with-obligations branch-binders ctor-obligations)
-                      body (branch/rewrite-self-calls body0 rec-pairs func-name param-names target-index)]
+                      branch-binders (seq/concat pat-binders branch-binders)
+                      full-binders (seq/concat branch-binders ctor-obligations)
+                      body (term/rewrite-self body0 rec-pairs func-name param-names target-index)]
                   [;branches (term/build-lam full-binders body)])))
             @[]
             ctors)))
