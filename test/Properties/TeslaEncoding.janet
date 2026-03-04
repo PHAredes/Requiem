@@ -264,6 +264,20 @@
   (test/assert (p/has/atom? body "Id")
                "equality obligations are represented as Id binders"))
 
+(let [src (string
+            "(data Nat: Type ((zero Nat) (succ (forall (k: Nat). Nat))))"
+            " (data Indexed (n: Nat): Type"
+            "   (| (forall (n: Nat). Indexed) = idx))")
+      forms (p/parse/text src)
+      lowered (l/lower/program forms)
+      indexed (decl/find-data lowered "Indexed")
+      ctors (data/ctors indexed)
+      idx-ctor (ctors 0)
+      encoded (ctor/encoded idx-ctor)]
+  (test/assert (not (nil? indexed)) "data with shadowing parameter parses")
+  (test/assert (p/has/atom? encoded "n")
+               "shadowed parameter name appears in encoded constructor type"))
+
 (defn mk-random-data-decl [rng]
   "Generate a random data declaration with 1-3 constructors."
   (let [data-name (string "D" (math/rng-int rng 10000))
