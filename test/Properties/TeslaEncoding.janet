@@ -232,6 +232,38 @@
     (test/assert (= expanded [:app [:var "idN"] [:var "arg0"]])
                  "eta-expanded function reference is exactly-applied")))
 
+(let [src (string
+            "(data Nat: Type ((zero Nat) (succ (forall (k: Nat). Nat))))"
+            " (def idN: (forall (x: Nat). Nat) x)"
+            " (def useApp: (forall (x: Nat). Nat) (idN x))")
+      forms (p/parse/text src)
+      lowered (l/lower/program forms)
+      core (e/elab/program lowered)
+      use-app (core/find-func core "useApp")
+      body (core/first-clause-body use-app)
+      head (core/app-head body)]
+  (test/assert (and (tuple? body) (= (body 0) :app))
+               "explicit function call stays as core application")
+  (test/assert (= head [:var "idN"])
+               "applied function head is not eta-expanded"))
+
+(let [src (string
+            "(data Nat: Type ((zero Nat) (succ (forall (k: Nat). Nat))))"
+            " (data Vec (A: Type) (n: Nat): Type"
+            "   (| A zero = vnil)"
+            "   (| A (succ n) = vcons (x: A) (xs: (Vec A n))))"
+            " (def useEq: (forall (A: Type). (forall (xs: (Vec A zero)). Nat))"
+            "   (match xs:"
+            "     (case vnil: zero)"
+            "     (case _: zero)))")
+      lowered (l/lower/program (p/parse/text src))
+      use-eq (decl/find-func lowered "useEq")
+      body (lowered/body use-eq)]
+  (test/assert (p/has/atom? body "_eq0:")
+               "indexed match branches keep explicit equality obligations")
+  (test/assert (p/has/atom? body "Id")
+               "equality obligations are represented as Id binders"))
+
 (defn mk-random-data-decl [rng]
   "Generate a random data declaration with 1-3 constructors."
   (let [data-name (string "D" (math/rng-int rng 10000))
