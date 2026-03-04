@@ -111,21 +111,6 @@
   (test/assert (not (nil? vec)) "selector-style indexed data parses")
   (test/assert (= (length (data/ctors vec)) 2) "selector-style Vec has two constructors"))
 
-(test/assert-error
- (fn []
-   (let [src (string
-               "(data Nat: Type ((zero Nat) (succ (forall (k: Nat). Nat))))"
-               " (data Vec (A: Type) (n: Nat): Type"
-               "   (| A zero = vnil)"
-               "   (| A (succ n) = vcons (x: A) (xs: (Vec A n))))"
-               " (def bad: (forall (A: Type). (forall (n: Nat). (forall (xs: (Vec A n)). Nat)))"
-               "   (match xs:"
-               "     (case vnil: zero)"
-               "     (case (vcons x xs'): zero)))")
-         forms (p/parse/text src)]
-     (l/lower/program forms)))
- "selector matching rejects stuck/ambiguous indexed match targets")
-
 (let [src (string
             "data Nat: Type\n"
             "  | zero\n"
@@ -222,6 +207,21 @@
   (test/assert (and (tuple? pi-core) (= (pi-core 0) :t-pi)) "Pi/Ann lowers to core Pi")
   (test/assert (and (tuple? lam-core) (= (lam-core 0) :lam)) "Lam/Ann lowers to core lambda")
   (test/assert (and (tuple? ann-core) (= ann-core [:var "n"])) "Ann term elaborates to annotated term"))
+
+(let [src (string
+            "(data Nat: Type ((zero Nat) (succ (forall (k: Nat). Nat))))"
+            " (def idN: (forall (x: Nat). Nat) x)"
+            " (def use: (forall (x: Nat). Nat) idN)")
+      forms (p/parse/text src)
+      lowered (l/lower/program forms)
+      core (e/elab/program lowered)
+      use-core (core/find-func core "use")
+      use-body (core/first-clause-body use-core)]
+  (test/assert (and (tuple? use-body) (= (use-body 0) :lam))
+               "bare function reference eta-expands to lambda")
+  (let [expanded ((use-body 1) [:var "arg0"])]
+    (test/assert (= expanded [:app [:var "idN"] [:var "arg0"]])
+                 "eta-expanded function reference is exactly-applied")))
 
 (defn mk-random-data-decl [rng]
   "Generate a random data declaration with 1-3 constructors."

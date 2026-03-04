@@ -123,3 +123,6 @@ janet
 - The project uses Janet, a Lisp-like language - expect S-expressions
 - Test coverage is critical - run `jpm test` after all changes
 - No automatic linting/formatting configured - follow existing patterns manually
+- Prefer mutation-free style in Janet (`reduce`, recursion, persistent vectors/maps).
+- Do **not** introduce mutable control/data patterns (`var`, `set`, `while`, `array/push`, `put`) unless absolutely required.
+- Only exception: existing `var` + `set` mutual-recursion bootstrapping patterns that are already established in core modules.
