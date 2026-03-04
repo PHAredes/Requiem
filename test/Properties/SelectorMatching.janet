@@ -41,14 +41,14 @@
     "(def okZero" suffix ": (forall (A: Type). (forall (xs: (Vec A zero)). Nat)) "
     "  (match xs: "
     "    (case vnil: zero) "
-    "    (case (vcons x xs'): zero)))"))
+    "    (case _: zero)))"))
 
 (defn mk-match-src-succ [suffix]
   (string
     (mk-base-prefix)
     "(def okSucc" suffix ": (forall (A: Type). (forall (k: Nat). (forall (xs: (Vec A (succ k))). Nat))) "
     "  (match xs: "
-    "    (case vnil: zero) "
+    "    (case _: zero) "
     "    (case (vcons x xs'): (succ zero))))"))
 
 (defn mk-repeat-selector-prefix []
@@ -69,7 +69,7 @@
     (mk-repeat-selector-prefix)
     "(def okRepeat" suffix ": (forall (k: Nat). (forall (p: (EqNat zero (succ k))). Nat)) "
     "  (match p: "
-    "    (case refl: zero)))"))
+    "    (case _: zero)))"))
 
 (defn mk-shadowed-ctor-name-ambiguous [suffix]
   (string
@@ -83,6 +83,14 @@
   (string
     (mk-base-prefix)
     "(def okLaterShadow" suffix ": (forall (A: Type). (forall (xs: (Vec A zero)). (forall (zero: Nat). Nat))) "
+    "  (match xs: "
+    "    (case vnil: zero) "
+    "    (case _: zero)))"))
+
+(defn mk-unreachable-explicit-case [suffix]
+  (string
+    (mk-base-prefix)
+    "(def badNoCase" suffix ": (forall (A: Type). (forall (xs: (Vec A zero)). Nat)) "
     "  (match xs: "
     "    (case vnil: zero) "
     "    (case (vcons x xs'): zero)))"))
@@ -144,5 +152,13 @@
       (test/assert
        (lower/ok? src)
        "later binders do not shadow constructor heads in target indices"))))
+
+(let [rng (math/rng 796)]
+  (for _ 0 40
+    (let [suffix (string (math/rng-int rng 100000))
+          src (mk-unreachable-explicit-case suffix)]
+      (test/assert
+       (lower/error-contains? src "unreachable constructor case")
+       "explicit clauses for selector-no constructors are rejected"))))
 
 (test/end-suite)
