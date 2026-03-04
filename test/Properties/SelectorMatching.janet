@@ -71,6 +71,14 @@
     "  (match p: "
     "    (case refl: zero)))"))
 
+(defn mk-shadowed-ctor-name-ambiguous [suffix]
+  (string
+    (mk-base-prefix)
+    "(def badShadow" suffix ": (forall (A: Type). (forall (zero: Nat). (forall (xs: (Vec A zero)). Nat))) "
+    "  (match xs: "
+    "    (case vnil: zero) "
+    "    (case (vcons x xs'): (succ zero))))"))
+
 (test/start-suite "Property Selector Matching")
 
 (let [rng (math/rng 789)]
@@ -112,5 +120,13 @@
       (test/assert
        (lower/ok? src)
        "repeated selector vars on concrete unequal constructors are decidable"))))
+
+(let [rng (math/rng 794)]
+  (for _ 0 40
+    (let [suffix (string (math/rng-int rng 100000))
+          src (mk-shadowed-ctor-name-ambiguous suffix)]
+      (test/assert
+       (lower/error-contains? src "ambiguous selector matching")
+       "shadowed constructor names in indices are treated as ambiguous"))))
 
 (test/end-suite)
