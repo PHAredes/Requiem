@@ -51,6 +51,26 @@
     "    (case vnil: zero) "
     "    (case (vcons x xs'): (succ zero))))"))
 
+(defn mk-repeat-selector-prefix []
+  (string
+    "(data Nat: Type ((zero Nat) (succ (forall (k: Nat). Nat)))) "
+    "(data EqNat (a: Nat) (b: Nat): Type "
+    "  (| a a = refl)) "))
+
+(defn mk-repeat-selector-ambiguous [suffix]
+  (string
+    (mk-repeat-selector-prefix)
+    "(def badRepeat" suffix ": (forall (n: Nat). (forall (m: Nat). (forall (p: (EqNat n m)). Nat))) "
+    "  (match p: "
+    "    (case refl: zero)))"))
+
+(defn mk-repeat-selector-concrete-no [suffix]
+  (string
+    (mk-repeat-selector-prefix)
+    "(def okRepeat" suffix ": (forall (k: Nat). (forall (p: (EqNat zero (succ k))). Nat)) "
+    "  (match p: "
+    "    (case refl: zero)))"))
+
 (test/start-suite "Property Selector Matching")
 
 (let [rng (math/rng 789)]
@@ -76,5 +96,21 @@
       (test/assert
        (lower/ok? src)
        "concrete succ index is decidable (no stuck selector matching)"))))
+
+(let [rng (math/rng 792)]
+  (for _ 0 40
+    (let [suffix (string (math/rng-int rng 100000))
+          src (mk-repeat-selector-ambiguous suffix)]
+      (test/assert
+       (lower/error-contains? src "ambiguous selector matching")
+       "repeated selector vars over unresolved indices are ambiguous"))))
+
+(let [rng (math/rng 793)]
+  (for _ 0 40
+    (let [suffix (string (math/rng-int rng 100000))
+          src (mk-repeat-selector-concrete-no suffix)]
+      (test/assert
+       (lower/ok? src)
+       "repeated selector vars on concrete unequal constructors are decidable"))))
 
 (test/end-suite)
