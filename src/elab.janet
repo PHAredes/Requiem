@@ -84,7 +84,7 @@
 (defn elab/callee [env sig-env node]
   (match node
     [:atom tok] (elab/atom env sig-env tok false)
-    _ (elab/term env sig-env node)))
+    _ (elab/term env sig-env node false)))
 
 (defn elab/pi-chain [env sig-env binders body]
   (if (zero? (length binders))
@@ -265,10 +265,11 @@
       (elab/app-list env sig-env xs))))
 
 (set elab/term
-     (fn [env sig-env node]
+     (fn [env sig-env node &opt exact-ref?]
+       (default exact-ref? true)
        (match node
          [:atom tok]
-         (elab/atom env sig-env tok true)
+         (elab/atom env sig-env tok exact-ref?)
 
           [:list xs]
           (elab/list env sig-env node xs)
