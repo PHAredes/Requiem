@@ -68,6 +68,24 @@
         [:lam (fn [x] (build (+ i 1) [;args x]))]))
     (build 0 @[])))
 
+(defn elab/atom [env sig-env tok exact-ref?]
+  (if-let [bound (env/lookup env tok)]
+    bound
+    (if-let [lvl (token/type-level tok)]
+      [:type lvl]
+      (if-let [hole (token/hole-name tok)]
+        [:hole hole]
+        (if-let [params (sig/lookup sig-env tok)]
+          (if exact-ref?
+            (elab/function-ref tok params)
+            [:var tok])
+          [:var tok])))))
+
+(defn elab/callee [env sig-env node]
+  (match node
+    [:atom tok] (elab/atom env sig-env tok false)
+    _ (elab/term env sig-env node)))
+
 (defn elab/pi-chain [env sig-env binders body]
   (if (zero? (length binders))
     (elab/term env sig-env body)
@@ -90,7 +108,7 @@
   (when (zero? (length xs))
     (errorf "cannot elaborate empty application"))
   (reduce (fn [acc x] [:app acc (elab/term env sig-env x)])
-          (elab/term env sig-env (xs 0))
+          (elab/callee env sig-env (xs 0))
           (slice xs 1)))
 
 (defn elab/lam-chain [env sig-env params body]
@@ -250,15 +268,7 @@
      (fn [env sig-env node]
        (match node
          [:atom tok]
-         (if-let [bound (env/lookup env tok)]
-            bound
-            (if-let [lvl (token/type-level tok)]
-              [:type lvl]
-              (if-let [hole (token/hole-name tok)]
-                [:hole hole]
-                (if-let [params (sig/lookup sig-env tok)]
-                  (elab/function-ref tok params)
-                  [:var tok]))))
+         (elab/atom env sig-env tok true)
 
           [:list xs]
           (elab/list env sig-env node xs)
@@ -310,7 +320,7 @@
           core-sort (elab/term env sig-env sort)
           core-ctors (map (fn [ctor]
                             (match ctor
-                              [:ctor ctor-name pat-binders patterns ctor-params encoded-type]
+                              [:ctor ctor-name pat-binders patterns ctor-params encoded-type _]
                               [:core/ctor ctor-name pat-binders patterns ctor-params
                                (elab/term env sig-env encoded-type)]
                               _ (errorf "invalid constructor: %v" ctor)))
