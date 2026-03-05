@@ -55,15 +55,14 @@
        (= (string/slice s 0 (length prefix)) prefix)))
 
 (defn- line/indent [line]
-  (defn scan [i acc]
-    (if (>= i (length line))
-      acc
-      (let [ch (string/slice line i (+ i 1))]
-        (cond
-          (= ch " ") (scan (+ i 1) (+ acc 1))
-          (= ch "\t") (scan (+ i 1) (+ acc 2))
-          true acc))))
-  (scan 0 0))
+  (reduce (fn [acc i]
+            (let [ch (string/slice line i (+ i 1))]
+              (cond
+                (= ch " ") (+ acc 1)
+                (= ch "\t") (+ acc 2)
+                true acc)))
+          0
+          (range 0 (length line))))
 
 (defn- line/ignored? [line]
   (let [t (string/trim line)]
@@ -102,16 +101,16 @@
     (if (zero? (length children))
       text
       (let [split (layout/pipe-split children)
-            head (reduce (fn [acc child]
-                           (string acc " " (layout/render-node child)))
+            head (reduce (fn [acc i]
+                           (string acc " " (layout/render-node (children i))))
                          text
-                         (slice children 0 split))
-            args (map (fn [child]
-                        (let [r (layout/render-node child)]
+                         (range split))
+            args (map (fn [i]
+                        (let [r (layout/render-node (children i))]
                           (if (text/wrapped-parens? r)
                             r
                             (string "(" r ")"))))
-                      (slice children split (length children)))]
+                      (range split (length children)))]
         (if (zero? (length args))
           (string "(" head ")")
           (string "(" head " " (string/join args " ") ")"))))))

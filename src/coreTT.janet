@@ -72,6 +72,7 @@
 (defn tm/id [A x y] [:t-id A x y])
 (defn tm/refl [x] [:t-refl x])
 (defn tm/J [A x P d y p] [:t-J A x P d y p])
+(defn tm/hole [name] [:hole name])
 
 # Neutrals / normal forms
 (defn ne/var [x] [:nvar x])
@@ -450,6 +451,20 @@
       (get UA 1)
       (errorf "expected a universe Type (Type_l), but got: %v\nTip: Make sure your type expression evaluates to a Type, e.g., Type 0, Type 1, etc." UA))))
 
+(defn goal/context-vars [Γ]
+  (map keyword (h/keys Γ)))
+
+(defn goal/error-infer [name Γ]
+  (errorf "unsolved goal ?%v during inference\nNo expected type is available in inference mode.\nContext variables: %v"
+          name
+          (goal/context-vars Γ)))
+
+(defn goal/error-check [name expected Γ]
+  (errorf "unsolved goal ?%v during checking\nExpected type: %v\nContext variables: %v"
+          name
+          expected
+          (goal/context-vars Γ)))
+
 (set infer
      (fn [Γ t]
        "Infer the type of term t in context Γ (returns semantic type)"
@@ -462,6 +477,9 @@
           [:type l] (ty/type (lvl/lvl/succ l))
 
           [:lam _] (errorf "cannot infer type of lambda expression %v\nLambda types require annotation because they have principal types.\nSuggestion: Annotate with a Pi type: (λx. body) : (Πx:A. B)" t)
+
+          [:hole name]
+          (goal/error-infer name Γ)
 
          [:app f x]
          (let [fA (infer Γ f)
@@ -557,9 +575,12 @@
 (set check
      (fn [Γ t A]
        "Check that term t has type A in context Γ"
-       (match t
-         [:lam body]
-         (let [tag (if (tuple? A) (get A 0) 0)]
+        (match t
+          [:hole name]
+          (goal/error-check name A Γ)
+
+          [:lam body]
+          (let [tag (if (tuple? A) (get A 0) 0)]
            (if (= tag T/Pi)
              (let [[_ dom cod] A
                    fresh (gensym)
@@ -638,6 +659,7 @@
    :tm/id tm/id
    :tm/refl tm/refl
    :tm/J tm/J
+   :tm/hole tm/hole
    :ne/var ne/var
    :ne/app ne/app
    :ne/fst ne/fst
