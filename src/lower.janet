@@ -24,6 +24,29 @@
 (defn node/atom/new [tok]
   [:atom tok])
 
+(defn record/entry/lower [node]
+  (when (not (node/list? node))
+    (errorf "record entry must be a list, got: %v" node))
+  (let [xs (node/list-items node)]
+    (when (< (length xs) 2)
+      (errorf "invalid record entry: %v" node))
+    (when (not (node/atom= (xs 0) "entry"))
+      (errorf "record entry must start with 'entry', got: %v" node))
+    (when (not (node/atom? (xs 1)))
+      (errorf "record entry line must be an atom, got: %v" (xs 1)))
+    [:entry
+     (node/atom (xs 1))
+     (map record/entry/lower (slice xs 2 (length xs)))]))
+
+(defn record/lower [nodes]
+  (when (zero? (length nodes))
+    (errorf "record declaration is missing header"))
+  (when (not (node/atom? (nodes 0)))
+    (errorf "record header must be an atom, got: %v" (nodes 0)))
+  (let [header (node/atom (nodes 0))
+        entries (map record/entry/lower (slice nodes 1 (length nodes)))]
+    [:decl/record header entries]))
+
 (defn token/colon? [tok]
   (let [n (length tok)]
     (and (> n 0)
@@ -933,7 +956,8 @@
           (match head
             "data" (data/lower rest)
             "def" (func/lower rest data-env)
-            _ (errorf "unsupported top-level form: %v\nSupported top-level forms:\n  (data ...)\n  (def ...)\n  (import ...)\n  (export ...)" head))))
+            "record" (record/lower rest)
+            _ (errorf "unsupported top-level form: %v\nSupported top-level forms:\n  (data ...)\n  (def ...)\n  (record ...)\n  (import ...)\n  (export ...)" head))))
       (errorf "top-level form must be a list (s-expression): %v\nAll top-level forms must be properly parenthesized" norm))))
 
 (defn lower/program [forms]
@@ -951,6 +975,7 @@
 (def exports
   {:lower/program lower/program
    :decl/lower decl/lower
+   :record/lower record/lower
    :bind/from-node bind/from-node
    :binders/from-spec binders/from-spec
    :term/split-pi term/split-pi

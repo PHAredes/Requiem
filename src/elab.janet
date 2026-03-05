@@ -314,6 +314,271 @@
     _
     (errorf "invalid clause: %v" clause)))
 
+(defn text/contains? [s sub]
+  (not (nil? (string/find sub (string s)))))
+
+(defn node/atom/new [tok]
+  [:atom tok])
+
+(defn binder/to-node [b]
+  [:list @[(node/atom/new (string (b 1) ":")) (b 2)]])
+
+(defn line/items [line]
+  (let [wrapped (string "(" (string/trim (string line)) ")")
+        parsed (p/parse/one wrapped)]
+    (if (and (tuple? parsed) (= (parsed 0) :list))
+      (parsed 1)
+      (errorf "cannot parse line: %v" line))))
+
+(defn node/arrow-token? [node]
+  (and (tuple? node)
+       (= (node 0) :atom)
+       (or (= (node 1) "->")
+           (= (node 1) "→"))))
+
+(defn node/forall-token? [node]
+  (and (tuple? node)
+       (= (node 0) :atom)
+       (or (= (node 1) "forall")
+           (= (node 1) "∀"))))
+
+(defn items/to-term [items]
+  (if (and (>= (length items) 4)
+           (node/forall-token? (items 0))
+           (tuple? (items 1))
+           (= ((items 1) 0) :list)
+           (tuple? (items 2))
+           (= ((items 2) 0) :atom)
+           (= ((items 2) 1) "."))
+    [:list @[(items 0) (items 1) (items 2) (items/to-term (slice items 3 (length items)))]]
+    (if-let [idx (find-index node/arrow-token? items)]
+      (let [lhs-items (slice items 0 idx)
+            rhs-items (slice items (+ idx 1) (length items))
+            lhs (if (= (length lhs-items) 1)
+                  (lhs-items 0)
+                  [:list lhs-items])
+            rhs (items/to-term rhs-items)]
+        [:list @[lhs [:atom "->"] rhs]])
+      (if (= (length items) 1)
+        (items 0)
+        [:list items]))))
+
+(defn line/term [line]
+  (items/to-term (line/items line)))
+
+(defn header/split-colon [header]
+  (let [s (string/trim (string header))
+        n (length s)]
+    (defn scan [i depth]
+      (if (>= i n)
+        nil
+        (let [ch (string/slice s i (+ i 1))]
+          (cond
+            (= ch "(") (scan (+ i 1) (+ depth 1))
+            (= ch ")") (scan (+ i 1) (max 0 (- depth 1)))
+            (and (= ch ":") (= depth 0)) i
+            true (scan (+ i 1) depth)))))
+    (if-let [idx (scan 0 0)]
+      (let [lhs (string/trim (string/slice s 0 idx))
+            rhs0 (string/trim (string/slice s (+ idx 1) n))
+            rhs (if (zero? (length rhs0)) nil rhs0)]
+        [lhs rhs])
+      [s nil])))
+
+(defn header/name+params [lhs]
+  (let [parsed (p/parse/one (string "(" lhs ")"))]
+    (when (not (and (tuple? parsed) (= (parsed 0) :list)))
+      (errorf "invalid record header: %v" lhs))
+    (let [items (parsed 1)]
+      (when (zero? (length items))
+        (errorf "empty record header: %v" lhs))
+      (when (not (and (tuple? (items 0)) (= ((items 0) 0) :atom)))
+        (errorf "record name must be an atom in header: %v" lhs))
+      (let [name ((items 0) 1)
+            params (map l/bind/from-node (slice items 1 (length items)))]
+        [name params]))))
+
+(defn entry/line [entry]
+  (entry 1))
+
+(defn entry/children [entry]
+  (entry 2))
+
+(defn items/eq-index [items]
+  (find-index |(and (tuple? $) (= ($ 0) :atom) (= ($ 1) "=")) items))
+
+(defn entry/child-binder-node [entry]
+  (let [items0 (line/items (entry/line entry))
+        eq-index (items/eq-index items0)
+        lhs-items (if (nil? eq-index)
+                    items0
+                    (slice items0 0 eq-index))]
+    (if (and (= (length lhs-items) 1)
+             (tuple? (lhs-items 0))
+             (= ((lhs-items 0) 0) :list))
+      (lhs-items 0)
+      [:list lhs-items])))
+
+(defn entry/ctor-items [entry]
+  (let [base (line/items (entry/line entry))
+        child-binders (map entry/child-binder-node (entry/children entry))]
+    (reduce (fn [acc b] [;acc b]) base child-binders)))
+
+(defn atom/type-token? [node]
+  (and (tuple? node)
+       (= (node 0) :atom)
+       (let [tok (node 1)]
+         (or (= tok "Type")
+             (and (> (length tok) 4)
+                  (= (string/slice tok 0 4) "Type"))))))
+
+(defn params/index-positions [params]
+  (reduce (fn [acc i]
+            (if (atom/type-token? ((params i) 2))
+              acc
+              [;acc i]))
+          @[]
+          (range (length params))))
+
+(defn selectors/for-clause [params selectors rhs]
+  (let [k (length params)]
+    (if (= (length selectors) k)
+      selectors
+      (let [defaults (map |[:atom ($ 1)] params)
+            index-pos (params/index-positions params)
+            assigned (reduce (fn [acc i]
+                               (if (< i (length selectors))
+                                 [;acc [(index-pos i) (selectors i)]]
+                                 acc))
+                             @[]
+                             (range (min (length selectors) (length index-pos))))
+            ctor-name (if (and (> (length rhs) 0)
+                               (tuple? (rhs 0))
+                               (= ((rhs 0) 0) :atom))
+                        ((rhs 0) 1)
+                        nil)
+            completed
+            (reduce (fn [acc pos]
+                      (if (and (nil? (find-index |(= ($ 0) pos) assigned))
+                               (= ctor-name "refl")
+                               (> (length selectors) 0))
+                        [;acc [pos (selectors 0)]]
+                        acc))
+                    assigned
+                    index-pos)]
+        (reduce (fn [acc i]
+                  (if-let [entry (find |(= ($ 0) i) completed)]
+                    [;acc (entry 1)]
+                    [;acc (defaults i)]))
+                @[]
+                (range k))))))
+
+(defn entry/data-clause-node [params entry]
+  (let [items (entry/ctor-items entry)
+        eq-index (items/eq-index items)]
+    (if (nil? eq-index)
+      [:list (reduce (fn [acc x] [;acc x])
+                     @[[:atom "|"]]
+                     items)]
+      (let [selectors (slice items 0 eq-index)
+            rhs (slice items (+ eq-index 1) (length items))
+            full-selectors (selectors/for-clause params selectors rhs)]
+        [:list (reduce (fn [acc x] [;acc x])
+                       @[[:atom "|"]]
+                       (reduce (fn [acc x] [;acc x])
+                               (reduce (fn [acc x] [;acc x])
+                                       full-selectors
+                                       @[[:atom "="]])
+                               rhs))]))))
+
+(defn patterns/normalize-arity [pat-items arity]
+  (cond
+    (and (= arity 1) (> (length pat-items) 1))
+    @[[:list pat-items]]
+
+    true pat-items))
+
+(defn entry/func-clause-node [arity entry]
+  (let [items (line/items (entry/line entry))
+        eq-index (items/eq-index items)]
+    (if (nil? eq-index)
+      [:list (reduce (fn [acc x] [;acc x])
+                     @[[:atom "|"]]
+                     items)]
+      (let [patterns0 (slice items 0 eq-index)
+            body (slice items (+ eq-index 1) (length items))
+            patterns (patterns/normalize-arity patterns0 arity)]
+        [:list (reduce (fn [acc x] [;acc x])
+                       @[[:atom "|"]]
+                       (reduce (fn [acc x] [;acc x])
+                               (reduce (fn [acc x] [;acc x])
+                                       patterns
+                                       @[[:atom "="]])
+                               body))]))))
+
+(defn record/function-type-line? [line]
+  (let [t (string/trim (string line))]
+    (or (text/contains? t "->")
+        (text/contains? t "→")
+        (text/contains? t "∀"))))
+
+(defn record->form [decl]
+  (match decl
+    [:decl/record header entries]
+    (let [[lhs rhs] (header/split-colon header)
+          [name params] (header/name+params lhs)
+          param-nodes (map binder/to-node params)
+          is-func
+          (or (not (nil? rhs))
+              (and (> (length entries) 0)
+                   (record/function-type-line? (entry/line (entries 0)))))]
+      (if is-func
+        (let [ann-text (if rhs rhs (entry/line (entries 0)))
+              ann (line/term ann-text)
+              [fn-params _] (l/term/split-pi ann)
+              arity (length fn-params)
+              clause-entries (if rhs entries (slice entries 1 (length entries)))
+              clauses (map |(entry/func-clause-node arity $) clause-entries)
+              head-nodes
+              (if (zero? (length param-nodes))
+                @[[:atom "def"] [:atom (string name ":")] ann]
+                (reduce (fn [acc x] [;acc x])
+                        (reduce (fn [acc p] [;acc p])
+                                @[[:atom "def"] [:atom name]]
+                                param-nodes)
+                        @[[:atom ":"] ann]))]
+          [:list (reduce (fn [acc x] [;acc x])
+                         head-nodes
+                         clauses)])
+        (let [sort (if rhs (line/term rhs) [:atom "Type"])
+              clauses (map |(entry/data-clause-node params $) entries)]
+          [:list (reduce (fn [acc x] [;acc x])
+                         (reduce (fn [acc p] [;acc p])
+                                 @[[:atom "data"] [:atom name]]
+                                 param-nodes)
+                         (reduce (fn [acc c] [;acc c])
+                                 @[[:atom ":"] sort]
+                                 clauses))])))
+    _
+    (errorf "expected :decl/record, got: %v" decl)))
+
+(defn program/resolve-decls [decls]
+  (let [[out _]
+        (reduce (fn [[acc data-env] decl]
+                  (let [resolved
+                        (match decl
+                          [:decl/record _ _]
+                          (l/decl/lower (record->form decl) data-env)
+                          _ decl)
+                        next-data-env
+                        (if (= (resolved 0) :decl/data)
+                          [;data-env [(resolved 1) (resolved 4)]]
+                          data-env)]
+                    [[;acc resolved] next-data-env]))
+                [@[] @[]]
+                decls)]
+    out))
+
 (defn decl/elab [sig-env decl]
   (match decl
     [:decl/data name params sort ctors]
@@ -339,8 +604,9 @@
     (errorf "invalid declaration: %v" decl)))
 
 (defn elab/program [decls]
-  (let [sig-env (sig/from-decls decls)]
-    (map |(decl/elab sig-env $) decls)))
+  (let [resolved (program/resolve-decls decls)
+        sig-env (sig/from-decls resolved)]
+    (map |(decl/elab sig-env $) resolved)))
 
 (defn elab/forms [forms]
   (elab/program (l/lower/program forms)))
@@ -352,7 +618,9 @@
   {:elab/program elab/program
    :elab/forms elab/forms
    :elab/text elab/text
-    :decl/elab (fn [decl] (decl/elab @[] decl))
-    :term/elab (fn [env node] (elab/term env @[] node))
-    :decl-elab (fn [decl] (decl/elab @[] decl))
-    :term-elab (fn [env node] (elab/term env @[] node))})
+    :record->form record->form
+    :resolve/decls program/resolve-decls
+     :decl/elab (fn [decl] (decl/elab @[] decl))
+     :term/elab (fn [env node] (elab/term env @[] node))
+     :decl-elab (fn [decl] (decl/elab @[] decl))
+     :term-elab (fn [env node] (elab/term env @[] node))})
