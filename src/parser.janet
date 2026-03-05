@@ -22,8 +22,7 @@
   '{:nl (+ "\r\n" "\n" "\r")
     :hspace (set " \t")
     :line-body (any (if-not :nl 1))
-    :top-head (+ "data" "def")
-    :top-line (* :top-head :line-body)
+    :top-line (* (if-not (+ :nl :hspace) 1) :line-body)
     :cont-line (* (some :hspace) :line-body)
     :block (<- (* :top-line (any (* :nl :cont-line)) (? :nl)))
     :comment (* (any :hspace) (+ "#" "--") :line-body (? :nl))
@@ -55,14 +54,15 @@
        (= (string/slice s 0 (length prefix)) prefix)))
 
 (defn- line/indent [line]
-  (reduce (fn [acc i]
-            (let [ch (string/slice line i (+ i 1))]
-              (cond
-                (= ch " ") (+ acc 1)
-                (= ch "\t") (+ acc 2)
-                true acc)))
-          0
-          (range 0 (length line))))
+  (defn scan [i acc]
+    (if (>= i (length line))
+      acc
+      (let [ch (string/slice line i (+ i 1))]
+        (cond
+          (= ch " ") (scan (+ i 1) (+ acc 1))
+          (= ch "\t") (scan (+ i 1) (+ acc 2))
+          true acc))))
+  (scan 0 0))
 
 (defn- line/ignored? [line]
   (let [t (string/trim line)]
@@ -121,6 +121,84 @@
       r
       (string "(" r ")"))))
 
+(defn- layout/node->entry-form [node]
+  [:list (reduce (fn [acc child]
+                   [;acc (layout/node->entry-form child)])
+                 @[[:atom "entry"]
+                   [:atom (get node :text)]]
+                 (get node :children))])
+
+(defn- layout/block->record-forms [block]
+  (let [root {:indent -1 :text nil :children @[]}
+        lines (string/split "\n" (string block))]
+    (defn walk [rest stack]
+      (if (zero? (length rest))
+        nil
+        (let [line (first rest)]
+          (if (line/ignored? line)
+            (walk (slice rest 1) stack)
+            (let [indent (line/indent line)
+                  text (string/trim line)
+                  node {:indent indent :text text :children @[]}
+                  trimmed (stack/trim stack indent)
+                  parent (trimmed (- (length trimmed) 1))]
+              (array/push (get parent :children) node)
+              (walk (slice rest 1) [;trimmed node]))))))
+    (walk lines @[root])
+    (map (fn [top]
+           [:list (reduce (fn [acc child]
+                            [;acc (layout/node->entry-form child)])
+                          @[[:atom "record"]
+                            [:atom (get top :text)]]
+                          (get top :children))])
+         (get root :children))))
+
+(defn- layout/caps->forms [caps]
+  (if (= (length caps) 1)
+    (reduce (fn [acc block]
+              (reduce (fn [inner form] [;inner form])
+                      acc
+                      (layout/block->record-forms block)))
+            @[]
+            (caps 0))
+    (errorf "unexpected layout parser capture shape: %v" caps)))
+
+(defn- block/head-line [block]
+  (let [lines (string/split "\n" (string block))]
+    (defn scan [rest]
+      (if (zero? (length rest))
+        nil
+        (let [line (first rest)
+              trimmed (string/trim line)]
+          (if (line/ignored? line)
+            (scan (slice rest 1))
+            trimmed))))
+    (scan lines)))
+
+(defn- layout/legacy-block? [block]
+  (if-let [head (block/head-line block)]
+    (or (text/starts-with? head "data ")
+        (text/starts-with? head "def ")
+        (= head "data")
+        (= head "def"))
+    false))
+
+(defn- layout/record-block? [block]
+  (if-let [head (block/head-line block)]
+    (not (nil? (string/find ":" head)))
+    false))
+
+(defn- layout/caps->mode [caps]
+  (if (not= (length caps) 1)
+    nil
+    (let [blocks (caps 0)
+          legacy? (reduce (fn [acc b] (and acc (layout/legacy-block? b))) true blocks)
+          record? (reduce (fn [acc b] (and acc (layout/record-block? b))) true blocks)]
+      (cond
+        legacy? :legacy
+        record? :record
+        true nil))))
+
 (defn- forms/all-lists? [forms]
   (reduce (fn [acc n]
             (and acc
@@ -171,14 +249,28 @@
         (if (nil? (string/find "\n" txt))
           forms
           (if-let [caps (peg/match layout/compiled txt)]
-            (if-let [layout-forms (parse/all grammar/compiled (layout/caps->canonical caps))]
-              layout-forms
-              forms)
+            (match (layout/caps->mode caps)
+              :legacy
+              (if-let [layout-forms (parse/all grammar/compiled (layout/caps->canonical caps))]
+                layout-forms
+                forms)
+              :record
+              (let [layout-forms (layout/caps->forms caps)]
+                (if (zero? (length layout-forms)) forms layout-forms))
+              _ forms)
             forms)))
       (if-let [caps (peg/match layout/compiled txt)]
-        (if-let [layout-forms (parse/all grammar/compiled (layout/caps->canonical caps))]
-          layout-forms
-          (errorf "parse failed"))
+        (match (layout/caps->mode caps)
+          :legacy
+          (if-let [layout-forms (parse/all grammar/compiled (layout/caps->canonical caps))]
+            layout-forms
+            (errorf "parse failed"))
+          :record
+          (let [layout-forms (layout/caps->forms caps)]
+            (if (zero? (length layout-forms))
+              (errorf "parse failed")
+              layout-forms))
+          _ (errorf "parse failed"))
         (errorf "parse failed")))))
 
 (defn parse/text-raw [src]
