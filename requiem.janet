@@ -10,6 +10,8 @@
     (string "data " name " (" (length ctors) " constructor(s))")
     [:decl/func name params _ clauses]
     (string "def " name " (" (length params) " param(s), " (length clauses) " clause(s))")
+    [:decl/record header entries]
+    (string "record " header " (" (length entries) " entry(ies))")
     _
     (string "unknown declaration: " decl)))
 
