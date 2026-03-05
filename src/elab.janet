@@ -407,6 +407,71 @@
 (defn items/eq-index [items]
   (find-index |(and (tuple? $) (= ($ 0) :atom) (= ($ 1) "=")) items))
 
+(defn items/lhs-of-eq [items]
+  (if-let [eq-index (items/eq-index items)]
+    (slice items 0 eq-index)
+    items))
+
+(defn items->node [items]
+  (if (and (= (length items) 1)
+           (tuple? (items 0))
+           (= ((items 0) 0) :list))
+    (items 0)
+    [:list items]))
+
+(defn field/binder-from-line [line]
+  (let [lhs-items (items/lhs-of-eq (line/items line))
+        node (items->node lhs-items)]
+    (if (l/bind/single-spec? node)
+      (l/bind/from-node node)
+      nil)))
+
+(defn entry/field-binders [entry]
+  (map |(field/binder-from-line (entry/line $)) (entry/children entry)))
+
+(defn seq/all? [pred xs]
+  (reduce (fn [acc x] (and acc (pred x))) true xs))
+
+(defn seq/concat [xs ys]
+  (reduce (fn [acc y] [;acc y]) xs ys))
+
+(defn term/sigma-from-binders [binders]
+  (when (zero? (length binders))
+    (errorf "record sigma encoding requires at least one field"))
+  (if (= (length binders) 1)
+    ((binders 0) 2)
+    (let [b (binders 0)]
+      [:list @[(node/atom/new "Sigma")
+               (binder/to-node b)
+               (node/atom/new ".")
+               (term/sigma-from-binders (slice binders 1 (length binders)))]])))
+
+(defn term/pair-from-names [names]
+  (when (zero? (length names))
+    (errorf "record constructor encoding requires at least one field name"))
+  (if (= (length names) 1)
+    [:atom (names 0)]
+    [:list @[(node/atom/new "pair")
+             [:atom (names 0)]
+             (term/pair-from-names (slice names 1 (length names)))]]))
+
+(defn term/app-head [head args]
+  (if (zero? (length args))
+    [:atom head]
+    [:list (reduce (fn [acc a] [;acc [:atom a]]) @[[:atom head]] args)]))
+
+(defn form/def-from-type+clauses [name ann clauses]
+  [:list (reduce (fn [acc x] [;acc x])
+                 @[[:atom "def"] [:atom (string name ":")] ann]
+                 clauses)])
+
+(defn form/clause [patterns body]
+  [:list (reduce (fn [acc x] [;acc x])
+                 (reduce (fn [acc p] [;acc [:atom p]])
+                         @[[:atom "|"]]
+                         patterns)
+                 @[[:atom "="] body])])
+
 (defn entry/child-binder-node [entry]
   (let [items0 (line/items (entry/line entry))
         eq-index (items/eq-index items0)
@@ -522,17 +587,47 @@
         (text/contains? t "→")
         (text/contains? t "∀"))))
 
-(defn record->form [decl]
+(defn record/sigma-shape? [entries]
+  (and (= (length entries) 1)
+       (> (length (entry/children (entries 0))) 0)
+       (let [ctor-items (line/items (entry/line (entries 0)))
+             ctor-ok (and (> (length ctor-items) 0)
+                          (tuple? (ctor-items 0))
+                          (= ((ctor-items 0) 0) :atom)
+                          (nil? (items/eq-index ctor-items)))
+             binders (entry/field-binders (entries 0))]
+         (and ctor-ok (seq/all? |(not (nil? $)) binders)))))
+
+(defn record->sigma-forms [name params entries]
+  (let [ctor-entry (entries 0)
+        ctor-items (line/items (entry/line ctor-entry))
+        ctor-name ((ctor-items 0) 1)
+        fields (entry/field-binders ctor-entry)
+        sigma-body (term/sigma-from-binders fields)
+        type-ann (l/term/build-forall params [:atom "Type"])
+        type-clause (form/clause (map |($ 1) params) sigma-body)
+        type-form (form/def-from-type+clauses name type-ann @[type-clause])
+        ctor-ann (l/term/build-forall (seq/concat params fields)
+                                      (term/app-head name (map |($ 1) params)))
+        ctor-clause (form/clause (map |($ 1) (seq/concat params fields))
+                                 (term/pair-from-names (map |($ 1) fields)))
+        ctor-form (form/def-from-type+clauses ctor-name ctor-ann @[ctor-clause])]
+    @[type-form ctor-form]))
+
+(defn record->forms [decl]
   (match decl
     [:decl/record header entries]
     (let [[lhs rhs] (header/split-colon header)
           [name params] (header/name+params lhs)
           param-nodes (map binder/to-node params)
+          sigma-record? (and (nil? rhs) (record/sigma-shape? entries))
           is-func
           (or (not (nil? rhs))
               (and (> (length entries) 0)
                    (record/function-type-line? (entry/line (entries 0)))))]
-      (if is-func
+      (if sigma-record?
+        (record->sigma-forms name params entries)
+        (if is-func
         (let [ann-text (if rhs rhs (entry/line (entries 0)))
               ann (line/term ann-text)
               [fn-params _] (l/term/split-pi ann)
@@ -547,34 +642,39 @@
                                 @[[:atom "def"] [:atom name]]
                                 param-nodes)
                         @[[:atom ":"] ann]))]
-          [:list (reduce (fn [acc x] [;acc x])
-                         head-nodes
-                         clauses)])
-        (let [sort (if rhs (line/term rhs) [:atom "Type"])
-              clauses (map |(entry/data-clause-node params $) entries)]
-          [:list (reduce (fn [acc x] [;acc x])
-                         (reduce (fn [acc p] [;acc p])
-                                 @[[:atom "data"] [:atom name]]
-                                 param-nodes)
-                         (reduce (fn [acc c] [;acc c])
-                                 @[[:atom ":"] sort]
-                                 clauses))])))
+          @[[:list (reduce (fn [acc x] [;acc x])
+                           head-nodes
+                           clauses)]])
+          (let [sort (if rhs (line/term rhs) [:atom "Type"])
+                clauses (map |(entry/data-clause-node params $) entries)]
+            @[[:list (reduce (fn [acc x] [;acc x])
+                             (reduce (fn [acc p] [;acc p])
+                                     @[[:atom "data"] [:atom name]]
+                                     param-nodes)
+                             (reduce (fn [acc c] [;acc c])
+                                     @[[:atom ":"] sort]
+                                     clauses))]]))))
     _
     (errorf "expected :decl/record, got: %v" decl)))
 
 (defn program/resolve-decls [decls]
   (let [[out _]
         (reduce (fn [[acc data-env] decl]
-                  (let [resolved
+                  (let [resolved-list
                         (match decl
                           [:decl/record _ _]
-                          (l/decl/lower (record->form decl) data-env)
-                          _ decl)
+                          (map |(l/decl/lower $ data-env) (record->forms decl))
+                          _ @[decl])
                         next-data-env
-                        (if (= (resolved 0) :decl/data)
-                          [;data-env [(resolved 1) (resolved 4)]]
-                          data-env)]
-                    [[;acc resolved] next-data-env]))
+                        (reduce (fn [env d]
+                                  (if (= (d 0) :decl/data)
+                                    [;env [(d 1) (d 4)]]
+                                    env))
+                                data-env
+                                resolved-list)
+                        next-acc
+                        (reduce (fn [acc1 d] [;acc1 d]) acc resolved-list)]
+                    [next-acc next-data-env]))
                 [@[] @[]]
                 decls)]
     out))
@@ -618,8 +718,8 @@
   {:elab/program elab/program
    :elab/forms elab/forms
    :elab/text elab/text
-    :record->form record->form
-    :resolve/decls program/resolve-decls
+    :record->forms record->forms
+    :resolve-decls program/resolve-decls
      :decl/elab (fn [decl] (decl/elab @[] decl))
      :term/elab (fn [env node] (elab/term env @[] node))
      :decl-elab (fn [decl] (decl/elab @[] decl))
