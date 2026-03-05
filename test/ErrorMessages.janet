@@ -32,6 +32,16 @@
   (fn [] (c/infer (c/ctx/empty) [:unknown]))
   "unknown term")
 
+# Goal hole in inference mode - reports unsolved goal and context
+(test/assert-error
+  (fn [] (c/infer (c/ctx/empty) [:hole "g"]))
+  "unsolved goal ?g during inference")
+
+# Goal hole in checking mode - reports expected type
+(test/assert-error
+  (fn [] (c/check (c/ctx/empty) [:hole "h"] [c/T/Type 0]))
+  "unsolved goal ?h during checking")
+
 (test/end-suite)
 
 (test/start-suite "Error Messages - Parser")

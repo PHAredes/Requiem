@@ -4,16 +4,26 @@
 (import ./lower :as l)
 
 (defn env/lookup [env name]
-  (defn scan [i]
-    (if (< i 0) nil
-      (let [entry (env i)]
-        (if (= (entry 0) name)
-          (entry 1)
-          (scan (- i 1))))))
-  (scan (- (length env) 1)))
+  (get (reduce (fn [acc entry]
+                 (if (= (entry 0) name) entry acc))
+               nil
+               env)
+       1))
 
 (defn env/extend [env name value]
   [;env [name value]])
+
+(defn sig/lookup [sig-env name]
+  (env/lookup sig-env name))
+
+(defn sig/from-decls [decls]
+  (reduce (fn [acc decl]
+            (match decl
+              [:decl/func name params _ _]
+              [;acc [name params]]
+              _ acc))
+          @[]
+          decls))
 
 (defn token/digits? [s]
   (and (> (length s) 0)
@@ -31,41 +41,81 @@
     (scan-number (string/slice tok 4))
     true nil))
 
-(varfn elab/term [env node]
+(defn token/hole-name [tok]
+  (cond
+    (= tok "_") "_"
+    (= tok "?") "_"
+    (and (> (length tok) 1)
+         (= (string/slice tok 0 1) "?"))
+    (string/slice tok 1)
+    true nil))
+
+(varfn elab/term [env sig-env node]
   (errorf "elab/term not yet defined"))
 
-(defn elab/pi-chain [env binders body]
+(defn term/app-chain [head args]
+  (reduce (fn [acc arg] [:app acc arg])
+          head
+          args))
+
+(defn elab/function-ref [name params]
+  (let [n (length params)]
+    (defn build [i args]
+      (if (= i n)
+        (term/app-chain [:var name] args)
+        [:lam (fn [x] (build (+ i 1) [;args x]))]))
+    (build 0 @[])))
+
+(defn elab/atom [env sig-env tok exact-ref?]
+  (if-let [bound (env/lookup env tok)]
+    bound
+    (if-let [lvl (token/type-level tok)]
+      [:type lvl]
+      (if-let [hole (token/hole-name tok)]
+        [:hole hole]
+        (if-let [params (sig/lookup sig-env tok)]
+          (if exact-ref?
+            (elab/function-ref tok params)
+            [:var tok])
+          [:var tok])))))
+
+(defn elab/callee [env sig-env node]
+  (match node
+    [:atom tok] (elab/atom env sig-env tok false)
+    _ (elab/term env sig-env node false)))
+
+(defn elab/pi-chain [env sig-env binders body]
   (if (zero? (length binders))
-    (elab/term env body)
+    (elab/term env sig-env body)
     (let [b (binders 0)
           name (b 1)
-          dom (elab/term env (b 2))
+          dom (elab/term env sig-env (b 2))
           rest (slice binders 1)]
-      [:t-pi dom (fn [x] (elab/pi-chain (env/extend env name x) rest body))])))
+      [:t-pi dom (fn [x] (elab/pi-chain (env/extend env name x) sig-env rest body))])))
 
-(defn elab/sigma-chain [env binders body]
+(defn elab/sigma-chain [env sig-env binders body]
   (if (zero? (length binders))
-    (elab/term env body)
+    (elab/term env sig-env body)
     (let [b (binders 0)
           name (b 1)
-          dom (elab/term env (b 2))
+          dom (elab/term env sig-env (b 2))
           rest (slice binders 1)]
-      [:t-sigma dom (fn [x] (elab/sigma-chain (env/extend env name x) rest body))])))
+      [:t-sigma dom (fn [x] (elab/sigma-chain (env/extend env name x) sig-env rest body))])))
 
-(defn elab/app-list [env xs]
+(defn elab/app-list [env sig-env xs]
   (when (zero? (length xs))
     (errorf "cannot elaborate empty application"))
-  (reduce (fn [acc x] [:app acc (elab/term env x)])
-          (elab/term env (xs 0))
+  (reduce (fn [acc x] [:app acc (elab/term env sig-env x)])
+          (elab/callee env sig-env (xs 0))
           (slice xs 1)))
 
-(defn elab/lam-chain [env params body]
+(defn elab/lam-chain [env sig-env params body]
   (if (zero? (length params))
-    (elab/term env body)
+    (elab/term env sig-env body)
     (let [b (params 0)
           name (b 1)
           rest (slice params 1)]
-      [:lam (fn [x] (elab/lam-chain (env/extend env name x) rest body))])))
+      [:lam (fn [x] (elab/lam-chain (env/extend env name x) sig-env rest body))])))
 
 (defn list/head [xs]
   (if (and (> (length xs) 0) (l/node/atom? (xs 0)))
@@ -114,74 +164,74 @@
     _
     (errorf "invalid Ann binder: %v\nExpected form: (Ann x A)" node)))
 
-(defn elab/list-pi [env node]
+(defn elab/list-pi [env sig-env node]
   (let [[binders body] (l/term/split-pi node)]
-    (elab/pi-chain env binders body)))
+    (elab/pi-chain env sig-env binders body)))
 
-(defn elab/list-lam [env xs]
+(defn elab/list-lam [env sig-env xs]
   (let [[binders body] (list/parse-binders-body xs "lambda")]
-    (elab/lam-chain env binders body)))
+    (elab/lam-chain env sig-env binders body)))
 
-(defn elab/list-lam-ann [env xs]
+(defn elab/list-lam-ann [env sig-env xs]
   (list/expect-arity "Lam" xs 3)
   (let [b (list/parse-ann-binder (xs 1))
         name (b 1)
         body (xs 2)]
-    [:lam (fn [x] (elab/term (env/extend env name x) body))]))
+    [:lam (fn [x] (elab/term (env/extend env name x) sig-env body))]))
 
-(defn elab/list-pi-ann [env xs]
+(defn elab/list-pi-ann [env sig-env xs]
   (list/expect-arity "Pi" xs 3)
   (let [b (list/parse-ann-binder (xs 1))
         name (b 1)
-        dom (elab/term env (b 2))]
-    [:t-pi dom (fn [x] (elab/term (env/extend env name x) (xs 2)))]))
+        dom (elab/term env sig-env (b 2))]
+    [:t-pi dom (fn [x] (elab/term (env/extend env name x) sig-env (xs 2)))]))
 
-(defn elab/list-ann [env xs]
+(defn elab/list-ann [env sig-env xs]
   (list/expect-arity "Ann" xs 3)
-  (elab/term env (xs 1)))
+  (elab/term env sig-env (xs 1)))
 
-(defn elab/list-let [env xs]
+(defn elab/list-let [env sig-env xs]
   (list/expect-arity "let" xs 4)
   (let [bind (l/bind/from-node (xs 1))
         name (bind 1)
-        val-core (elab/term env (xs 2))]
-    (elab/term (env/extend env name val-core) (xs 3))))
+        val-core (elab/term env sig-env (xs 2))]
+    (elab/term (env/extend env name val-core) sig-env (xs 3))))
 
-(defn elab/list-sigma [env xs]
+(defn elab/list-sigma [env sig-env xs]
   (let [[binders body] (list/parse-binders-body xs "Sigma")]
-    (elab/sigma-chain env binders body)))
+    (elab/sigma-chain env sig-env binders body)))
 
-(defn elab/list-pair [env xs]
+(defn elab/list-pair [env sig-env xs]
   (list/expect-arity "pair" xs 3)
-  [:pair (elab/term env (xs 1))
-         (elab/term env (xs 2))])
+  [:pair (elab/term env sig-env (xs 1))
+         (elab/term env sig-env (xs 2))])
 
-(defn elab/list-fst [env xs]
+(defn elab/list-fst [env sig-env xs]
   (list/expect-arity "fst" xs 2)
-  [:fst (elab/term env (xs 1))])
+  [:fst (elab/term env sig-env (xs 1))])
 
-(defn elab/list-snd [env xs]
+(defn elab/list-snd [env sig-env xs]
   (list/expect-arity "snd" xs 2)
-  [:snd (elab/term env (xs 1))])
+  [:snd (elab/term env sig-env (xs 1))])
 
-(defn elab/list-id [env xs]
+(defn elab/list-id [env sig-env xs]
   (list/expect-arity "Id" xs 4)
-  [:t-id (elab/term env (xs 1))
-         (elab/term env (xs 2))
-         (elab/term env (xs 3))])
+  [:t-id (elab/term env sig-env (xs 1))
+         (elab/term env sig-env (xs 2))
+         (elab/term env sig-env (xs 3))])
 
-(defn elab/list-refl [env xs]
+(defn elab/list-refl [env sig-env xs]
   (list/expect-arity "refl" xs 2)
-  [:t-refl (elab/term env (xs 1))])
+  [:t-refl (elab/term env sig-env (xs 1))])
 
-(defn elab/list-j [env xs]
+(defn elab/list-j [env sig-env xs]
   (list/expect-arity "J" xs 7)
-  [:t-J (elab/term env (xs 1))
-        (elab/term env (xs 2))
-        (elab/term env (xs 3))
-        (elab/term env (xs 4))
-        (elab/term env (xs 5))
-        (elab/term env (xs 6))])
+  [:t-J (elab/term env sig-env (xs 1))
+        (elab/term env sig-env (xs 2))
+        (elab/term env sig-env (xs 3))
+        (elab/term env sig-env (xs 4))
+        (elab/term env sig-env (xs 5))
+        (elab/term env sig-env (xs 6))])
 
 (def elab/list-dispatch
   {"fn" elab/list-lam
@@ -205,92 +255,91 @@
    "Refl" elab/list-refl
    "J" elab/list-j})
 
-(defn elab/list [env node xs]
+(defn elab/list [env sig-env node xs]
   (if (or (l/term/forall? node) (l/term/arrow? node))
-    (elab/list-pi env node)
+    (elab/list-pi env sig-env node)
     (if-let [handler (get elab/list-dispatch (list/head xs))]
-      (handler env xs)
-      (elab/app-list env xs))))
+      (handler env sig-env xs)
+      (elab/app-list env sig-env xs))))
 
 (set elab/term
-     (fn [env node]
+     (fn [env sig-env node &opt exact-ref?]
+       (default exact-ref? true)
        (match node
          [:atom tok]
-         (if-let [bound (env/lookup env tok)]
-           bound
-           (if-let [lvl (token/type-level tok)]
-             [:type lvl]
-             [:var tok]))
+         (elab/atom env sig-env tok exact-ref?)
 
-         [:list xs]
-         (elab/list env node xs)
+          [:list xs]
+          (elab/list env sig-env node xs)
 
-         _
-         (errorf "cannot elaborate node: %v" node))))
+          _
+          (errorf "cannot elaborate node: %v" node))))
 
-(defn binders/elab [env binders]
+(defn binders/elab [env sig-env binders]
   (let [[out final-env]
         (reduce (fn [[acc cur-env] b]
                   (let [name (b 1)
-                        ty-core (elab/term cur-env (b 2))]
-                    [[;acc [:bind name ty-core]]
-                     (env/extend cur-env name [:var name])]))
+                        ty-core (elab/term cur-env sig-env (b 2))]
+                     [[;acc [:bind name ty-core]]
+                      (env/extend cur-env name [:var name])]))
                 [[] env]
                 binders)]
     [out final-env]))
 
-(defn clause/vars [patterns]
-  (let [seen @{}
-        out @[]]
-    (defn collect [pat]
-      (match pat
-        [:pat/var x]
-        (when (and (not= x "_") (not (has-key? seen x)))
-          (put seen x true)
-          (array/push out x))
-        [:pat/con _ args]
-        (each a args (collect a))
-        _ nil))
-    (each p patterns (collect p))
-    out))
+(defn seq/contains? [xs x]
+  (not (nil? (find-index |(= $ x) xs))))
 
-(defn clause/elab [base-env clause]
+(defn clause/vars [patterns]
+  "Collect unique pattern variables from clause patterns."
+  (defn collect [pat seen]
+    (match pat
+      [:pat/var x]
+      (if (or (= x "_") (seq/contains? seen x))
+        seen
+        [;seen x])
+      [:pat/con _ args]
+      (reduce collect seen args)
+      seen))
+  (reduce collect @[] patterns))
+
+(defn clause/elab [base-env sig-env clause]
   (match clause
     [:clause patterns body]
     (let [vars (clause/vars patterns)
           env (reduce (fn [e name] (env/extend e name [:var name]))
                        base-env
                        vars)]
-      [:core/clause patterns (elab/term env body)])
+      [:core/clause patterns (elab/term env sig-env body)])
     _
     (errorf "invalid clause: %v" clause)))
 
-(defn decl/elab [decl]
+(defn decl/elab [sig-env decl]
   (match decl
     [:decl/data name params sort ctors]
-    (let [[core-params env] (binders/elab @[] params)
-          core-sort (elab/term env sort)
+    (let [[core-params env] (binders/elab @[] sig-env params)
+          core-sort (elab/term env sig-env sort)
           core-ctors (map (fn [ctor]
                             (match ctor
-                              [:ctor ctor-name pat-binders patterns ctor-params encoded-type]
+                              [:ctor ctor-name pat-binders patterns ctor-params encoded-type _]
                               [:core/ctor ctor-name pat-binders patterns ctor-params
-                               (elab/term env encoded-type)]
+                               (elab/term env sig-env encoded-type)]
                               _ (errorf "invalid constructor: %v" ctor)))
                           ctors)]
       [:core/data name core-params core-sort core-ctors])
 
     [:decl/func name params result clauses]
-    (let [[core-params env] (binders/elab @[] params)
-          core-result (elab/term env result)
-          core-type (elab/pi-chain @[] params result)
-          core-clauses (map |(clause/elab env $) clauses)]
+    (let [[core-params env] (binders/elab @[] sig-env params)
+          core-result (elab/term env sig-env result)
+          core-type (elab/pi-chain @[] sig-env params result)
+          core-clauses (map |(clause/elab env sig-env $) clauses)]
       [:core/func name core-params core-result core-type core-clauses])
 
     _
     (errorf "invalid declaration: %v" decl)))
 
 (defn elab/program [decls]
-  (map decl/elab decls))
+  (let [sig-env (sig/from-decls decls)]
+    (map |(decl/elab sig-env $) decls)))
 
 (defn elab/forms [forms]
   (elab/program (l/lower/program forms)))
@@ -302,7 +351,7 @@
   {:elab/program elab/program
    :elab/forms elab/forms
    :elab/text elab/text
-   :decl/elab decl/elab
-   :term/elab elab/term
-   :decl-elab decl/elab
-   :term-elab elab/term})
+    :decl/elab (fn [decl] (decl/elab @[] decl))
+    :term/elab (fn [env node] (elab/term env @[] node))
+    :decl-elab (fn [decl] (decl/elab @[] decl))
+    :term-elab (fn [env node] (elab/term env @[] node))})
