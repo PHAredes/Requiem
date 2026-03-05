@@ -24,6 +24,29 @@
 (defn node/atom/new [tok]
   [:atom tok])
 
+(defn record/entry/lower [node]
+  (when (not (node/list? node))
+    (errorf "record entry must be a list, got: %v" node))
+  (let [xs (node/list-items node)]
+    (when (< (length xs) 2)
+      (errorf "invalid record entry: %v" node))
+    (when (not (node/atom= (xs 0) "entry"))
+      (errorf "record entry must start with 'entry', got: %v" node))
+    (when (not (node/atom? (xs 1)))
+      (errorf "record entry line must be an atom, got: %v" (xs 1)))
+    [:entry
+     (node/atom (xs 1))
+     (map record/entry/lower (slice xs 2 (length xs)))]))
+
+(defn record/lower [nodes]
+  (when (zero? (length nodes))
+    (errorf "record declaration is missing header"))
+  (when (not (node/atom? (nodes 0)))
+    (errorf "record header must be an atom, got: %v" (nodes 0)))
+  (let [header (node/atom (nodes 0))
+        entries (map record/entry/lower (slice nodes 1 (length nodes)))]
+    [:decl/record header entries]))
+
 (defn token/colon? [tok]
   (let [n (length tok)]
     (and (> n 0)
@@ -844,7 +867,10 @@
             (walk (+ i 1) binders1 rec-pairs)))))
     (walk 0 @[] @[])))
 
-(defn term/rewrite-self [body rec-pairs func-name param-names target-index]
+(defn branch/with-obligations [branch-binders obligations]
+  (seq/concat branch-binders obligations))
+
+(defn branch/rewrite-self-calls [body rec-pairs func-name param-names target-index]
   (reduce (fn [acc pair]
             (term/replace-self-call acc func-name param-names target-index (pair 0) (pair 1)))
           body
@@ -854,7 +880,6 @@
   (let [target-name (param-names target-index)]
     (reduce (fn [branches ctor]
               (let [ctor-name (ctor 1)
-                    pat-binders (ctor 2)
                     ctor-params (ctor 4)
                     ctor-obligations (if (> (length ctor) 6) (ctor 6) @[])
                     case-entry (match/find-ctor-entry entries ctor-name)
@@ -867,9 +892,8 @@
                           (length pat-args)
                           (length ctor-params)))
                 (let [[branch-binders rec-pairs] (branch/build-binders ctor-params pat-args data-name result)
-                      branch-binders (seq/concat pat-binders branch-binders)
-                      full-binders (seq/concat branch-binders ctor-obligations)
-                      body (term/rewrite-self body0 rec-pairs func-name param-names target-index)]
+                      full-binders (branch/with-obligations branch-binders ctor-obligations)
+                      body (branch/rewrite-self-calls body0 rec-pairs func-name param-names target-index)]
                   [;branches (term/build-lam full-binders body)])))
             @[]
             ctors)))
@@ -932,7 +956,8 @@
           (match head
             "data" (data/lower rest)
             "def" (func/lower rest data-env)
-            _ (errorf "unsupported top-level form: %v\nSupported top-level forms:\n  (data ...)\n  (def ...)\n  (import ...)\n  (export ...)" head))))
+            "record" (record/lower rest)
+            _ (errorf "unsupported top-level form: %v\nSupported top-level forms:\n  (data ...)\n  (def ...)\n  (record ...)\n  (import ...)\n  (export ...)" head))))
       (errorf "top-level form must be a list (s-expression): %v\nAll top-level forms must be properly parenthesized" norm))))
 
 (defn lower/program [forms]
@@ -950,6 +975,7 @@
 (def exports
   {:lower/program lower/program
    :decl/lower decl/lower
+   :record/lower record/lower
    :bind/from-node bind/from-node
    :binders/from-spec binders/from-spec
    :term/split-pi term/split-pi
