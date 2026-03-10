@@ -70,6 +70,16 @@
     (++ i))
   result)
 
+(defn indent/tokenize [src]
+  (let [lines (string/split "\n" src)
+        out @[]]
+    (eachp [i line] lines
+      (let [trimmed (string/triml line)
+            col (- (length line) (length trimmed))]
+        (when (not= (trim line) "")
+          (array/push out @{:text trimmed :col col :line (+ i 1)}))))
+    out))
+
 (def exports
   {:trim trim
    :trimr trimr
@@ -77,4 +87,5 @@
    :is-space-byte? is-space-byte?
    :split-top-level split-top-level
    :split-ws-top-level split-ws-top-level
-   :find-top-level-char find-top-level-char})
+   :find-top-level-char find-top-level-char
+   :indent/tokenize indent/tokenize})

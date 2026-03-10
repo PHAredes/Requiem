@@ -216,6 +216,21 @@
     [:list xs] (lst @[;xs x])
     _ (lst @[f x])))
 
+(defn- term/render [node]
+  (match node
+    [:atom tok]
+    tok
+
+    [:list xs]
+    (string "(" (string/join (map term/render xs) " ") ")")
+
+    _
+    (string/format "%v" node)))
+
+(defn- term/equal? [a b]
+  (= (term/render a)
+     (term/render b)))
+
 (var lower/type nil)
 
 (defn- lower/binder [binder]
@@ -283,12 +298,17 @@
          (flatten-app (lower/term f) (lower/term x))
 
          [:tm/lam params body _sp]
-         (let [binder-nodes (map |(atom $) params)]
-           (lst @[(atom "fn")
-                  (if (= (length binder-nodes) 1)
-                    (binder-nodes 0)
-                    (lst binder-nodes))
-                  (lower/term body)]))
+         (let [lower-param (fn [p]
+                              (if (string? p)
+                                (atom p)
+                                (let [[_ name ty _] p]
+                                  (node/binder name (lower/type ty)))))
+                binder-nodes (map lower-param params)]
+            (lst @[(atom "fn")
+                   (if (= (length binder-nodes) 1)
+                     (binder-nodes 0)
+                     (lst binder-nodes))
+                   (lower/term body)]))
 
          [:tm/let name value body _sp]
          (lst @[(atom "let")
@@ -414,6 +434,26 @@
         encoded (ctor/ford-encoded data-name data-params pat-binders ctor-params eq-binders)]
     [:ctor name pat-binders patterns ctor-params encoded eq-binders]))
 
+(defn- ctor/drop-index-echo-fields [indices fields]
+  # Aya-style sugar: in indexed branches, ctor(arg) where arg repeats
+  # the branch index is treated as an index echo, not a runtime field.
+  (let [index-terms (map lower/pat-to-term indices)
+        n-fields (length fields)
+        n-index (length index-terms)]
+    (var fi 0)
+    (var ii 0)
+    (while (and (< fi n-fields) (< ii n-index))
+      (let [f (fields fi)]
+        (match f
+          [:field/anon ty _sp]
+          (if (term/equal? (lower/type ty) (index-terms ii))
+            (do (++ fi) (++ ii))
+            (break))
+
+          _
+          (break))))
+    (slice fields fi n-fields)))
+
 # ---------------------------------------------------------------
 # Constructor lowering (plain & indexed)
 # ---------------------------------------------------------------
@@ -432,7 +472,8 @@
 (defn- ctor/lower-indexed-ctor [data-name data-params ctor-node]
   (match ctor-node
     [:ctor/indexed indices name fields _sp]
-    (let [ctor-binders (lower/ctor-fields-as-binders fields)
+    (let [effective-fields (ctor/drop-index-echo-fields indices fields)
+          ctor-binders (lower/ctor-fields-as-binders effective-fields)
           ret-args (map lower/pat-to-term indices)]
       (if (args/simple-return? ret-args data-params)
         (let [data-param-terms (map |(atom ($ 1)) data-params)
@@ -529,6 +570,12 @@
           [lowered-params result] (split-pi lowered-ty)
           lowered-clauses (map |(lower/clause $ data-env lowered-params) clauses)]
       [:decl/func name lowered-params result lowered-clauses])
+
+    [:decl/compute tm _sp]
+    [:decl/compute (lower/term tm)]
+
+    [:decl/check tm ty _sp]
+    [:decl/check (lower/term tm) (lower/type ty)]
 
     _ (errorf "lower/decl: unknown declaration %v" decl)))
 
