@@ -4,8 +4,14 @@
 (import ./layout :as ly)
 (import ./lexer :as lx)
 
+(defn- strip-parens [s]
+  (let [t (ly/trim s)]
+    (if (and (> (length t) 1) (= (t 0) (chr "(")) (= (t (- (length t) 1)) (chr ")")))
+      (strip-parens (string/slice t 1 (- (length t) 1)))
+      t)))
+
 (defn- parse/pat-atom [text]
-  (let [t (ly/trim text)
+  (let [t (strip-parens text)
         sp (a/span/none)]
     (cond
       (= t "_") (a/pat/wild sp)
@@ -21,7 +27,8 @@
       true (a/pat/var t sp))))
 
 (defn parse/pat-text [text]
-  (let [parts (ly/split-ws-top-level (ly/trim text))
+  (let [stripped (strip-parens text)
+        parts (ly/split-ws-top-level stripped)
         sp (a/span/none)]
     (when (zero? (length parts))
       (error "empty pattern"))

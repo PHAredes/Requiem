@@ -92,7 +92,16 @@
       (test/assert (p/has/atom? body (string "ih-" rec-var)) "recursive branch introduces ih binder")
       (test/assert (not (p/has/atom? body "sum")) "structural branch removes direct recursive call"))))
 
-(let [forms (p/parse/text (slurp "examples/test.requiem"))
+(let [src (string
+            "(data Nat: Type ((zero Nat) (succ (forall (k: Nat). Nat))))"
+            " (data Bool: Type ((true Bool) (false Bool)))"
+            " (def sum: (forall (n: Nat). (forall (m: Nat). Nat))"
+            "   (| n zero = n)"
+            "   (| n (succ m') = (succ (sum n m'))))"
+            " (def not: (forall (b: Bool). Bool)"
+            "   (| true = false)"
+            "   (| false = true))")
+      forms (p/parse/text src)
       lowered (l/lower/program forms)
       core (e/elab/program lowered)
       sum-decl (decl/find-func lowered "sum")

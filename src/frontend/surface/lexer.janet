@@ -16,7 +16,7 @@
   (or (is-alpha-byte? c) (= c (chr "_"))))
 
 (defn- is-ident-byte? [c]
-  (or (is-alnum-byte? c) (= c (chr "_")) (= c (chr "-"))))
+  (or (is-alnum-byte? c) (= c (chr "_")) (= c (chr "-")) (= c (chr "'"))))
 
 (defn is-op-byte? [c]
   (or (= c (chr "*")) (= c (chr "+")) (= c (chr "-")) (= c (chr "/"))

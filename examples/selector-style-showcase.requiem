@@ -1,127 +1,132 @@
-data Nat: Type
-  | zero
-  | succ Nat
+Nat:
+  zero
+  succ Nat
 
-data Bool: Type
-  | true
-  | false
+Bool:
+  true
+  false
 
-data Unit: Type
-  | tt
+Unit:
+  tt
 
-data Void: Type
+Void:
 
-data List (A: Type): Type
-  | nil
-  | cons A (List A)
+List(A: Type):
+  nil
+  cons A (List A)
 
-data Maybe (A: Type): Type
-  | none
-  | some A
+Maybe(A: Type):
+  none
+  some A
 
-data Either (A: Type) (B: Type): Type
-  | left A
-  | right B
+Either(A: Type, B: Type):
+  left A
+  right B
 
-data Pair (A: Type) (B: Type): Type
-  | pair A B
+Pair(A: Type, B: Type):
+  pair A B
 
-data Tree (A: Type): Type
-  | leaf
-  | node A (Tree A) (Tree A)
+Tree(A: Type):
+  leaf
+  node A (Tree A) (Tree A)
 
-data Vec (A: Type) (n: Nat): Type
-  | A zero = vnil
-  | A (succ n) = vcons (x: A) (xs: (Vec A n))
+Vec(A: Type, n: Nat):
+  A, zero = vnil
+  A, (succ n) = vcons (x: A) (xs: Vec A n)
 
-data Fin (n: Nat): Type
-  | (succ n) = fzero
-  | (succ n) = fsuc (x: (Fin n))
+Fin(n: Nat):
+  (succ n) = fzero
+  (succ n) = fsuc (x: Fin n)
 
-data Matrix (A: Type) (m: Nat) (n: Nat): Type
-  | A zero n = mnil
-  | A (succ m) n = mcons (row: (Vec A n)) (rest: (Matrix A m n))
+Matrix(A: Type, m: Nat, n: Nat):
+  A, zero, n = mnil
+  A, (succ m), n = mcons (row: Vec A n) (rest: Matrix A m n)
 
-def not (b: Bool): Bool
-  | true = false
-  | false = true
+not: Bool -> Bool
+  true = false
+  false = true
 
-def and (a: Bool) (b: Bool): Bool
-  | true b = b
-  | false b = false
+and: Bool -> Bool -> Bool
+  true b = b
+  false b = false
 
-def add (n: Nat) (m: Nat): Nat
-  | n zero = n
-  | n (succ m) = (succ (add n m))
+add: Nat -> Nat -> Nat
+  n zero = n
+  n (succ m) = succ (add n m)
 
-def mul (n: Nat) (m: Nat): Nat
-  | n zero = zero
-  | n (succ m) = (add n (mul n m))
+mul: Nat -> Nat -> Nat
+  n zero = zero
+  n (succ m) = add n (mul n m)
 
-def length (A: Type) (xs: (List A)): Nat
-  | A nil = zero
-  | A (cons x xs) = (succ (length A xs))
+length: ∀(A: Type). List A -> Nat
+  A nil = zero
+  A (cons x xs) = succ (length A xs)
 
-def map (A: Type) (B: Type) (f: (A -> B)) (xs: (List A)): (List B)
-  | A B f nil = nil
-  | A B f (cons x xs) = (cons (f x) (map A B f xs))
+map: ∀(A: Type). ∀(B: Type). (A -> B) -> List A -> List B
+  A B f nil = nil
+  A B f (cons x xs) = cons (f x) (map A B f xs)
 
-def head (A: Type) (n: Nat) (xs: (Vec A (succ n))): A
-  | A n (vcons x _) = x
+head: ∀(A: Type). Π(n: Nat). Vec A (succ n) -> A
+  A n (vcons x _) = x
 
-def tail (A: Type) (n: Nat) (xs: (Vec A (succ n))): (Vec A n)
-  | A n (vcons _ xs) = xs
+tail: ∀(A: Type). Π(n: Nat). Vec A (succ n) -> Vec A n
+  A n (vcons _ xs) = xs
 
-def lookup (A: Type) (n: Nat) (xs: (Vec A n)) (i: (Fin n)): A
-  | A (succ n) (vcons x _) fzero = x
-  | A (succ n) (vcons _ xs) (fsuc i) = (lookup A n xs i)
+lookup: ∀(A: Type). Π(n: Nat). Vec A n -> Fin n -> A
+  A (succ n) (vcons x _) fzero = x
+  A (succ n) (vcons _ xs) (fsuc i) = lookup A n xs i
 
-data Id (A: Type) (x: A) (y: A): Type
-  | A x x = refl
+Id(A: Type, x: A, y: A):
+  A, x, x = refl
 
-def transport
-  (A: Type) (x: A) (y: A) (p: (Id A x y)) (P: (A -> Type)) (px: (P x))
-  : (P y)
-  | A x x refl P px = px
+transport:
+  ∀(A: Type).
+  Π(x: A). Π(y: A).
+  Id A x y ->
+  Π(P: A -> Type).
+  P x ->
+  P y
+  A x x refl P px = px
 
-def sym (A: Type) (x: A) (y: A) (p: (Id A x y)): (Id A y x)
-  | A x x refl = refl
+sym: ∀(A: Type). Π(x: A). Π(y: A). Id A x y -> Id A y x
+  A x x refl = refl
 
-def trans
-  (A: Type) (x: A) (y: A) (z: A) (p: (Id A x y)) (q: (Id A y z))
-  : (Id A x z)
-  | A x x x refl refl = refl
+trans:
+  ∀(A: Type).
+  Π(x: A). Π(y: A). Π(z: A).
+  Id A x y ->
+  Id A y z ->
+  Id A x z
+  A x x x refl refl = refl
 
-data Ty: Type
-  | natT
-  | boolT
-  | arrT Ty Ty
+Ty:
+  nat-t
+  bool-t
+  arr-t Ty Ty
 
-def interp (t: Ty): Type
-  | natT = Nat
-  | boolT = Bool
-  | (arrT a b) = (interp a -> interp b)
+interp: Ty -> Type
+  nat-t = Nat
+  bool-t = Bool
+  (arr-t a b) = interp a -> interp b
 
-data Term (t: Ty): Type
-  | natT = litN Nat
-  | boolT = litB Bool
-  | (arrT a b) = lam (a: Ty) (b: Ty) (body: (Term b))
-  | b = app (a: Ty) (b: Ty) (f: (Term (arrT a b))) (x: (Term a))
+Term(t: Ty):
+  nat-t = lit-n Nat
+  bool-t = lit-b Bool
+  (arr-t a b) = lam (a: Ty) (b: Ty) (body: Term b)
+  b = app (a: Ty) (b: Ty) (f: Term (arr-t a b)) (x: Term a)
 
-def eval (t: Ty) (e: (Term t)): (interp t)
-  | natT (litN n) = n
-  | boolT (litB b) = b
-  | (arrT a b) (lam a b body) = (fn (x: (interp a)) (eval b body))
-  | b (app a b f x) = ((eval (arrT a b) f) (eval a x))
+comp:
+  ∀(A: Type). ∀(B: Type). ∀(C: Type).
+  (B -> C) -> (A -> B) -> A -> C
+  A B C f g x = f (g x)
 
-def comp (A: Type) (B: Type) (C: Type) (f: (B -> C)) (g: (A -> B)) (x: A): C
-  | A B C f g x = (f (g x))
+flip:
+  ∀(A: Type). ∀(B: Type). ∀(C: Type).
+  (A -> B -> C) -> B -> A -> C
+  A B C f x y = f y x
 
-def flip (A: Type) (B: Type) (C: Type) (f: (A -> (B -> C))) (x: B) (y: A): C
-  | A B C f x y = (f y x)
+const: ∀(A: Type). ∀(B: Type). A -> B -> A
+  A B x _ = x
 
-def const (A: Type) (B: Type) (x: A) (_: B): A
-  | A B x _ = x
-
-def id (A: Type) (x: A): A
-  | A x = x
+id: ∀(A: Type). A -> A
+  A x = x
