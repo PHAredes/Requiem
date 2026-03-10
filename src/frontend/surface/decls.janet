@@ -16,19 +16,38 @@
       :op (capture (thru -1))
       :main (* :ws* :fix :ws+ :lvl :ws+ :op :ws*)}))
 
-(def peg/type-head-line
-  (peg/compile
-    ~{:ws* (any (set " \t"))
-      :name (capture (* (range "AZ") (any (range "AZ" "az" "09"))))
-      :params (capture (to ")"))
-      :main (* :ws* :name :ws* (? (* "(" :params ")")) :ws* ":" :ws*)}))
+(defn- is-upper-byte? [c]
+  (and (>= c (chr "A")) (<= c (chr "Z"))))
 
-(def peg/term-head-line
-  (peg/compile
-    ~{:ws* (any (set " \t"))
-      :lhs (capture (some (if-not ":" 1)))
-      :rhs (capture (thru -1))
-      :main (* :ws* :lhs :ws* ":" :ws* :rhs)}))
+(defn- is-lower-byte? [c]
+  (and (>= c (chr "a")) (<= c (chr "z"))))
+
+(defn- is-ident-start-byte? [c]
+  (or (is-upper-byte? c) (is-lower-byte? c) (= c (chr "_"))))
+
+(defn- find-top-level-colon [text]
+  "Find the index of the last top-level colon respecting balanced parens."
+  (let [n (length text)]
+    (var depth 0)
+    (var last-colon nil)
+    (for i 0 n
+      (let [c (text i)]
+        (cond
+          (= c (chr "(")) (++ depth)
+          (= c (chr ")")) (when (> depth 0) (-- depth))
+          (and (= c (chr ":")) (= depth 0))
+          (set last-colon i))))
+    last-colon))
+
+(defn- extract-name-and-params [lhs]
+  "From 'Name' or 'Name(params)', extract [name params-text-or-nil]."
+  (let [t (ly/trim lhs)
+        paren-idx (string/find "(" t)]
+    (if (and paren-idx
+             (string/has-suffix? ")" t))
+      [(string/slice t 0 paren-idx)
+       (string/slice t (+ paren-idx 1) (- (length t) 1))]
+      [t nil])))
 
 (def peg/split-eq-line
   (peg/compile
@@ -77,17 +96,21 @@
       (a/decl/field-anon (pr/parse/type-text t prec syntax) sp))))
 
 (defn- read-parenthesized-end [text start]
-  (let [p (parser/new)
-        n (length text)]
+  (let [n (length text)]
     (var i start)
-    (while (< i n)
-      (parser/byte p (text i))
-      (when (= (parser/status p) :error)
-        (errorf "parser error while scanning '%v': %v" text (parser/error p)))
-      (++ i)
-      (when (= (length (or (parser/state p :delimiters) "")) 0)
-        (return i)))
-    nil))
+    (var depth 0)
+    (var found false)
+    (var result nil)
+    (while (and (< i n) (not found))
+      (let [c (text i)]
+        (cond
+          (= c (chr "(")) (++ depth)
+          (= c (chr ")")) (when (> depth 0) (-- depth)))
+        (++ i)
+        (when (= depth 0)
+          (set found true)
+          (set result i))))
+    result))
 
 (defn- parse/fields [text prec syntax]
   (let [out @[]
@@ -135,6 +158,7 @@
       (a/decl/ctor-plain name fields (a/span/none)))))
 
 (defn- parse/term-body-line [text prec syntax]
+  (print "Parsing clause: " text)
   (if-let [eq (peg/match peg/split-eq-line text)]
     (let [lhs (ly/trim (eq 0))
           rhs (ly/trim (eq 1))
@@ -147,11 +171,14 @@
 (defn- classify-top [text]
   (if-let [m (peg/match peg/prec-line text)]
     [:top/prec (m 0) (scan-number (ly/trim (m 1))) (ly/trim (m 2))]
-    (if-let [m (peg/match peg/type-head-line text)]
-      [:top/type-head (m 0) (if (> (length m) 1) (m 1) nil)]
-      (if-let [m (peg/match peg/term-head-line text)]
-        [:top/term-head (ly/trim (m 0)) (ly/trim (m 1))]
-        (errorf "unknown top-level line: %v" text)))))
+    (if-let [colon-idx (find-top-level-colon text)]
+      (let [lhs (ly/trim (string/slice text 0 colon-idx))
+            rhs (ly/trim (string/slice text (+ colon-idx 1)))
+            [name params-text] (extract-name-and-params lhs)]
+        (if (and (> (length name) 0) (is-upper-byte? (name 0)))
+          [:top/type-head name params-text rhs]
+          [:top/term-head name params-text rhs]))
+      (errorf "unknown top-level line (no colon found): %v" text))))
 
 (defn- build-prec-table [entries]
   (let [prec @{}]
@@ -193,12 +220,14 @@
               (set current {:kind :data-head
                             :name (top 1)
                             :params-text (top 2)
+                            :sort-text (top 3)
                             :body @[]})
 
               :top/term-head
               (set current {:kind :term-head
                             :name (top 1)
-                            :type-text (top 2)
+                            :params-text (top 2)
+                            :type-text (top 3)
                             :body @[]}))))
         (if current
           (array/push (current :body) (ln :text))
@@ -221,10 +250,54 @@
             (array/push decls (a/decl/data (e :name) params ctors (a/span/none))))
 
           :term-head
-          (let [ty (pr/parse/type-text (e :type-text) prec syn)
+          (let [# Separate body into type-continuation lines and clause lines
+                # Lines without '=' before the first clause line are type continuation
+                body-lines (e :body)
+                type-parts @[]
+                clause-lines @[]
+                _ (do
+                    (var found-clause false)
+                    (each bl body-lines
+                      (if found-clause
+                        (array/push clause-lines bl)
+                        (if (peg/match peg/split-eq-line bl)
+                          (do (set found-clause true)
+                              (array/push clause-lines bl))
+                          (array/push type-parts bl)))))
+                # Build full type text: head type-text + continuation lines + params
+                head-type (or (e :type-text) "")
+                full-type-text
+                (if (zero? (length type-parts))
+                  head-type
+                  (string head-type
+                          (if (> (length head-type) 0) " " "")
+                          (string/join type-parts " ")))
+                # Weave params into type as Pi binders
+                params-text (e :params-text)
+                final-type-text
+                (if params-text
+                  (let [param-parts (ly/split-top-level params-text (chr ","))
+                        pi-prefix @[]]
+                    (each pp param-parts
+                      (let [tp (ly/trim pp)]
+                        (when (not= tp "")
+                          (if-let [colon-ix (ly/find-top-level-char tp (chr ":"))]
+                            # Split on colon: could be "n,m: Nat" or "A: Type"
+                            (let [names-part (ly/trim (string/slice tp 0 colon-ix))
+                                  ty-part (ly/trim (string/slice tp (+ colon-ix 1)))
+                                  names (ly/split-top-level names-part (chr ","))]
+                              (each nm names
+                                (let [n (ly/trim nm)]
+                                  (when (not= n "")
+                                    (array/push pi-prefix
+                                                (string "\xCE\xA0(" n ": " ty-part "). "))))))
+                            (array/push pi-prefix (string "\xCE\xA0(" tp ": Type). "))))))
+                    (string (string/join pi-prefix "") full-type-text))
+                  full-type-text)
+                ty (pr/parse/type-text final-type-text prec syn)
                 clauses @[]]
-            (each bl (e :body)
-              (array/push clauses (parse/term-body-line bl prec syn)))
+            (each cl clause-lines
+              (array/push clauses (parse/term-body-line cl prec syn)))
             (array/push decls (a/decl/func (e :name) ty clauses (a/span/none))))
 
           _ (errorf "unknown entry kind: %v" (e :kind))))

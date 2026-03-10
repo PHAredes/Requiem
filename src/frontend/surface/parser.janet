@@ -5,6 +5,7 @@
 (import ./pratt :as pr)
 (import ./patterns :as pat)
 (import ./decls :as d)
+(import ./lower :as lo)
 
 (def ast/debug-checks? a/ast/debug-checks?)
 (def ast/set-debug-checks! a/ast/set-debug-checks!)
@@ -70,6 +71,13 @@
 (def parse/expr-text pr/parse/expr-text)
 (def parse/pat-text pat/parse/pat-text)
 (def parse/source d/parse/source)
+
+(def lower/type lo/lower/type)
+(def lower/term lo/lower/term)
+(def lower/pat lo/lower/pat)
+(def lower/decl lo/lower/decl)
+(def lower/clause lo/lower/clause)
+(def lower/program lo/lower/program)
 
 (defn parse/type [xv &opt prec sx]
   (if (string? xv)
@@ -168,4 +176,11 @@
    :parse/expr-text parse/expr-text
    :parse/pat-text parse/pat-text
    :parse/source parse/source
-   :parse/program parse/program})
+   :parse/program parse/program
+
+   :lower/type lower/type
+   :lower/term lower/term
+   :lower/pat lower/pat
+   :lower/decl lower/decl
+   :lower/clause lower/clause
+   :lower/program lower/program})

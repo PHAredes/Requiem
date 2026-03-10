@@ -31,11 +31,13 @@
 (defn syntax/default []
   @{:literals @[
       {:lit "->" :k :arrow :v :arrow}
+      {:lit "→" :k :arrow :v :arrow}
       {:lit "=>" :k :fat-arrow :v :fat-arrow}
       {:lit "\\" :k :lambda :v :lambda}
       {:lit "λ" :k :lambda :v :lambda}
       {:lit "Π" :k :quant :v :pi}
       {:lit "∀" :k :quant :v :pi}
+      {:lit "forall" :k :quant :v :pi}
       {:lit "Σ" :k :quant :v :sigma}
       {:lit "∃" :k :quant :v :sigma}
     ]
@@ -73,14 +75,28 @@
   (array/push (sx :type/ident-resolvers) resolver)
   sx)
 
+(defn- is-ident-byte-c? [c]
+  (or (is-byte-between? c (chr "a") (chr "z"))
+      (is-byte-between? c (chr "A") (chr "Z"))
+      (is-digit-byte? c)
+      (= c (chr "-"))
+      (= c (chr "_"))
+      (= c (chr "'"))))
+
 (defn syntax/match-literal [sx text i]
   (var best nil)
   (each entry (sx :literals)
     (let [lit (entry :lit)]
       (when (starts-with-at? text i lit)
-        (if (or (nil? best)
-                (> (length lit) (length (best :lit))))
-          (set best entry)))))
+        # Prevent partial matches for alpha keywords
+        (let [last-c (lit (- (length lit) 1))
+              next-i (+ i (length lit))]
+          (when (or (not (is-ident-byte-c? last-c))
+                    (>= next-i (length text))
+                    (not (is-ident-byte-c? (text next-i))))
+            (if (or (nil? best)
+                    (> (length lit) (length (best :lit))))
+              (set best entry)))))))
   best)
 
 (def exports
