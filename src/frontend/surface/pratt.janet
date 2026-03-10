@@ -6,8 +6,8 @@
 
 (defn- trim [s] (string/trim s))
 
-(defn- pstate/new [tokens mode prec sx]
-  @{:tokens tokens :i 0 :mode mode :prec prec :sx sx})
+(defn- pstate/new [tokens mode sx]
+  @{:tokens tokens :i 0 :mode mode :sx sx})
 
 (defn- pstate/peek [st]
   (if (< (st :i) (length (st :tokens)))
@@ -22,11 +22,11 @@
 (defn- pstate/expect [st kind]
   (let [t (pstate/next st)]
     (when (not= (t :k) kind)
-      (errorf "expected token %v, got %v" kind t))
+      (errorf "expected token %v, got %v (k: %v v: %v)" kind t (t :k) (t :v)))
     t))
 
-(defn- prec/spec [prec op]
-  (get prec op))
+(defn- prec/spec [st op]
+  (get ((st :sx) :operators) op))
 
 (defn- op-lbp [level] (+ 10 level))
 
@@ -36,9 +36,12 @@
   (pstate/expect st :lparen)
   (let [nm ((pstate/expect st :ident) :v)]
     (pstate/expect st :colon)
-    (let [dom (parse/expr st 0)]
-      (pstate/expect st :rparen)
-      (a/ty/binder nm dom (a/span/none)))))
+    (let [old-mode (st :mode)]
+      (put st :mode :type)
+      (let [dom (parse/expr st 0)]
+        (put st :mode old-mode)
+        (pstate/expect st :rparen)
+        (a/ty/binder nm dom (a/span/none))))))
 
 (defn- resolve-type-ident [st name]
   (var out nil)
@@ -54,6 +57,7 @@
 (defn- nud/type [st tok]
   (match (tok :k)
     :hole (a/ty/hole (tok :v) (a/span/none))
+    :nat (a/ty/universe (tok :v) (a/span/none))
     :ident (resolve-type-ident st (tok :v))
     :lparen (let [e (parse/expr st 0)]
               (pstate/expect st :rparen)
@@ -66,13 +70,13 @@
             mk (quant-builder st q)]
         (mk binder body (a/span/none))))
     :op
-    (if-let [spec (prec/spec (st :prec) (tok :v))]
+    (if-let [spec (prec/spec st (tok :v))]
       (if (= (spec :fixity) :prefix)
         (let [rhs (parse/expr st (op-lbp (spec :level)))]
           (a/ty/op (tok :v) @[rhs] (a/span/none)))
         (errorf "operator %v is not prefix in type position" (tok :v)))
       (errorf "unknown prefix type operator %v" (tok :v)))
-    _ (errorf "unexpected type token %v" tok)))
+    _ (errorf "unexpected type token %v" (tok :k))))
 
 (defn- nud/term [st tok]
   (match (tok :k)
@@ -84,11 +88,21 @@
               e)
     :lambda
     (let [params @[]]
-      (while (= ((pstate/peek st) :k) :ident)
-        (array/push params ((pstate/next st) :v)))
+      (while true
+        (let [pk (pstate/peek st)]
+          (cond
+            (= (pk :k) :ident)
+            (array/push params ((pstate/next st) :v))
+
+            (= (pk :k) :lparen)
+            (array/push params (parse-binder st))
+
+            true (break))))
       (when (zero? (length params))
         (error "lambda expects at least one parameter"))
-      (pstate/expect st :fat-arrow)
+      (let [sep (pstate/next st)]
+        (when (and (not= (sep :k) :dot) (not= (sep :k) :fat-arrow))
+          (errorf "lambda expects '.' or '=>', got %v" sep)))
       (a/tm/lam params (parse/expr st 0) (a/span/none)))
     :kw/let
     (let [name ((pstate/expect st :ident) :v)]
@@ -97,17 +111,18 @@
         (pstate/expect st :kw/in)
         (a/tm/let name v (parse/expr st 0) (a/span/none))))
     :op
-    (if-let [spec (prec/spec (st :prec) (tok :v))]
+    (if-let [spec (prec/spec st (tok :v))]
       (if (= (spec :fixity) :prefix)
         (let [rhs (parse/expr st (op-lbp (spec :level)))]
           (a/tm/op (tok :v) @[rhs] (a/span/none)))
         (errorf "operator %v is not prefix in term position" (tok :v)))
       (errorf "unknown prefix term operator %v" (tok :v)))
-    _ (errorf "unexpected term token %v" tok)))
+    _ (errorf "unexpected term token %v" (tok :k))))
 
 (defn- can-start-atom? [tok]
   (let [k (tok :k)]
-    (or (= k :hole) (= k :ident) (= k :nat) (= k :lparen))))
+    (or (= k :hole) (= k :ident) (= k :nat) (= k :lparen)
+        (= k :quant) (= k :lambda) (= k :kw/let))))
 
 (set parse/expr
      (fn [st min-bp]
@@ -126,52 +141,47 @@
                             (a/ty/app out rhs (a/span/none))
                             (a/tm/app out rhs (a/span/none)))))
 
-               (and (= nk :arrow) (<= min-bp 20))
-               (do
-                 (pstate/next st)
-                 (let [rhs (parse/expr st 20)]
-                   (set out (if (= (st :mode) :type)
-                              (a/ty/arrow out rhs (a/span/none))
-                              (a/tm/op "->" @[out rhs] (a/span/none))))))
-
-               (and (= nk :op)
-                    (if-let [spec (prec/spec (st :prec) (next :v))]
-                      (or (= (spec :fixity) :infixl)
-                          (= (spec :fixity) :infixr)
-                          (= (spec :fixity) :postfix))
-                      false))
-               (let [spec (prec/spec (st :prec) (next :v))
+               (let [spec (prec/spec st (next :v))
+                     p (if spec (op-lbp (spec :level)) -1)]
+                 (and (= nk :op)
+                      (if spec
+                        (and (> p min-bp)
+                             (or (= (spec :fixity) :infixl)
+                                 (= (spec :fixity) :infixr)
+                                 (= (spec :fixity) :postfix)))
+                        false)))
+               (let [op-tok (pstate/next st)
+                     spec (prec/spec st (op-tok :v))
                      p (op-lbp (spec :level))]
-                 (if (<= p min-bp)
-                   (break)
-                   (do
-                     (pstate/next st)
-                     (if (= (spec :fixity) :postfix)
-                       (set out (if (= (st :mode) :type)
-                                  (a/ty/op (next :v) @[out] (a/span/none))
-                                  (a/tm/op (next :v) @[out] (a/span/none))))
-                       (let [rbp (if (= (spec :fixity) :infixl) (+ p 1) p)
-                             rhs (parse/expr st rbp)]
-                         (set out (if (= (st :mode) :type)
-                                    (a/ty/op (next :v) @[out rhs] (a/span/none))
-                                    (a/tm/op (next :v) @[out rhs] (a/span/none)))))))))
+                 (if (= (spec :fixity) :postfix)
+                   (set out (if (= (st :mode) :type)
+                              (a/ty/op (op-tok :v) @[out] (a/span/none))
+                              (a/tm/op (op-tok :v) @[out] (a/span/none))))
+                   (let [rbp (if (= (spec :fixity) :infixr) (dec p) p)
+                         rhs (parse/expr st rbp)]
+                     (set out (if (= (st :mode) :type)
+                                (if (or (= (op-tok :v) "->") (= (op-tok :v) "→"))
+                                  (a/ty/arrow out rhs (a/span/none))
+                                  (a/ty/op (op-tok :v) @[out rhs] (a/span/none)))
+                                (a/tm/op (op-tok :v) @[out rhs] (a/span/none)))))))
 
                true
                (break))))
          out)))
 
-(defn- parse-with-pratt [text mode prec sx]
-  (let [st (pstate/new (lx/lex text sx) mode prec sx)
+(defn- parse-with-pratt [text mode sx]
+  (let [st (pstate/new (lx/lex text sx) mode sx)
         out (parse/expr st 0)]
-    (when (not= ((pstate/peek st) :k) :eof)
-      (errorf "unexpected trailing token: %v" (pstate/peek st)))
+    (let [trail (pstate/peek st)]
+      (when (not= (trail :k) :eof)
+        (errorf "unexpected trailing token: %v (%v)" (trail :k) (trail :v))))
     out))
 
-(defn parse/type-text [text &opt prec sx]
-  (parse-with-pratt (trim text) :type (or prec @{}) (or sx (x/syntax/default))))
+(defn parse/type-text [text &opt sx]
+  (parse-with-pratt (trim text) :type (or sx (x/syntax/default))))
 
-(defn parse/expr-text [text &opt prec sx]
-  (parse-with-pratt (trim text) :term (or prec @{}) (or sx (x/syntax/default))))
+(defn parse/expr-text [text &opt sx]
+  (parse-with-pratt (trim text) :term (or sx (x/syntax/default))))
 
 (def exports
   {:parse/type-text parse/type-text

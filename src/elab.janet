@@ -322,14 +322,26 @@
 (set elab/term
      (fn [env sig-env node]
        (match node
-         [:atom tok]
-         (elab/atom env sig-env tok true)
+         [:atom tok] (elab/atom env sig-env tok true)
+         [:nat n] [:var (string n)]
+         [:list xs] (elab/list env sig-env node xs)
 
-          [:list xs]
-          (elab/list env sig-env node xs)
+         # Surface AST nodes
+         [:ty/universe lvl _] [:type lvl]
+         [:ty/hole name _] [:hole name]
+         [:ty/var x _] (elab/atom env sig-env x true)
+         [:ty/name x _] (elab/atom env sig-env x true)
+         [:ty/arrow dom cod _] [:t-pi (elab/term env sig-env dom) (fn [_] (elab/term env sig-env cod))]
+         [:ty/app f a _] [:app (elab/term env sig-env f) (elab/term env sig-env a)]
+         
+         [:tm/nat n _] [:var (string n)]
+         [:tm/var x _] (elab/atom env sig-env x true)
+         [:tm/ref x _] (elab/atom env sig-env x true)
+         [:tm/hole name _] [:hole name]
+         [:tm/app f a _] [:app (elab/term env sig-env f) (elab/term env sig-env a)]
+         [:tm/lam params body _] (elab/lam-chain env sig-env params body)
 
-          _
-          (errorf "cannot elaborate node: %v" node))))
+         _ (errorf "cannot elaborate node: %v" node))))
 
 (defn binders/elab [env sig-env binders]
   (let [[out final-env]
@@ -742,8 +754,16 @@
           core-ctors (map (fn [ctor]
                             (match ctor
                               [:ctor ctor-name pat-binders patterns ctor-params encoded-type _]
-                              [:core/ctor ctor-name pat-binders patterns ctor-params
-                               (elab/term env sig-env encoded-type)]
+                              [:core/ctor ctor-name
+                               pat-binders
+                               patterns
+                               (map (fn [b]
+                                      (match b
+                                        [:bind bname bty]
+                                        [:bind bname (elab/term env sig-env bty)]
+                                        _ (errorf "invalid ctor parameter binder: %v" b)))
+                                    ctor-params)
+                                (elab/term env sig-env encoded-type)]
                               _ (errorf "invalid constructor: %v" ctor)))
                           ctors)]
       [:core/data name core-params core-sort core-ctors])
@@ -754,6 +774,12 @@
           core-type (elab/pi-chain @[] sig-env params result)
           core-clauses (map |(clause/elab env sig-env $) clauses)]
       [:core/func name core-params core-result core-type core-clauses])
+
+    [:decl/compute tm]
+    [:core/compute (elab/term @[] sig-env tm)]
+
+    [:decl/check tm ty]
+    [:core/check (elab/term @[] sig-env tm) (elab/term @[] sig-env ty)]
 
     _
     (errorf "invalid declaration: %v" decl)))
