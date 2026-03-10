@@ -6,6 +6,66 @@
 (import ./patterns :as pat)
 (import ./decls :as d)
 
+(def ast/debug-checks? a/ast/debug-checks?)
+(def ast/set-debug-checks! a/ast/set-debug-checks!)
+
+(def syntax/default x/syntax/default)
+(def syntax/clone x/syntax/clone)
+(def syntax/add-literal! x/syntax/add-literal!)
+(def syntax/add-quant-alias! x/syntax/add-quant-alias!)
+(def syntax/add-type-ident-resolver! x/syntax/add-type-ident-resolver!)
+
+(def pos a/pos)
+(def span a/span)
+(def span/none a/span/none)
+
+(def ty/hole a/ty/hole)
+(def ty/universe a/ty/universe)
+(def ty/name a/ty/name)
+(def ty/var a/ty/var)
+(def ty/app a/ty/app)
+(def ty/arrow a/ty/arrow)
+(def ty/binder a/ty/binder)
+(def ty/pi a/ty/pi)
+(def ty/forall a/ty/forall)
+(def ty/sigma a/ty/sigma)
+(def ty/exists a/ty/exists)
+(def ty/op a/ty/op)
+
+(def tm/hole a/tm/hole)
+(def tm/var a/tm/var)
+(def tm/ref a/tm/ref)
+(def tm/nat a/tm/nat)
+(def tm/app a/tm/app)
+(def tm/lam a/tm/lam)
+(def tm/let a/tm/let)
+(def tm/op a/tm/op)
+
+(def pat/wild a/pat/wild)
+(def pat/hole a/pat/hole)
+(def pat/var a/pat/var)
+(def pat/con a/pat/con)
+(def pat/nat a/pat/nat)
+
+(def decl/param a/decl/param)
+(def decl/field-named a/decl/field-named)
+(def decl/field-anon a/decl/field-anon)
+(def decl/ctor-plain a/decl/ctor-plain)
+(def decl/ctor-indexed a/decl/ctor-indexed)
+(def decl/clause a/decl/clause)
+(def decl/prec a/decl/prec)
+(def decl/data a/decl/data)
+(def decl/func a/decl/func)
+
+(def program a/program)
+
+(def node/tag a/node/tag)
+(def node/span a/node/span)
+(def node/type? a/node/type?)
+(def node/term? a/node/term?)
+(def node/pat? a/node/pat?)
+(def node/decl? a/node/decl?)
+
 (def parse/type-text pr/parse/type-text)
 (def parse/expr-text pr/parse/expr-text)
 (def parse/pat-text pat/parse/pat-text)
@@ -14,22 +74,34 @@
 (defn parse/type [xv &opt prec sx]
   (if (string? xv)
     (parse/type-text xv (or prec @{}) (or sx (x/syntax/default)))
-    xv))
+    (do
+      (when (and (a/ast/debug-checks?) (not (a/node/type? xv)))
+        (errorf "parse/type expected type node, got: %v" xv))
+      xv)))
 
 (defn parse/expr [xv &opt prec sx]
   (if (string? xv)
     (parse/expr-text xv (or prec @{}) (or sx (x/syntax/default)))
-    xv))
+    (do
+      (when (and (a/ast/debug-checks?) (not (a/node/term? xv)))
+        (errorf "parse/expr expected term node, got: %v" xv))
+      xv)))
 
 (defn parse/pat [xv]
   (if (string? xv)
     (parse/pat-text xv)
-    xv))
+    (do
+      (when (and (a/ast/debug-checks?) (not (a/node/pat? xv)))
+        (errorf "parse/pat expected pattern node, got: %v" xv))
+      xv)))
 
 (defn parse/program [xv &opt sx]
   (if (string? xv)
     (parse/source xv (or sx (x/syntax/default)))
-    xv))
+    (do
+      (when (and (a/ast/debug-checks?) (not= (a/node/tag xv) :program))
+        (errorf "parse/program expected :program node, got: %v" xv))
+      xv)))
 
 (def exports
   {:ast/debug-checks? a/ast/debug-checks?
