@@ -216,20 +216,20 @@
     [:list xs] (lst @[;xs x])
     _ (lst @[f x])))
 
-(defn- term/render [node]
-  (match node
-    [:atom tok]
-    tok
+(defn- term/equal? [a b]
+  (match [a b]
+    [[:atom x] [:atom y]]
+    (= x y)
 
-    [:list xs]
-    (string "(" (string/join (map term/render xs) " ") ")")
+    [[:list xs] [:list ys]]
+    (and (= (length xs) (length ys))
+         (reduce (fn [ok i]
+                   (and ok (term/equal? (xs i) (ys i))))
+                 true
+                 (range (length xs))))
 
     _
-    (string/format "%v" node)))
-
-(defn- term/equal? [a b]
-  (= (term/render a)
-     (term/render b)))
+    (= a b)))
 
 (var lower/type nil)
 

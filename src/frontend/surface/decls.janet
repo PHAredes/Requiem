@@ -77,11 +77,14 @@
     last-colon))
 
 (defn- extract-name-and-params [lhs]
-  (if-let [lp (string/find "(" lhs)]
-    (let [name (ly/trim (string/slice lhs 0 lp))
-          params (string/slice lhs (+ lp 1) (- (length lhs) 1))]
-      [name params])
-    [(ly/trim lhs) nil]))
+  (let [trimmed (ly/trim lhs)]
+    (if-let [lp (string/find "(" trimmed)]
+      (let [rp (- (length trimmed) 1)]
+        (if (= (trimmed rp) (chr ")"))
+          [(ly/trim (string/slice trimmed 0 lp))
+           (string/slice trimmed (+ lp 1) rp)]
+          [trimmed nil]))
+      [trimmed nil])))
 
 (defn read-parenthesized-end [text start]
   (let [n (length text)]
@@ -121,6 +124,16 @@
               (array/push out (parse/field-fragment trimmed syntax mk-named mk-anon))))))
       out)))
 
+(defn- strip-optional-parens [text]
+  (let [trimmed (ly/trim text)
+        n (length trimmed)]
+    (if (and (> n 1)
+             (= (trimmed 0) (chr "("))
+             (= (trimmed (- n 1)) (chr ")"))
+             (= (read-parenthesized-end trimmed 0) n))
+      (string/slice trimmed 1 (- n 1))
+      trimmed)))
+
 (defn- parse/type-params [text syntax]
   (if (or (nil? text) (= (ly/trim text) ""))
     @[]
@@ -139,23 +152,36 @@
 
 (defn- parse/ctor-rhs [rhs syntax]
   (let [trimmed (ly/trim rhs)]
-    (if (= trimmed "()")
-      [nil @[]]
-      (if-let [lp (string/find "(" trimmed)]
-        (let [name (ly/trim (string/slice trimmed 0 lp))
-              rest (string/slice trimmed (+ lp 1) (- (length trimmed) 1))]
-          [name (parse/fields rest syntax a/decl/field-named a/decl/field-anon)])
-        (let [parts (ly/split-ws-top-level trimmed)]
-          (when (zero? (length parts))
-            (error "empty constructor rhs"))
-          (let [name (ly/trim (parts 0))
-                rest (if (> (length parts) 1)
-                       (string/slice trimmed (+ (length (parts 0)) 1))
-                       "")]
-            [name (parse/fields rest syntax a/decl/field-named a/decl/field-anon)]))))))
+    (cond
+      (= trimmed "()") [nil @[]]
 
-(defn- parse/data-body-line [text syntax]
-  (if-let [eq (peg/match peg/split-eq-line text)]
+      (and (string/find "(" trimmed)
+           (string/has-suffix? ")" trimmed))
+      (let [lp (string/find "(" trimmed)
+            name (ly/trim (string/slice trimmed 0 lp))
+            rest (string/slice trimmed (+ lp 1) (- (length trimmed) 1))]
+        [name (parse/fields rest syntax a/decl/field-named a/decl/field-anon)])
+
+      true
+      (let [parts (ly/split-ws-top-level trimmed)]
+        (when (zero? (length parts))
+          (error "empty constructor rhs"))
+        (let [name (ly/trim (parts 0))
+              rest (if (> (length parts) 1)
+                     (string/slice trimmed (+ (length (parts 0)) 1))
+                     "")
+              field-text (strip-optional-parens rest)]
+          [name (parse/fields field-text syntax a/decl/field-named a/decl/field-anon)])))))
+
+(defn- diag/error [ln message]
+  (error {:kind :surface/diag
+          :message message
+          :line (ln :line)
+          :column (+ (ln :col) 1)}))
+
+(defn- parse/data-body-line [ln syntax]
+  (let [text (ln :text)]
+    (if-let [eq (peg/match peg/split-eq-line text)]
     (let [lhs (ly/trim (eq 0))
           rhs (ly/trim (eq 1))
           idx-parts (ly/split-top-level lhs (chr ","))
@@ -169,39 +195,55 @@
     (let [[name fields] (parse/ctor-rhs (ly/trim text) syntax)]
       (if name
         [(a/decl/ctor-plain name fields (a/span/none))]
-        []))))
+        [])))))
 
-(defn- parse/term-body-line [text syntax]
-  (if-let [eq (peg/match peg/split-eq-line text)]
+(defn- parse/term-body-line [ln syntax]
+  (let [text (ln :text)]
+    (if-let [eq (peg/match peg/split-eq-line text)]
     (let [lhs (ly/trim (eq 0))
           rhs (ly/trim (eq 1))
           pats @[]]
       (each part (ly/split-ws-top-level lhs)
         (array/push pats (pat/parse/pat-text part)))
       (a/decl/clause pats (pr/parse/expr-text rhs syntax) (a/span/none)))
-    (errorf "invalid clause line: %v" text)))
+    (diag/error ln (string "invalid clause line: " text)))))
 
-(defn- classify-top [text]
-  (if (string/has-prefix? "#" (ly/trim text))
-    [:top/comment]
-    (if-let [m (peg/match peg/prec-line text)]
-      [:top/prec (m 0) (scan-number (ly/trim (m 1))) (ly/trim (m 2))]
-      (if-let [m (peg/match peg/alias-line text)]
-        [:top/alias (m 0) (m 1)]
-        (if-let [m (peg/match peg/import-line text)]
-          [:top/import (m 0)]
-          (if-let [m (peg/match peg/compute-line text)]
-            [:top/compute (m 0)]
-            (if-let [m (peg/match peg/check-line text)]
-              [:top/check (m 0) (m 1)]
-              (if-let [colon-idx (find-top-level-colon text)]
-                (let [lhs (ly/trim (string/slice text 0 colon-idx))
-                      rhs (ly/trim (string/slice text (+ colon-idx 1)))
-                      [name params-text] (extract-name-and-params lhs)]
-                  (if (and (> (length name) 0) (is-upper-byte? (name 0)))
-                    [:top/type-head name params-text rhs]
-                    [:top/term-head name params-text rhs]))
-                (errorf "unknown top-level line (no colon found): %v" text)))))))))
+(defn- classify-top [ln]
+  (let [text (ln :text)
+        trimmed (ly/trim text)]
+    (cond
+      (string/has-prefix? "#" trimmed)
+      [:top/comment]
+
+      (peg/match peg/prec-line text)
+      (let [m (peg/match peg/prec-line text)]
+        [:top/prec (m 0) (scan-number (ly/trim (m 1))) (ly/trim (m 2))])
+
+      (peg/match peg/alias-line text)
+      (let [m (peg/match peg/alias-line text)]
+        [:top/alias (m 0) (m 1)])
+
+      (peg/match peg/import-line text)
+      (let [m (peg/match peg/import-line text)]
+        [:top/import (m 0)])
+
+      (peg/match peg/compute-line text)
+      (let [m (peg/match peg/compute-line text)]
+        [:top/compute (m 0)])
+
+      (peg/match peg/check-line text)
+      (let [m (peg/match peg/check-line text)]
+        [:top/check (m 0) (m 1)])
+
+      true
+      (if-let [colon-idx (find-top-level-colon text)]
+        (let [lhs (ly/trim (string/slice text 0 colon-idx))
+              rhs (ly/trim (string/slice text (+ colon-idx 1)))
+              [name params-text] (extract-name-and-params lhs)]
+          (if (and (> (length name) 0) (is-upper-byte? (name 0)))
+            [:top/type-head name params-text rhs]
+            [:top/term-head name params-text rhs]))
+        (diag/error ln (string "unknown top-level line (no colon found): " text))))))
 
 (var parse/source nil)
 
@@ -215,11 +257,11 @@
          (defn flush-current []
            (when current
              (match (current :kind)
-               :data-head
-               (let [params (parse/type-params (current :params-text) syn)
-                      ctors @[]]
-                 (each bl (current :body)
-                   (let [new-ctors (parse/data-body-line bl syn)]
+                :data-head
+                (let [params (parse/type-params (current :params-text) syn)
+                       ctors @[]]
+                  (each bl (current :body)
+                    (let [new-ctors (parse/data-body-line bl syn)]
                      (each c new-ctors (array/push ctors c))))
                  (array/push decls (a/decl/data (current :name) params ctors (a/span/none))))
 
@@ -228,18 +270,18 @@
                      type-parts @[]
                      clause-lines @[]
                      _ (do
-                         (var found-clause false)
-                         (each bl body-lines
-                           (if found-clause
-                             (array/push clause-lines bl)
-                             (if (peg/match peg/split-eq-line bl)
-                               (do (set found-clause true)
-                                   (array/push clause-lines bl))
-                               (array/push type-parts bl)))))
-                     head-type (or (current :type-text) "")
-                     full-type-text (if (or (zero? (length type-parts)) (= (string/trim (string/join type-parts "")) ""))
-                                     (if (and head-type (not= (string/trim head-type) "")) head-type "?")
-                                     (string head-type " " (string/join type-parts " ")))
+                          (var found-clause false)
+                          (each bl body-lines
+                            (if found-clause
+                              (array/push clause-lines bl)
+                              (if (peg/match peg/split-eq-line (bl :text))
+                                (do (set found-clause true)
+                                    (array/push clause-lines bl))
+                                (array/push type-parts bl)))))
+                      head-type (or (current :type-text) "")
+                      full-type-text (if (or (zero? (length type-parts)) (= (string/trim (string/join (map |($ :text) type-parts) "")) ""))
+                                      (if (and head-type (not= (string/trim head-type) "")) head-type "?")
+                                      (string head-type " " (string/join (map |($ :text) type-parts) " ")))
                      params-text (current :params-text)
                      # Weave params into type as Pi binders
                      final-type-text
@@ -260,30 +302,30 @@
                                  (array/push pi-prefix (string "Pi(" tp ": Type). "))))))
                          (string (string/join pi-prefix "") full-type-text))
                        full-type-text)
-                     ty (pr/parse/type-text final-type-text syn)
-                     clauses @[]]
-                 (each cl clause-lines
-                   (array/push clauses (parse/term-body-line cl syn)))
+                      ty (pr/parse/type-text final-type-text syn)
+                      clauses @[]]
+                  (each cl clause-lines
+                    (array/push clauses (parse/term-body-line cl syn)))
                  (array/push decls (a/decl/func (current :name) ty clauses (a/span/none)))))
              (set current nil)))
 
-         (each ln lines
-           (if (= (ln :col) 0)
-             (do
-               (let [top (classify-top (ln :text))]
-                 (match (top 0)
-                   :top/comment nil
-                   _ (do
+          (each ln lines
+            (if (= (ln :col) 0)
+              (do
+                (let [top (classify-top ln)]
+                  (match (top 0)
+                    :top/comment nil
+                    _ (do
                        (flush-current)
                        (match (top 0)
                          :top/prec
-                         (let [fx (match (top 1)
-                                    "infixl" :infixl
-                                    "infixr" :infixr
-                                    "prefix" :prefix
-                                    "postfix" :postfix
-                                    (errorf "unknown fixity %v" (top 1)))]
-                           (sx/syntax/add-operator! syn (top 3) fx (top 2)))
+                          (let [fx (match (top 1)
+                                     "infixl" :infixl
+                                     "infixr" :infixr
+                                     "prefix" :prefix
+                                     "postfix" :postfix
+                                     (diag/error ln (string "unknown fixity " (top 1))))]
+                            (sx/syntax/add-operator! syn (top 3) fx (top 2)))
 
                          :top/alias
                          (sx/syntax/add-alias! syn (top 1) (top 2))
@@ -297,19 +339,19 @@
                                ext (if (string/has-suffix? ".requiem" path) "" ".requiem")
                                full-path (string path ext)
                                content (if (os/stat full-path) (slurp full-path) nil)]
-                           (if content
-                             (let [prog (parse/source (string content) syn)
-                                   ds (prog 1)]
-                               (each d ds (array/push decls d)))
-                             (errorf "could not import file: %v" full-path)))
+                            (if content
+                              (let [prog (parse/source (string content) syn)
+                                    ds (prog 1)]
+                                (each d ds (array/push decls d)))
+                              (diag/error ln (string "could not import file: " full-path))))
 
-                         :top/compute
-                         (array/push decls (a/decl/compute (pr/parse/expr-text (top 1) syn) (a/span/none)))
+                          :top/compute
+                          (array/push decls (a/decl/compute (pr/parse/expr-text (top 1) syn) (a/span/none)))
 
-                         :top/check
-                         (array/push decls (a/decl/check (pr/parse/expr-text (top 1) syn)
-                                                         (pr/parse/type-text (top 2) syn)
-                                                         (a/span/none)))
+                          :top/check
+                          (array/push decls (a/decl/check (pr/parse/expr-text (top 1) syn)
+                                                          (pr/parse/type-text (top 2) syn)
+                                                          (a/span/none)))
 
                          :top/type-head
                          (set current {:kind :data-head
@@ -325,9 +367,9 @@
                                        :type-text (top 3)
                                        :body @[]}))))))
              (if current
-               (array/push (current :body) (ln :text))
-               (when (not (string/has-prefix? "#" (ly/trim (ln :text))))
-                 (errorf "indented line without declaration: %v" (ln :text))))))
+                (array/push (current :body) ln)
+                (when (not (string/has-prefix? "#" (ly/trim (ln :text))))
+                  (diag/error ln (string "indented line without declaration: " (ln :text)))))))
 
          (flush-current)
          (a/program decls (a/span/none)))))
