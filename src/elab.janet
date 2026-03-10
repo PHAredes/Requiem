@@ -2,6 +2,8 @@
 
 (import ./frontend/sexpr/parser :as p)
 (import ./frontend/sexpr/lower :as l)
+(import ./sig :as s)
+(import ./coreTT :as tt)
 
 (defn env/lookup [env name]
   (defn scan [i]
@@ -51,6 +53,59 @@
          (= (string/slice tok 0 1) "?"))
     (string/slice tok 1)
     true nil))
+
+(defn elab/state []
+  @{:holes @{}
+    :constraints @[]
+    :next 0})
+
+(defn- elab/fresh-mv! [state]
+  (let [n (+ (state :next) 1)
+        mv (symbol "?mv" n)]
+    (put state :next n)
+    mv))
+
+(defn elab/hole [state name]
+  (if name
+    (if-let [mv (get (state :holes) name)]
+      (tt/tm/hole mv)
+      (let [mv (elab/fresh-mv! state)]
+        (put (state :holes) name mv)
+        (array/push (state :constraints) {:mv mv :name name :solution nil})
+        (tt/tm/hole mv)))
+    (let [mv (elab/fresh-mv! state)]
+      (array/push (state :constraints) {:mv mv :name nil :solution nil})
+      (tt/tm/hole mv))))
+
+(defn elab/func-ref [sig name]
+  (s/sig/exact-ref sig name))
+
+(defn elab/ctor-call [env sig data-name type-args ctor-name args]
+  (let [available (s/sig/available-ctors sig data-name type-args)
+        hit (find |(= (($ :ctor) :name) ctor-name) available)]
+    (when (nil? hit)
+      (errorf "constructor %v is not available for %v %v"
+              ctor-name
+              data-name
+              type-args))
+    (let [ctor (hit :ctor)
+          fields (or (ctor :params) @[])]
+      (when (not= (length fields) (length args))
+        (errorf "constructor %v expects %d argument(s), got %d"
+                ctor-name
+                (length fields)
+                (length args)))
+      (let [check-arg (or (env :check-arg) (fn [_env _sig arg _ty] arg))
+            checked (reduce (fn [acc i]
+                              [;acc (check-arg env sig (args i) ((fields i) :type))])
+                            @[]
+                            (range (length args)))
+            term (reduce (fn [acc arg] [:app acc arg])
+                         [:var ctor-name]
+                         checked)]
+        {:term term
+         :subst (hit :subst)
+         :ctor ctor}))))
 
 (varfn elab/term [env sig-env node]
   (errorf "elab/term not yet defined"))
@@ -715,7 +770,11 @@
   (elab/forms (p/parse/text src)))
 
 (def exports
-  {:elab/program elab/program
+  {:elab/state elab/state
+   :elab/hole elab/hole
+   :elab/func-ref elab/func-ref
+   :elab/ctor-call elab/ctor-call
+   :elab/program elab/program
    :elab/forms elab/forms
    :elab/text elab/text
     :record->forms record->forms
