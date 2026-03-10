@@ -2,7 +2,7 @@
 
 (import ../Utils/TestRunner :as test)
 (import ../Utils/SurfaceSchema :as schema)
-(import ../../src/surface :as s)
+(import ../../src/frontend/surface/parser :as s)
 
 (test/start-suite "Surface Parser")
 
