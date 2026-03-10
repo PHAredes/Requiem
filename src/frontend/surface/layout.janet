@@ -7,24 +7,26 @@
 (defn is-space-byte? [c]
   (or (= c (chr " ")) (= c (chr "\t"))))
 
-(defn- parser/depth [p]
-  (length (or (parser/state p :delimiters) "")))
+# Simple paren-depth tracker for the surface language.
+# Unlike Janet's parser, this only tracks () and does not
+# interpret quotes, brackets, or other Janet-specific syntax.
 
-(defn- parser/feed-byte! [p c text]
-  (parser/byte p c)
-  (when (= (parser/status p) :error)
-    (errorf "parser error while scanning '%v': %v" text (parser/error p))))
+(defn- paren-depth-byte [depth c]
+  (cond
+    (= c (chr "(")) (+ depth 1)
+    (= c (chr ")")) (if (> depth 0) (- depth 1) 0)
+    true depth))
 
 (defn split-top-level [text delim-byte]
   (let [out @[]
-        p (parser/new)
         n (length text)]
     (var i 0)
     (var start 0)
+    (var depth 0)
     (while (< i n)
       (let [c (text i)]
-        (parser/feed-byte! p c text)
-        (when (and (= c delim-byte) (= (parser/depth p) 0))
+        (set depth (paren-depth-byte depth c))
+        (when (and (= c delim-byte) (= depth 0))
           (array/push out (string/slice text start i))
           (set start (+ i 1))))
       (++ i))
@@ -33,15 +35,15 @@
 
 (defn split-ws-top-level [text]
   (let [out @[]
-        p (parser/new)
         n (length text)]
     (var i 0)
     (var in-token false)
     (var start 0)
+    (var depth 0)
     (while (< i n)
       (let [c (text i)]
-        (parser/feed-byte! p c text)
-        (let [top? (= (parser/depth p) 0)]
+        (set depth (paren-depth-byte depth c))
+        (let [top? (= depth 0)]
           (if in-token
             (when (and top? (is-space-byte? c))
               (array/push out (string/slice text start i))
@@ -55,15 +57,18 @@
     out))
 
 (defn find-top-level-char [text target]
-  (let [p (parser/new)]
-    (var i 0)
-    (while (< i (length text))
-      (let [c (text i)]
-        (parser/feed-byte! p c text)
-        (when (and (= c target) (= (parser/depth p) 0))
-          (return i)))
-      (++ i))
-    nil))
+  (var i 0)
+  (var depth 0)
+  (var found false)
+  (var result nil)
+  (while (and (< i (length text)) (not found))
+    (let [c (text i)]
+      (set depth (paren-depth-byte depth c))
+      (when (and (= c target) (= depth 0))
+        (set found true)
+        (set result i)))
+    (++ i))
+  result)
 
 (def exports
   {:trim trim

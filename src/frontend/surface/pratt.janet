@@ -126,11 +126,13 @@
                             (a/ty/app out rhs (a/span/none))
                             (a/tm/app out rhs (a/span/none)))))
 
-               (and (= (st :mode) :type) (= nk :arrow) (<= min-bp 20))
+               (and (= nk :arrow) (<= min-bp 20))
                (do
                  (pstate/next st)
                  (let [rhs (parse/expr st 20)]
-                   (set out (a/ty/arrow out rhs (a/span/none)))))
+                   (set out (if (= (st :mode) :type)
+                              (a/ty/arrow out rhs (a/span/none))
+                              (a/tm/op "->" @[out rhs] (a/span/none))))))
 
                (and (= nk :op)
                     (if-let [spec (prec/spec (st :prec) (next :v))]

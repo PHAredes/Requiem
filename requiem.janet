@@ -2,6 +2,7 @@
 
 (import ./src/frontend/sexpr/parser :as p)
 (import ./src/frontend/sexpr/lower :as l)
+(import ./src/frontend/surface/parser :as sp)
 (import ./src/elab :as e)
 
 (defn decl/summary [decl]
@@ -15,10 +16,27 @@
     _
     (string "unknown declaration: " decl)))
 
-(defn run/file [path]
+(defn- surface-file? [path]
+  (string/has-suffix? ".requiem" path))
+
+(defn run/file-surface [path]
+  (def start (os/clock))
+  (def src (string (slurp path)))
+  (print "Parsing (surface) " path "...")
+  (def prog (sp/parse/program src))
+  (def lowered (sp/lower/program prog))
+  (print "Lowered declarations: " (length lowered))
+  (each decl lowered
+    (print "  - " (decl/summary decl)))
+  (def core (e/elab/program lowered))
+  (print "Elaborated core declarations: " (length core))
+  (def elapsed (- (os/clock) start))
+  (printf "Done. %d declaration(s) in %.3fs" (length lowered) elapsed))
+
+(defn run/file-sexpr [path]
   (def start (os/clock))
   (def src (slurp path))
-  (print "Parsing " path "...")
+  (print "Parsing (sexpr) " path "...")
   (def forms (p/parse/text src))
   (def interactions (length forms))
   (print "Parsed " interactions " interaction(s)")
@@ -30,6 +48,11 @@
   (print "Elaborated core declarations: " (length core))
   (def elapsed (- (os/clock) start))
   (printf "Done. %d interaction(s) in %.3fs" interactions elapsed))
+
+(defn run/file [path]
+  (if (surface-file? path)
+    (run/file-surface path)
+    (run/file-sexpr path)))
 
 (defn main [& args]
   (def n (length args))
