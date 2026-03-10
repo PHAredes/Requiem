@@ -3,6 +3,10 @@
 # Requiem CoreTT
 # NbE kernel with HOAS, bidirectional type checking, and J-eliminator
 
+(import ./levels :as lvl)
+(import ./meta :as meta)
+(import ./checker :as checker)
+
 # Tags
 (def T/Type 0x01)
 (def T/Pi 0x02)
@@ -22,25 +26,10 @@
 (def NF/Id 0x4000)
 (def NF/Refl 0x8000)
 
-# Local level operations (workaround for import issues)
-(defn- lvl/const? [l] (and (tuple? l) (= (get l 0) 0x01)))
-(defn- lvl/shift? [l] (and (tuple? l) (= (get l 0) 0x02)))
-(defn- lvl/value [l]
-  (cond
-    (int? l) l
-    (lvl/const? l) (get l 1)
-    (lvl/shift? l) (get l 1)
-    true 0))
-
-(defn- lvl/<= [l1 l2] (<= (lvl/value l1) (lvl/value l2)))
-(defn- lvl/eq? [l1 l2] (= (lvl/value l1) (lvl/value l2)))
-(defn- lvl/succ [l] (inc (lvl/value l)))
-(defn- lvl/max [l1 l2] (max (lvl/value l1) (lvl/value l2)))
-
 # ---------------------
 # Type constructors
 # ---------------------
-(defn ty/type [lvl] [T/Type (lvl/value lvl)])
+(defn ty/type [lvl*] [T/Type (lvl/value lvl*)])
 (defn ty/pi [A B] [T/Pi A B])
 (defn ty/sigma [A B] [T/Sigma A B])
 (defn ty/id [A x y] [T/Id A x y])
@@ -94,6 +83,19 @@
     (errorf "unbound variable '%v' - not found in context.\nAvailable variables: %v" x (map keyword (h/keys Γ)))
     v))
 
+(var print/sem nil)
+(var print/ne nil)
+(var print/nf nil)
+(var print/tm nil)
+(var ne/print* nil)
+(var nf/print* nil)
+(var print/tm* nil)
+(var print/name-map nil)
+(var print/used-names nil)
+(var print/fresh-id 0)
+(var goals nil)
+(var goals/set-collect! nil)
+
 # NbE: raise / lower
 (var raise nil)
 (var lower nil)
@@ -125,14 +127,14 @@
       (= tag T/Type) (nf/type (get sem 1))
       (= tag T/Pi) (let [[_ A B] sem]
                      (nf/pi (lower/type A)
-                            (let [fresh (gensym)
-                                  arg (raise A (ne/var fresh))]
-                              (lower (ty/type 100) (B arg))))) # Use a high-level universe for lower/type recursion
+                            (fn [fresh]
+                              (let [arg (raise A (ne/var fresh))]
+                                (lower (ty/type 100) (B arg))))))
       (= tag T/Sigma) (let [[_ A B] sem]
                         (nf/sigma (lower/type A)
-                                  (let [fresh (gensym)
-                                        arg (raise A (ne/var fresh))]
-                                    (lower (ty/type 100) (B arg)))))
+                                  (fn [fresh]
+                                    (let [arg (raise A (ne/var fresh))]
+                                      (lower (ty/type 100) (B arg))))))
       (= tag T/Id) (let [[_ A x y] sem]
                      (nf/id (lower/type A) (lower A x) (lower A y)))
       true sem)))
@@ -291,7 +293,6 @@
 # Evaluator
 (var eval nil)
 
-
 (defn- eval/var [Γ x]
   (if (or (string? x) (symbol? x))
     [T/Neutral (ne/var x)]
@@ -323,7 +324,8 @@
     (cond
       (= tag T/Pair) (get v 1)
       (= tag T/Neutral) [T/Neutral (ne/fst (get v 1))]
-      true (errorf "fst expects a pair value (Σ type), but got: %v\nExpected: [T/Pair first second]\nActual: %v" v v))))
+      true (errorf "fst expects a pair value (Σ type), but got: %s"
+                   (print/sem v)))))
 
 (defn- eval/snd [Γ p]
   (let [v (eval Γ p)
@@ -331,7 +333,8 @@
     (cond
       (= tag T/Pair) (get v 2)
       (= tag T/Neutral) [T/Neutral (ne/snd (get v 1))]
-      true (errorf "snd expects a pair value (Σ type), but got: %v\nExpected: [T/Pair first second]\nActual: %v" v v))))
+      true (errorf "snd expects a pair value (Σ type), but got: %s"
+                   (print/sem v)))))
 
 (defn- eval/t-id [Γ A x y]
   (ty/id (eval Γ A) (eval Γ x) (eval Γ y)))
@@ -356,7 +359,8 @@
       (= tag T/Neutral)
       [T/Neutral (ne/J Av xv Pv dv yv pv)]
 
-      true (errorf "J eliminator requires a proof of identity (Id A x y), but got: %v\nExpected either [T/Refl proof] or [T/Neutral neutral-term]" pv))))
+      true (errorf "J eliminator requires a proof of identity (Id A x y), but got: %s"
+                   (print/sem pv)))))
 
 (set eval
      (fn [Γ tm]
@@ -391,240 +395,286 @@
 (defn nf [ty tm]
   (eval/session (fn [] (lower ty (eval (ctx/empty) tm)))))
 
-# Bidirectional checker
+# Bidirectional checker / metas are installed later.
 (var infer nil)
 (var check nil)
 (var subtype nil)
 
-(defn- subtype/pi [A1 B1 A2 B2]
-  (and (subtype A2 A1)
-       (let [fresh (gensym)
-             arg-sem (raise A2 (ne/var fresh))]
-         (subtype (B1 arg-sem) (B2 arg-sem)))))
 
-(defn- subtype/sigma [A1 B1 A2 B2]
-  (and (subtype A1 A2)
-       (let [fresh (gensym)
-             arg-sem (raise A1 (ne/var fresh))]
-         (subtype (B1 arg-sem) (B2 arg-sem)))))
+(defn- print/reset-state! []
+  (set print/fresh-id 0)
+  (set print/name-map @{})
+  (set print/used-names @{}))
 
-(set subtype
-     (fn [A B]
-       "Semantic subtyping with cumulative universes and Pi/Sigma variance."
-       (let [tagA (if (tuple? A) (get A 0) 0)
-             tagB (if (tuple? B) (get B 0) 0)]
+(defn- print/mark-used! [name]
+  (put print/used-names name true)
+  name)
+
+(defn- print/used? [name]
+  (get print/used-names name))
+
+(defn- print/internal-name? [x]
+  (let [s (string x)]
+    (and (> (length s) 0)
+         (= (s 0) (chr "_")))))
+
+(defn- print/alpha-name [n]
+  (let [letters "abcdefghijklmnopqrstuvwxyz"]
+    (defn recur [k]
+      (let [q (div k 26)
+            r (% k 26)
+            ch (string/slice letters r (+ r 1))]
+        (if (= q 0)
+          ch
+          (string (recur (- q 1)) ch))))
+    (recur n)))
+
+(defn- print/fresh-name []
+  (var out nil)
+  (while (nil? out)
+    (let [candidate (print/alpha-name print/fresh-id)]
+      (++ print/fresh-id)
+      (when (not (print/used? candidate))
+        (set out (print/mark-used! candidate)))))
+  out)
+
+(defn- print/disambiguate [preferred]
+  (if (not (print/used? preferred))
+    (print/mark-used! preferred)
+    (do
+      (var out nil)
+      (var n 1)
+      (while (nil? out)
+        (let [candidate (string preferred n)]
+          (if (print/used? candidate)
+            (++ n)
+            (set out (print/mark-used! candidate)))))
+      out)))
+
+(defn- print/name [x]
+  (or (get print/name-map x)
+      (let [preferred (string x)
+            out (if (print/internal-name? x)
+                  (print/fresh-name)
+                  (print/disambiguate preferred))]
+        (put print/name-map x out)
+        out)))
+
+(defn- print/wrap [s]
+  (string "(" s ")"))
+
+(defn- print/atomic-nf? [nf]
+  (match nf
+    [NF/Type _] true
+    [NF/Neut [:nvar _]] true
+    _ false))
+
+(defn- print/atomic-ne? [ne]
+  (match ne
+    [:nvar _] true
+    _ false))
+
+(defn- print/nf-arg [nf]
+  (let [rendered (nf/print* nf)]
+    (if (print/atomic-nf? nf) rendered (print/wrap rendered))))
+
+(defn- print/ne-arg [ne]
+  (let [rendered (ne/print* ne)]
+    (if (print/atomic-ne? ne) rendered (print/wrap rendered))))
+
+(defn- print/atomic-tm? [tm]
+  (match tm
+    [:var _] true
+    [:type _] true
+    [:hole _] true
+    _ false))
+
+(defn- print/tm-arg [tm]
+  (let [rendered (print/tm* tm)]
+    (if (print/atomic-tm? tm) rendered (print/wrap rendered))))
+
+(set ne/print* (fn [ne]
+  (match ne
+    [:nvar x] (print/name x)
+    [:napp f x] (string (print/ne-arg f) " " (print/nf-arg x))
+    [:nfst p] (string "fst " (print/ne-arg p))
+    [:nsnd p] (string "snd " (print/ne-arg p))
+    [:nJ A x P d y p]
+    (string "J "
+            (print/nf-arg A) " "
+            (print/nf-arg x) " "
+            (print/nf-arg P) " "
+            (print/nf-arg d) " "
+            (print/nf-arg y) " "
+            (print/ne-arg p))
+    _ (string/format "%v" ne))))
+
+(set nf/print* (fn [nf]
+  (match nf
+    [NF/Type l]
+    (string "Type" (if (or (int? l) (tuple? l)) (lvl/value l) (string/format "%v" l)))
+
+    [NF/Pi A B]
+    (let [x (print/fresh-name)]
+      (string "Pi(" x " : " (nf/print* A) "). " (nf/print* (B x))))
+
+    [NF/Sigma A B]
+    (let [x (print/fresh-name)]
+      (string "Sigma(" x " : " (nf/print* A) "). " (nf/print* (B x))))
+
+    [NF/Id A x y]
+    (string "Id " (print/nf-arg A) " " (print/nf-arg x) " " (print/nf-arg y))
+
+    [NF/Refl x]
+    (string "refl " (print/nf-arg x))
+
+    [NF/Pair l r]
+    (string "(" (nf/print* l) ", " (nf/print* r) ")")
+
+    [NF/Lam body]
+    (let [x (print/fresh-name)]
+      (string "λ" x ". " (nf/print* (body x))))
+
+    [NF/Neut ne]
+    (ne/print* ne)
+
+    _
+    (string/format "%v" nf))))
+
+(set print/tm* (fn [tm]
+  (match tm
+    [:var x]
+    (print/name x)
+
+    [:app f x]
+    (string (print/tm-arg f) " " (print/tm-arg x))
+
+    [:type l]
+    (string "Type" l)
+
+    [:lam body]
+    (let [x (print/fresh-name)]
+      (string "λ" x ". " (print/tm* (body [:var x]))))
+
+    [:t-pi A B]
+    (let [x (print/fresh-name)]
+      (string "Pi(" x " : " (print/tm* A) "). " (print/tm* (B [:var x]))))
+
+    [:t-sigma A B]
+    (let [x (print/fresh-name)]
+      (string "Sigma(" x " : " (print/tm* A) "). " (print/tm* (B [:var x]))))
+
+    [:pair l r]
+    (string "(" (print/tm* l) ", " (print/tm* r) ")")
+
+    [:fst p]
+    (string "fst " (print/tm-arg p))
+
+    [:snd p]
+    (string "snd " (print/tm-arg p))
+
+    [:t-id A x y]
+    (string "Id " (print/tm-arg A) " " (print/tm-arg x) " " (print/tm-arg y))
+
+    [:t-refl x]
+    (string "refl " (print/tm-arg x))
+
+    [:t-J A x P d y p]
+    (string "J "
+            (print/tm-arg A) " "
+            (print/tm-arg x) " "
+            (print/tm-arg P) " "
+            (print/tm-arg d) " "
+            (print/tm-arg y) " "
+            (print/tm-arg p))
+
+    [:hole name]
+    (if name (string "?" name) "?")
+
+    _
+    (string/format "%v" tm))))
+
+(set print/ne (fn [ne]
+  (let [saved-id print/fresh-id
+        saved-map print/name-map
+        saved-used print/used-names]
+    (print/reset-state!)
+    (def out (ne/print* ne))
+    (set print/fresh-id saved-id)
+    (set print/name-map saved-map)
+    (set print/used-names saved-used)
+    out)))
+
+(set print/nf (fn [nf]
+  (let [saved-id print/fresh-id
+        saved-map print/name-map
+        saved-used print/used-names]
+    (print/reset-state!)
+    (def out (nf/print* nf))
+    (set print/fresh-id saved-id)
+    (set print/name-map saved-map)
+    (set print/used-names saved-used)
+    out)))
+
+(set print/tm (fn [tm]
+  (let [saved-id print/fresh-id
+        saved-map print/name-map
+        saved-used print/used-names]
+    (print/reset-state!)
+    (def out (print/tm* tm))
+    (set print/fresh-id saved-id)
+    (set print/name-map saved-map)
+    (set print/used-names saved-used)
+    out)))
+
+(set print/sem
+     (fn [sem]
+       (let [tag (if (tuple? sem) (get sem 0) 0)]
          (cond
-           (and (= tagA T/Type) (= tagB T/Type))
-           (lvl/<= (get A 1) (get B 1))
+           (= tag T/Neutral) (print/ne (get sem 1))
+           (= tag T/Type) (print/nf (lower/type sem))
+           (= tag T/Pi) (print/nf (lower/type sem))
+           (= tag T/Sigma) (print/nf (lower/type sem))
+           (= tag T/Id) (print/nf (lower/type sem))
+           (= tag T/Refl) (string "refl " (print/sem (get sem 1)))
+           (= tag T/Pair) (string "(" (print/sem (get sem 1)) ", " (print/sem (get sem 2)) ")")
+           true (string/format "%v" sem)))))
 
-           (and (= tagA T/Pi) (= tagB T/Pi))
-           (let [[_ A1 B1] A
-                 [_ A2 B2] B]
-             (subtype/pi A1 B1 A2 B2))
+(let [meta-state (meta/make {:ty/type ty/type
+                             :lower lower
+                             :ctx/lookup ctx/lookup
+                             :print/sem print/sem})
+      checker-state (checker/make {:T/Type T/Type
+                                   :T/Pi T/Pi
+                                   :T/Sigma T/Sigma
+                                   :ty/type ty/type
+                                   :ty/id ty/id
+                                   :lvl/<= lvl/leq
+                                   :lvl/max (fn [l1 l2] (max (lvl/value l1) (lvl/value l2)))
+                                   :lvl/succ (fn [l] (inc (lvl/value l)))
+                                   :sem-eq sem-eq
+                                   :eval eval
+                                   :raise raise
+                                   :lower lower
+                                   :ctx/empty ctx/empty
+                                   :ctx/add ctx/add
+                                   :ctx/lookup ctx/lookup
+                                   :ne/var ne/var
+                                   :print/sem print/sem
+                                   :print/tm print/tm
+                                   :meta meta-state})]
+  (set goals (meta-state :goals))
+  (set goals/set-collect! (meta-state :set-collect!))
+  (set infer (checker-state :infer))
+  (set check (checker-state :check))
+  (set subtype (checker-state :subtype)))
 
-           (and (= tagA T/Sigma) (= tagB T/Sigma))
-           (let [[_ A1 B1] A
-                 [_ A2 B2] B]
-             (subtype/sigma A1 B1 A2 B2))
-
-           true
-           (sem-eq (ty/type 100) A B)))))
-
-(defn check-univ [Γ A]
-  "Check that A is a universe and return its level"
-  (let [UA (infer Γ A)
-        tag (if (tuple? UA) (get UA 0) 0)]
-    (if (= tag T/Type)
-      (get UA 1)
-      (errorf "expected a universe Type (Type_l), but got: %v\nTip: Make sure your type expression evaluates to a Type, e.g., Type 0, Type 1, etc." UA))))
-
-(defn goal/context-vars [Γ]
-  (map keyword (h/keys Γ)))
-
-(def goals @[])
-(var goals/collect? false)
-
-(defn goals/set-collect! [enabled]
-  (set goals/collect? enabled)
-  goals/collect?)
-
-(defn goal/report [name expected Γ]
-  (let [goal {:name name
-              :expected (lower (ty/type 100) expected)
-              :ctx (map (fn [k] [k (lower (ty/type 100) (ctx/lookup Γ k))]) (h/keys Γ))}]
-    (array/push goals goal)))
-
-(defn goal/error-infer [name Γ]
-  (if goals/collect?
-    (do
-      (goal/report name (ty/type 100) Γ)
-      [:type 100])
-    (errorf "unsolved goal ?%v during inference\nNo expected type is available in inference mode.\nContext variables: %v"
-            name
-            (goal/context-vars Γ))))
-
-(defn goal/error-check [name expected Γ]
-  (if goals/collect?
-    (do
-      (goal/report name expected Γ)
-      true)
-    (errorf "unsolved goal ?%v during checking\nExpected type: %v\nContext variables: %v"
-            name
-            expected
-            (goal/context-vars Γ))))
-
-(set infer
-     (fn [Γ t]
-       "Infer the type of term t in context Γ (returns semantic type)"
-       (match t
-         [:var x]
-         (if (or (string? x) (symbol? x))
-           (ctx/lookup Γ x)
-            (errorf "variable must be a string or symbol, but got: %v\nVariable names should be like 'x', 'y', 'myVar', etc." x))
-
-          [:type l] (ty/type (lvl/succ l))
-
-          [:lam _] (errorf "cannot infer type of lambda expression %v\nLambda types require annotation because they have principal types.\nSuggestion: Annotate with a Pi type: (λx. body) : (Πx:A. B)" t)
-
-          [:hole name]
-          (goal/error-infer name Γ)
-
-         [:app f x]
-         (let [fA (infer Γ f)
-               tag (if (tuple? fA) (get fA 0) 0)]
-           (if (= tag T/Pi)
-             (let [[_ A B] fA]
-               (do (check Γ x A)
-                 (B (eval Γ x))))
-             (errorf "cannot apply function - expected a Pi type (Πx:A. B), but got: %v\nTip: Make sure the function has a proper Pi type annotation or can be inferred as one." fA)))
-
-          [:t-pi A B]
-          (let [lvlA (check-univ Γ A)
-                fresh (gensym)
-                A-sem (eval Γ A)
-                Γ2 (ctx/add Γ fresh A-sem)
-                lvlB (check-univ Γ2 (B [:var fresh]))]
-            (ty/type (lvl/max lvlA lvlB)))
-
-          [:t-sigma A B]
-          (let [lvlA (check-univ Γ A)
-                fresh (gensym)
-                A-sem (eval Γ A)
-                Γ2 (ctx/add Γ fresh A-sem)
-                lvlB (check-univ Γ2 (B [:var fresh]))]
-            (ty/type (lvl/max lvlA lvlB)))
-
-         [:fst p]
-         (let [pA (infer Γ p)
-               tag (if (tuple? pA) (get pA 0) 0)]
-           (if (= tag T/Sigma)
-             (get pA 1) # A from [T/Sigma A B]
-             (errorf "fst projection requires a Σ (Sigma) type product, but got: %v\nExpected format: Σx:A. B or a term that evaluates to a Sigma type" pA)))
-
-         [:snd p]
-         (let [pA (infer Γ p)
-               tag (if (tuple? pA) (get pA 0) 0)]
-           (if (= tag T/Sigma)
-             (let [[_ A B] pA]
-               (B (eval Γ [:fst p])))
-              (errorf "snd projection requires a Σ (Sigma) type product, but got: %v\nExpected format: Σx:A. B or a term that evaluates to a Sigma type" pA)))
-
-          [:pair _ _] (errorf "cannot infer type of pair %v\nPairs require explicit Sigma type annotation because they lack principal types.\nSuggestion: (pair a b) : (Σx:A. B)" t)
-
-         # Identity type: Id A x y : Type_l where A : Type_l
-         [:t-id A x y]
-         (let [A-ty (infer Γ A)
-               A-sem (eval Γ A)
-               tag (if (tuple? A-ty) (get A-ty 0) 0)]
-           (if (= tag T/Type)
-             (do (check Γ x A-sem)
-               (check Γ y A-sem)
-               (ty/type (get A-ty 1)))
-             (errorf "Identity type (Id A x y) expects 'A' to be a universe Type, but got: %v\nThe first argument must evaluate to a Type, e.g., Type 0, Type 1, etc." A-ty)))
-
-         # Reflexivity: refl x : Id A x x
-         [:t-refl x]
-         (let [A (infer Γ x)
-               xv (eval Γ x)]
-           (ty/id A xv xv))
-
-         # J eliminator
-         [:t-J A x P d y p]
-         (let [lvlA (check-univ Γ A)
-               A-sem (eval Γ A)]
-           (check Γ x A-sem)
-
-           # P : (y : A) → Id A x y → Type_l
-           (let [fresh-y (gensym)
-                 fresh-p (gensym)
-                 xv (eval Γ x)
-                 Γ-y (ctx/add Γ fresh-y A-sem)
-                 id-ty (ty/id A-sem xv [:var fresh-y])
-                 Γ-yp (ctx/add Γ-y fresh-p id-ty)]
-             (check-univ Γ-yp (P [:var fresh-y] [:var fresh-p]))
-
-             # d : P x (refl x)
-             (let [P-refl (eval Γ (P xv [:refl xv]))]
-               (check Γ d P-refl))
-
-             # y : A
-             (check Γ y A-sem)
-             (let [yv (eval Γ y)]
-
-               # p : Id A x y
-               (check Γ p (ty/id A-sem xv yv))
-
-               # Result type: P y p
-               (let [pv (eval Γ p)]
-                 (eval Γ (P yv pv))))))
-
-         _ (errorf "infer: unknown term %v\nThis term is not recognized by the type checker.\nSupported forms: var, type, lambda, application, pi, sigma, pair, fst, snd, id, refl, J" t))))
-
-(set check
-     (fn [Γ t A]
-       #"Check that term t has type A in context Γ"
-       #(printf "CHECK: %v : %v" t A)
-        (match t
-          [:hole name]
-          (goal/error-check name A Γ)
-
-          [:lam body]
-          (let [tag (if (tuple? A) (get A 0) 0)]
-           (if (= tag T/Pi)
-             (let [[_ dom cod] A
-                   fresh (gensym)
-                   arg-sem (raise dom (ne/var fresh))]
-               (check (ctx/add Γ fresh dom)
-                      (body [:var fresh])
-                      (cod arg-sem)))
-             (errorf "lambda checking failed - expected a Pi type (Πx:A. B), but got: %v\nLambda expressions can only be checked against function types." A)))
-
-         [:pair l r]
-         (let [tag (if (tuple? A) (get A 0) 0)]
-           (if (= tag T/Sigma)
-             (let [[_ A1 B1] A]
-               (do (check Γ l A1)
-                 (check Γ r (B1 (eval Γ l)))))
-              (errorf "pair checking failed - expected a Sigma type (Σx:A. B), but got: %v\nPair expressions can only be checked against Sigma product types." A)))
-
-          _
-          (let [A1 (infer Γ t)]
-            (if (subtype A1 A)
-              true
-              (errorf "type mismatch between expected type and inferred type\nExpected: %v\nInferred: %v\nSuggestion: Check if the terms are actually equal or if there's a type annotation issue." A A1))))))
-
-# ---------------------
-# Top-level helpers
-# ---------------------
 (defn type-eq [Γ A B]
-  "Check if two types are equal"
   (= (eval Γ A) (eval Γ B)))
 
 (defn term-eq [Γ A t u]
-  "Check if two terms are equal at type A"
-  (or
-    (= t u)
-    (sem-eq (eval Γ A) (eval Γ t) (eval Γ u))))
+  (or (= t u)
+      (sem-eq (eval Γ A) (eval Γ t) (eval Γ u))))
 
 (defn check-top [t expected]
   (let [Γ (ctx/empty)]
@@ -634,30 +684,6 @@
 (defn infer-top [t]
   (let [Γ (ctx/empty)]
     (infer Γ t)))
-
-(var ne/print nil)
-(var nf/print nil)
-
-(set ne/print (fn [ne]
-  (match ne
-    [:nvar x] (string x)
-    [:napp f x] (string "(" (ne/print f) " " (nf/print x) ")")
-    [:nfst p] (string "fst(" (ne/print p) ")")
-    [:nsnd p] (string "snd(" (ne/print p) ")")
-    [:nJ A x P d y p] (string "J(" (nf/print A) ", " (nf/print x) ", " (nf/print P) ", " (nf/print d) ", " (nf/print y) ", " (ne/print p) ")")
-    _ (string/format "%v" ne))))
-
-(set nf/print (fn [nf]
-  (match nf
-    [NF/Type l] (string "Type" (if (or (int? l) (tuple? l)) (lvl/value l) (string/format "%v" l)))
-    [NF/Pi A B] (string "Π(" (nf/print A) ", " (nf/print B) ")")
-    [NF/Sigma A B] (string "Σ(" (nf/print A) ", " (nf/print B) ")")
-    [NF/Id A x y] (string "Id(" (nf/print A) ", " (nf/print x) ", " (nf/print y) ")")
-    [NF/Refl x] (string "refl(" (nf/print x) ")")
-    [NF/Pair l r] (string "(" (nf/print l) ", " (nf/print r) ")")
-    [NF/Lam _] (string "λ. ...") # HOAS is hard to print without name recovery
-    [NF/Neut ne] (ne/print ne)
-    _ (string/format "%v" nf))))
 
 # Public API
 (def exports
@@ -722,7 +748,5 @@
    :ctx/add ctx/add
    :ctx/lookup ctx/lookup
    :eval/session eval/session
-    :nf/print nf/print
-    :ne/print ne/print
-    :goals goals
-    :goals/set-collect! goals/set-collect!})
+   :goals goals
+   :goals/set-collect! goals/set-collect!})

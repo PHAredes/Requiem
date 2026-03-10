@@ -9,10 +9,20 @@
 (defn- pstate/new [tokens mode sx]
   @{:tokens tokens :i 0 :mode mode :sx sx})
 
+(defn- tok/at [tok]
+  (if (and (tok :line) (tok :col))
+    (string (tok :line) ":" (tok :col))
+    "?:?"))
+
+(defn- tok/render [tok]
+  (if (= (tok :k) :eof)
+    "end of input"
+    (string (tok :k) (if (nil? (tok :v)) "" (string " '" (tok :v) "'")))))
+
 (defn- pstate/peek [st]
   (if (< (st :i) (length (st :tokens)))
     ((st :tokens) (st :i))
-    {:k :eof :v nil}))
+    {:k :eof :v nil :line nil :col nil}))
 
 (defn- pstate/next [st]
   (let [t (pstate/peek st)]
@@ -22,7 +32,7 @@
 (defn- pstate/expect [st kind]
   (let [t (pstate/next st)]
     (when (not= (t :k) kind)
-      (errorf "expected token %v, got %v (k: %v v: %v)" kind t (t :k) (t :v)))
+      (errorf "parse error at %s: expected %v, got %s" (tok/at t) kind (tok/render t)))
     t))
 
 (defn- prec/spec [st op]
@@ -52,7 +62,7 @@
 
 (defn- quant-builder [st q]
   (or (get ((st :sx) :type/quant-builders) q)
-      (errorf "unknown quantified alias %v" q)))
+      (errorf "parse error: unknown quantified alias %v" q)))
 
 (defn- nud/type [st tok]
   (match (tok :k)
@@ -74,9 +84,9 @@
       (if (= (spec :fixity) :prefix)
         (let [rhs (parse/expr st (op-lbp (spec :level)))]
           (a/ty/op (tok :v) @[rhs] (a/span/none)))
-        (errorf "operator %v is not prefix in type position" (tok :v)))
-      (errorf "unknown prefix type operator %v" (tok :v)))
-    _ (errorf "unexpected type token %v" (tok :k))))
+        (errorf "parse error at %s: operator %v is not prefix in type position" (tok/at tok) (tok :v)))
+      (errorf "parse error at %s: unknown prefix type operator %v" (tok/at tok) (tok :v)))
+    _ (errorf "parse error at %s: unexpected type token %s" (tok/at tok) (tok/render tok))))
 
 (defn- nud/term [st tok]
   (match (tok :k)
@@ -99,10 +109,10 @@
 
             true (break))))
       (when (zero? (length params))
-        (error "lambda expects at least one parameter"))
+        (errorf "parse error at %s: lambda expects at least one parameter" (tok/at tok)))
       (let [sep (pstate/next st)]
         (when (and (not= (sep :k) :dot) (not= (sep :k) :fat-arrow))
-          (errorf "lambda expects '.' or '=>', got %v" sep)))
+          (errorf "parse error at %s: lambda expects '.' or '=>', got %s" (tok/at sep) (tok/render sep))))
       (a/tm/lam params (parse/expr st 0) (a/span/none)))
     :kw/let
     (let [name ((pstate/expect st :ident) :v)]
@@ -115,9 +125,9 @@
       (if (= (spec :fixity) :prefix)
         (let [rhs (parse/expr st (op-lbp (spec :level)))]
           (a/tm/op (tok :v) @[rhs] (a/span/none)))
-        (errorf "operator %v is not prefix in term position" (tok :v)))
-      (errorf "unknown prefix term operator %v" (tok :v)))
-    _ (errorf "unexpected term token %v" (tok :k))))
+        (errorf "parse error at %s: operator %v is not prefix in term position" (tok/at tok) (tok :v)))
+      (errorf "parse error at %s: unknown prefix term operator %v" (tok/at tok) (tok :v)))
+    _ (errorf "parse error at %s: unexpected term token %s" (tok/at tok) (tok/render tok))))
 
 (defn- can-start-atom? [tok]
   (let [k (tok :k)]
@@ -174,7 +184,7 @@
         out (parse/expr st 0)]
     (let [trail (pstate/peek st)]
       (when (not= (trail :k) :eof)
-        (errorf "unexpected trailing token: %v (%v)" (trail :k) (trail :v))))
+        (errorf "parse error at %s: unexpected trailing token %s" (tok/at trail) (tok/render trail))))
     out))
 
 (defn parse/type-text [text &opt sx]
