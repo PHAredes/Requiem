@@ -3,7 +3,7 @@
 # Test key error messages to verify improvements
 
 (import ../src/coreTT :as c)
-(import ../src/parser :as p)
+(import ../src/frontend/sexpr/parser :as p)
 (import ../test/Utils/TestRunner :as test)
 
 (test/start-suite "Error Messages - CoreTT Context")
