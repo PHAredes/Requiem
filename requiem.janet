@@ -1,7 +1,7 @@
 #!/usr/bin/env janet
 
-(import ./src/parser :as p)
-(import ./src/lower :as l)
+(import ./src/frontend/sexpr/parser :as p)
+(import ./src/frontend/sexpr/lower :as l)
 (import ./src/elab :as e)
 
 (defn decl/summary [decl]

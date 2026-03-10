@@ -1,7 +1,7 @@
 #!/usr/bin/env janet
 
-(import ./parser :as p)
-(import ./lower :as l)
+(import ./frontend/sexpr/parser :as p)
+(import ./frontend/sexpr/lower :as l)
 
 (defn env/lookup [env name]
   (defn scan [i]

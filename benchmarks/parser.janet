@@ -1,4 +1,4 @@
-(import ../src/parser :as p)
+(import ../src/frontend/sexpr/parser :as p)
 (import ../build/timer :as timer)
 
 (def samples
