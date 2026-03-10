@@ -27,11 +27,22 @@ janet requiem.janet examples/test.requiem   # run frontend on a file
 
 ```
 src/
-  coreTT.janet      # NbE kernel, bidirectional checker, J eliminator
-  elab.janet        # Elaboration from lowered terms to core terms
-  lower.janet       # Lowering (pattern matching, indexed constructors)
-  parser.janet      # PEG-based s-expression parser
-  levels.janet      # Universe level algebra
+  coreTT.janet                  # NbE kernel, bidirectional checker, J eliminator
+  levels.janet                  # Universe level algebra
+  elab.janet                    # Elaboration from lowered terms to core terms
+  frontend/
+    sexpr/
+      parser.janet              # PEG-based s-expression parser
+      lower.janet               # Lowering (pattern matching, indexed constructors)
+    surface/
+      parser.janet              # Surface parser entrypoint
+      ast.janet                 # Canonical surface AST constructors
+      syntax.janet              # Compositional syntax aliases
+      layout.janet              # Delimiter-aware split/layout helpers
+      lexer.janet               # Surface tokenization entry helpers
+      pratt.janet               # Pratt expression/type parsing entry helpers
+      patterns.janet            # Pattern parser entry helpers
+      decls.janet               # Top-level declaration parser entry helpers
 native/
   hamt.c            # Persistent Hash Array Mapped Trie (C extension)
   timer.c           # High-resolution timer (C extension)
