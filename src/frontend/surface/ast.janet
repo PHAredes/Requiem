@@ -81,6 +81,8 @@
 
 (defn decl/data [name params ctors sp] [:decl/data name params ctors sp])
 (defn decl/func [name ty clauses sp] [:decl/func name ty clauses sp])
+(defn decl/compute [tm sp] [:decl/compute tm sp])
+(defn decl/check [tm ty sp] [:decl/check tm ty sp])
 (defn program [decls sp] [:program decls sp])
 
 (defn node/tag [node] (if (tuple? node) (node 0) nil))
@@ -112,6 +114,9 @@
     (or (= t :tm/hole) (= t :tm/var) (= t :tm/ref) (= t :tm/nat)
         (= t :tm/app) (= t :tm/lam) (= t :tm/let) (= t :tm/op))))
 
+(defn node/type-or-term? [n]
+  (or (node/type? n) (node/term? n)))
+
 (defn node/pat? [n]
   (let [t (node/tag n)]
     (or (= t :pat/wild) (= t :pat/hole) (= t :pat/var)
@@ -119,7 +124,8 @@
 
 (defn node/decl? [n]
   (let [t (node/tag n)]
-    (or (= t :decl/prec) (= t :decl/data) (= t :decl/func))))
+    (or (= t :decl/prec) (= t :decl/data) (= t :decl/func)
+        (= t :decl/compute) (= t :decl/check))))
 
 (def exports
   {:ast/debug-checks? ast/debug-checks?
@@ -161,6 +167,8 @@
    :decl/prec decl/prec
    :decl/data decl/data
    :decl/func decl/func
+   :decl/compute decl/compute
+   :decl/check decl/check
    :program program
    :node/tag node/tag
    :node/span node/span

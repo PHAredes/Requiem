@@ -22,38 +22,25 @@
 (def NF/Id 0x4000)
 (def NF/Refl 0x8000)
 
-# Semantic values:
-#   [T/Type l]           - universes
-#   function            - Pi types (HOAS)
-#   [v1 v2]             - Sigma types (pairs)
-#   [T/Id A x y]        - Identity type
-#   [T/Refl x]          - Reflexivity proof
-#   [T/Neutral ne]      - stuck terms
+# Local level operations (workaround for import issues)
+(defn- lvl/const? [l] (and (tuple? l) (= (get l 0) 0x01)))
+(defn- lvl/shift? [l] (and (tuple? l) (= (get l 0) 0x02)))
+(defn- lvl/value [l]
+  (cond
+    (int? l) l
+    (lvl/const? l) (get l 1)
+    (lvl/shift? l) (get l 1)
+    true 0))
 
-# Normal forms:
-#   [NF/Lam body]        - lambda abstraction
-#   [NF/Pair l r]        - pair
-#   [NF/Type l]          - type universe
-#   [NF/Pi A B]          - Pi type
-#   [NF/Sigma A B]       - Sigma type
-#   [NF/Id A x y]        - Identity type
-#   [NF/Refl x]          - Reflexivity
-#   [NF/Neut ne]         - neutral term
-
-# Neutral terms:
-#   [:nvar x]           - variable
-#   [:napp f x]         - application
-#   [:nfst p]           - first projection
-#   [:nsnd p]           - second projection
-#   [:nJ A x P d y p]   - J eliminator (stuck)
-# (Keywords kept for AST readability)
-
-(import ./levels :as lvl)
+(defn- lvl/<= [l1 l2] (<= (lvl/value l1) (lvl/value l2)))
+(defn- lvl/eq? [l1 l2] (= (lvl/value l1) (lvl/value l2)))
+(defn- lvl/succ [l] (inc (lvl/value l)))
+(defn- lvl/max [l1 l2] (max (lvl/value l1) (lvl/value l2)))
 
 # ---------------------
 # Type constructors
 # ---------------------
-(defn ty/type [lvl] [T/Type (lvl/lvl/value lvl)])
+(defn ty/type [lvl] [T/Type (lvl/value lvl)])
 (defn ty/pi [A B] [T/Pi A B])
 (defn ty/sigma [A B] [T/Sigma A B])
 (defn ty/id [A x y] [T/Id A x y])
@@ -206,7 +193,7 @@
         t2 (if (tuple? v2) (get v2 0) 0)]
     (cond
       (and (= t1 T/Type) (= t2 T/Type))
-      (lvl/lvl/eq? (get v1 1) (get v2 1))
+      (lvl/eq? (get v1 1) (get v2 1))
 
       (and (= t1 T/Pi) (= t2 T/Pi))
       (let [[_ A1 B1] v1 [_ A2 B2] v2]
@@ -428,7 +415,7 @@
              tagB (if (tuple? B) (get B 0) 0)]
          (cond
            (and (= tagA T/Type) (= tagB T/Type))
-           (lvl/lvl/<= (get A 1) (get B 1))
+           (lvl/<= (get A 1) (get B 1))
 
            (and (= tagA T/Pi) (= tagB T/Pi))
            (let [[_ A1 B1] A
@@ -454,16 +441,37 @@
 (defn goal/context-vars [Γ]
   (map keyword (h/keys Γ)))
 
+(def goals @[])
+(var goals/collect? false)
+
+(defn goals/set-collect! [enabled]
+  (set goals/collect? enabled)
+  goals/collect?)
+
+(defn goal/report [name expected Γ]
+  (let [goal {:name name
+              :expected (lower (ty/type 100) expected)
+              :ctx (map (fn [k] [k (lower (ty/type 100) (ctx/lookup Γ k))]) (h/keys Γ))}]
+    (array/push goals goal)))
+
 (defn goal/error-infer [name Γ]
-  (errorf "unsolved goal ?%v during inference\nNo expected type is available in inference mode.\nContext variables: %v"
-          name
-          (goal/context-vars Γ)))
+  (if goals/collect?
+    (do
+      (goal/report name (ty/type 100) Γ)
+      [:type 100])
+    (errorf "unsolved goal ?%v during inference\nNo expected type is available in inference mode.\nContext variables: %v"
+            name
+            (goal/context-vars Γ))))
 
 (defn goal/error-check [name expected Γ]
-  (errorf "unsolved goal ?%v during checking\nExpected type: %v\nContext variables: %v"
-          name
-          expected
-          (goal/context-vars Γ)))
+  (if goals/collect?
+    (do
+      (goal/report name expected Γ)
+      true)
+    (errorf "unsolved goal ?%v during checking\nExpected type: %v\nContext variables: %v"
+            name
+            expected
+            (goal/context-vars Γ))))
 
 (set infer
      (fn [Γ t]
@@ -474,7 +482,7 @@
            (ctx/lookup Γ x)
             (errorf "variable must be a string or symbol, but got: %v\nVariable names should be like 'x', 'y', 'myVar', etc." x))
 
-          [:type l] (ty/type (lvl/lvl/succ l))
+          [:type l] (ty/type (lvl/succ l))
 
           [:lam _] (errorf "cannot infer type of lambda expression %v\nLambda types require annotation because they have principal types.\nSuggestion: Annotate with a Pi type: (λx. body) : (Πx:A. B)" t)
 
@@ -496,7 +504,7 @@
                 A-sem (eval Γ A)
                 Γ2 (ctx/add Γ fresh A-sem)
                 lvlB (check-univ Γ2 (B [:var fresh]))]
-            (ty/type (lvl/lvl/max lvlA lvlB)))
+            (ty/type (lvl/max lvlA lvlB)))
 
           [:t-sigma A B]
           (let [lvlA (check-univ Γ A)
@@ -504,7 +512,7 @@
                 A-sem (eval Γ A)
                 Γ2 (ctx/add Γ fresh A-sem)
                 lvlB (check-univ Γ2 (B [:var fresh]))]
-            (ty/type (lvl/lvl/max lvlA lvlB)))
+            (ty/type (lvl/max lvlA lvlB)))
 
          [:fst p]
          (let [pA (infer Γ p)
@@ -574,7 +582,8 @@
 
 (set check
      (fn [Γ t A]
-       "Check that term t has type A in context Γ"
+       #"Check that term t has type A in context Γ"
+       #(printf "CHECK: %v : %v" t A)
         (match t
           [:hole name]
           (goal/error-check name A Γ)
@@ -625,6 +634,30 @@
 (defn infer-top [t]
   (let [Γ (ctx/empty)]
     (infer Γ t)))
+
+(var ne/print nil)
+(var nf/print nil)
+
+(set ne/print (fn [ne]
+  (match ne
+    [:nvar x] (string x)
+    [:napp f x] (string "(" (ne/print f) " " (nf/print x) ")")
+    [:nfst p] (string "fst(" (ne/print p) ")")
+    [:nsnd p] (string "snd(" (ne/print p) ")")
+    [:nJ A x P d y p] (string "J(" (nf/print A) ", " (nf/print x) ", " (nf/print P) ", " (nf/print d) ", " (nf/print y) ", " (ne/print p) ")")
+    _ (string/format "%v" ne))))
+
+(set nf/print (fn [nf]
+  (match nf
+    [NF/Type l] (string "Type" (if (or (int? l) (tuple? l)) (lvl/value l) (string/format "%v" l)))
+    [NF/Pi A B] (string "Π(" (nf/print A) ", " (nf/print B) ")")
+    [NF/Sigma A B] (string "Σ(" (nf/print A) ", " (nf/print B) ")")
+    [NF/Id A x y] (string "Id(" (nf/print A) ", " (nf/print x) ", " (nf/print y) ")")
+    [NF/Refl x] (string "refl(" (nf/print x) ")")
+    [NF/Pair l r] (string "(" (nf/print l) ", " (nf/print r) ")")
+    [NF/Lam _] (string "λ. ...") # HOAS is hard to print without name recovery
+    [NF/Neut ne] (ne/print ne)
+    _ (string/format "%v" nf))))
 
 # Public API
 (def exports
@@ -688,4 +721,8 @@
    :ctx/empty ctx/empty
    :ctx/add ctx/add
    :ctx/lookup ctx/lookup
-   :eval/session eval/session})
+   :eval/session eval/session
+    :nf/print nf/print
+    :ne/print ne/print
+    :goals goals
+    :goals/set-collect! goals/set-collect!})
