@@ -93,8 +93,8 @@
       (test/assert (not (p/has/atom? body "sum")) "structural branch removes direct recursive call"))))
 
 (let [src (string
-            "(data Nat: Type ((zero Nat) (succ (forall (k: Nat). Nat))))"
-            " (data Bool: Type ((true Bool) (false Bool)))"
+             "(data Nat: Type ((zero Nat) (succ (forall (k: Nat). Nat))))"
+             " (data Bool: Type ((true Bool) (false Bool)))"
             " (def sum: (forall (n: Nat). (forall (m: Nat). Nat))"
             "   (| n zero = n)"
             "   (| n (succ m') = (succ (sum n m'))))"
@@ -110,12 +110,12 @@
       not-core (core/find-func core "not")]
   (test/assert (= (length (lowered/clauses sum-decl)) 2) "selector-style sum keeps two clauses")
   (test/assert (= (length (lowered/clauses not-decl)) 2) "selector-style not keeps two clauses")
-  (test/assert (= (length (sum-core 5)) 2) "sum elaborates two clauses")
-  (test/assert (= (length (not-core 5)) 2) "not elaborates two clauses"))
+       (test/assert (= (length (sum-core 5)) 2) "sum elaborates two clauses")
+       (test/assert (= (length (not-core 5)) 2) "not elaborates two clauses"))
 
 (let [src (string
-            "(data Vec (A: Type) (n: Nat): Type "
-            "  (| A zero = vnil)"
+             "(data Vec (A: Type) (n: Nat): Type "
+             "  (| A zero = vnil)"
             "  (| A (succ n) = vcons (x: A) (xs: (Vec A n))))")
       forms (p/parse/text src)
       lowered (l/lower/program forms)
