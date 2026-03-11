@@ -17,9 +17,6 @@
 (defn- node/binder [name ty]
   [:list @[(atom (string name ":")) ty]])
 
-(defn- seq/contains? [xs x]
-  (not (nil? (find-index |(= $ x) xs))))
-
 (defn- assoc/get [pairs key]
   (defn scan [i]
     (if (< i 0)
@@ -30,21 +27,15 @@
           (scan (- i 1))))))
   (scan (- (length pairs) 1)))
 
-(defn- assoc/has? [pairs key]
-  (not (nil? (assoc/get pairs key))))
-
-(defn- seq/concat [xs ys]
-  (reduce (fn [acc y] [;acc y]) xs ys))
-
 (defn- binders/name->type [binders]
   (map |[($ 1) ($ 2)] binders))
 
 (defn- binders/unique-by-name [binders]
   (let [step (fn [[seen out] b]
                (let [name (b 1)]
-                 (if (seq/contains? seen name)
-                   [seen out]
-                   [[;seen name] [;out b]])))
+                  (if (not (nil? (find-index |(= $ name) seen)))
+                    [seen out]
+                    [[;seen name] [;out b]])))
         [_ out] (reduce step [@[] @[]] (reverse binders))]
     (reverse out)))
 
@@ -66,8 +57,8 @@
     (cond
       (and (tuple? node) (= (node 0) :atom))
       (let [tok (node 1)]
-        (if (and (assoc/has? var-types tok)
-                 (not (seq/contains? seen tok)))
+        (if (and (assoc/get var-types tok)
+                 (nil? (find-index |(= $ tok) seen)))
           [[;seen tok] [;out tok]]
           [seen out]))
 
@@ -82,9 +73,9 @@
 (defn- pat/from-term [term pat-var-set]
   (match term
     [:atom tok]
-    (if (seq/contains? pat-var-set tok)
-      [:pat/var tok]
-      [:pat/con tok @[]])
+      (if (not (nil? (find-index |(= $ tok) pat-var-set)))
+        [:pat/var tok]
+        [:pat/con tok @[]])
 
     [:list xs]
     (if (and (> (length xs) 0) (tuple? (xs 0)) (= ((xs 0) 0) :atom))
@@ -110,7 +101,7 @@
 (defn- build-data-app [name args]
   (if (zero? (length args))
     (atom name)
-    (lst (reduce (fn [acc a] [;acc a]) @[(atom name)] args))))
+    (lst (tuple/join @[(atom name)] args))))
 
 (defn- term/build-lam [binders body]
   (if (zero? (length binders))
@@ -207,6 +198,30 @@
       [binders cur]))
   (split-loop node 0 @[]))
 
+(defn- binder/name-hint [ty]
+  (match ty
+    [:ty/name name _sp]
+    (if (> (length name) 0)
+      (string/ascii-lower (string/slice name 0 1))
+      "arg")
+
+    [:ty/var name _sp]
+    name
+
+    [:ty/app f _ _sp]
+    (binder/name-hint f)
+
+    _ "arg"))
+
+(defn- binder/fresh-name [used base index]
+  (let [prefix (if (= base "") "arg" base)
+        candidate (if (and (= index 0) (nil? (find-index |(= $ prefix) used)))
+                    prefix
+                    (string prefix index))]
+    (if (find-index |(= $ candidate) used)
+      (binder/fresh-name used prefix (+ index 1))
+      candidate)))
+
 # ---------------------------------------------------------------
 # Type lowering
 # ---------------------------------------------------------------
@@ -246,9 +261,7 @@
          (if name (atom (string "?" name)) (atom "?"))
 
          [:ty/universe level _sp]
-         (if (zero? level)
-           (atom "Type")
-           (atom (string "U" level)))
+          (atom (string "Type" level))
 
          [:ty/name name _sp]
          (atom name)
@@ -265,11 +278,11 @@
          [:ty/pi binder body _sp]
          (lst @[(atom "forall") (lower/binder binder) (atom ".") (lower/type body)])
 
-         [:ty/sigma binder body _sp]
-         (lst @[(atom "Sigma") (lower/binder binder) (atom ".") (lower/type body)])
+          [:ty/sigma binder body _sp]
+          (lst @[(atom "Sigma") (lower/binder binder) (atom ".") (lower/type body)])
 
-         [:ty/op op args _sp]
-         (lst (reduce (fn [acc arg] [;acc (lower/type arg)]) @[(atom op)] args))
+          [:ty/op op args _sp]
+          (lst (tuple/join @[(atom op)] (map lower/type args)))
 
          _ (errorf "lower/type: unknown node %v" node))))
 
@@ -311,13 +324,13 @@
                    (lower/term body)]))
 
          [:tm/let name value body _sp]
-         (lst @[(atom "let")
-                (atom (string name ":"))
-                (lower/term value)
-                (lower/term body)])
+          (lst @[(atom "let")
+                 (atom (string name ":"))
+                 (lower/term value)
+                 (lower/term body)])
 
-         [:tm/op op args _sp]
-         (lst (reduce (fn [acc arg] [;acc (lower/term arg)]) @[(atom op)] args))
+          [:tm/op op args _sp]
+          (lst (tuple/join @[(atom op)] (map lower/term args)))
 
          _ (errorf "lower/term: unknown node %v" node))))
 
@@ -353,9 +366,7 @@
     [:pat/con name args _sp]
     (if (zero? (length args))
       (atom name)
-      (lst (reduce (fn [acc a] [;acc (lower/pat-to-term a)])
-                   @[(atom name)]
-                   args)))
+      (lst (tuple/join @[(atom name)] (map lower/pat-to-term args))))
     _ (errorf "lower/pat-to-term: unknown pattern %v" pat)))
 
 # ---------------------------------------------------------------
@@ -371,15 +382,20 @@
     _ (errorf "lower/param: unknown param %v" param)))
 
 (defn- lower/ctor-fields-as-binders [fields]
-  (let [out @[]]
+  (let [out @[]
+        used @[]]
     (for i 0 (length fields)
       (let [f (fields i)]
         (match f
           [:field/named name ty _sp]
-          (array/push out [:bind name (lower/type ty)])
+          (do
+            (array/push out [:bind name (lower/type ty)])
+            (array/push used name))
 
           [:field/anon ty _sp]
-          (array/push out [:bind (string "_arg" i) (lower/type ty)])
+          (let [name (binder/fresh-name used (binder/name-hint ty) 0)]
+            (array/push out [:bind name (lower/type ty)])
+            (array/push used name))
 
           _ (errorf "lower/ctor-fields-as-binders: unknown field %v" f))))
     out))
@@ -405,8 +421,8 @@
 (defn- ctor/ford-encoded [data-name data-params pat-binders ctor-params eq-binders]
   (let [data-param-terms (map |(atom ($ 1)) data-params)
         result-term (build-data-app data-name data-param-terms)
-        base-binders (binders/unique-by-name (seq/concat data-params (seq/concat pat-binders ctor-params)))
-        all-binders (seq/concat base-binders eq-binders)]
+        base-binders (binders/unique-by-name (tuple/join data-params pat-binders ctor-params))
+        all-binders (tuple/join base-binders eq-binders)]
     (build-forall all-binders result-term)))
 
 (defn- args/simple-return? [args data-params]
@@ -424,11 +440,11 @@
           (check-index 0))))
 
 (defn- ctor/lower-indexed [data-name data-params name ctor-binders ret-args]
-  (let [var-types (binders/name->type (binders/unique-by-name (seq/concat data-params ctor-binders)))
+  (let [var-types (binders/name->type (binders/unique-by-name (tuple/join data-params ctor-binders)))
         ordered-vars (term/collect-var-order ret-args var-types)
         pat-var-set ordered-vars
         pat-binders (map |[:bind $ (assoc/get var-types $)] ordered-vars)
-        ctor-params (filter |(not (seq/contains? pat-var-set ($ 1))) ctor-binders)
+        ctor-params (filter (fn [b] (nil? (find-index |(= $ (b 1)) pat-var-set))) ctor-binders)
         eq-binders (ctor/ford-eqs data-params ret-args)
         patterns (map |(pat/from-term $ pat-var-set) ret-args)
         encoded (ctor/ford-encoded data-name data-params pat-binders ctor-params eq-binders)]
@@ -530,7 +546,7 @@
                       (match lowered
                         [:pat/var name]
                         (if (and (not= name "_")
-                                 (seq/contains? ctor-names name))
+                                 (not (nil? (find-index |(= $ name) ctor-names))))
                           [;acc [:pat/con name @[]]]
                           [;acc lowered])
                         _ [;acc lowered])))
@@ -539,7 +555,7 @@
           consumed (length lowered-pats)
           wildcard-pats (map (fn [_] [:pat/var "_"])
                              (range (- (length params) consumed)))
-          all-pats (seq/concat lowered-pats wildcard-pats)
+          all-pats (tuple/join lowered-pats wildcard-pats)
           rest-params (slice params consumed (length params))
           lowered-body (lower/term body)
           wrapped-body (term/build-lam rest-params lowered-body)]
@@ -559,9 +575,9 @@
     [:decl/prec fixity level op _sp]
     [:decl/prec fixity level op]
 
-    [:decl/data name params ctors _sp]
+    [:decl/data name params sort ctors _sp]
     (let [lowered-params (map lower/param params)
-          sort (atom "Type")
+          sort (lower/type sort)
           lowered-ctors (map |(ctor/lower name lowered-params $) ctors)]
       [:decl/data name lowered-params sort lowered-ctors])
 

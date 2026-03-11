@@ -26,13 +26,23 @@
          (for i 1 (length name)
            (when (not (is-digit-byte? (name i)))
              (set ok false)))
-         ok)))
+          ok)))
+
+(defn name/is-type-universe? [name]
+  (and (string/has-prefix? "Type" name)
+       (let [suffix (string/slice name 4)]
+         (or (= suffix "")
+             (do
+               (var ok true)
+               (for i 0 (length suffix)
+                 (when (not (is-digit-byte? (suffix i)))
+                   (set ok false)))
+               ok)))))
 
 (defn syntax/default []
   @{:literals @[
       {:lit "->" :k :op :v "->"}
       {:lit "→" :k :op :v "->"}
-      {:lit "=>" :k :fat-arrow :v :fat-arrow}
       {:lit "\\" :k :lambda :v :lambda}
       {:lit "λ" :k :lambda :v :lambda}
       {:lit "Pi" :k :quant :v :pi}
@@ -48,6 +58,11 @@
       :sigma a/ty/sigma
     }
     :type/ident-resolvers @[
+      (fn [name sp]
+        (if (name/is-type-universe? name)
+          (let [suffix (string/slice name 4)]
+            (a/ty/universe (if (= suffix "") 0 (scan-number suffix)) sp))
+          nil))
       (fn [name sp]
         (if (name/is-universe? name)
           (a/ty/universe (scan-number (string/slice name 1)) sp)
@@ -96,7 +111,11 @@
       "forall" (syntax/add-literal! sx new-lit :quant :pi)
       "sigma" (syntax/add-literal! sx new-lit :quant :sigma)
       "pi" (syntax/add-literal! sx new-lit :quant :pi)
-      (errorf "cannot alias unknown literal or keyword: %v" target-lit)))
+      (if (or (= target-lit "Type")
+              (name/is-type-universe? target-lit)
+              (name/is-universe? target-lit))
+        (syntax/add-literal! sx new-lit :ident target-lit)
+        (errorf "cannot alias unknown literal or keyword: %v" target-lit))))
   sx)
 
 (defn syntax/add-quant-alias! [sx new-lit kind]
@@ -135,6 +154,7 @@
   {:starts-with-at? starts-with-at?
    :name/is-upper? name/is-upper?
    :name/is-universe? name/is-universe?
+   :name/is-type-universe? name/is-type-universe?
    :syntax/default syntax/default
    :syntax/clone syntax/clone
    :syntax/add-literal! syntax/add-literal!
