@@ -5,71 +5,71 @@
 (def L/Const 0x01)
 (def L/Shift 0x02)
 
-(defn- lvl/check-nat [n who]
+(defn- check-nat [n who]
   (when (or (not (int? n)) (< n 0))
     (errorf "%v expects a non-negative integer, got: %v" who n))
   n)
 
-(defn lvl/const [n]
-  [L/Const (lvl/check-nat n "lvl/const")])
+(defn const [n]
+  [L/Const (check-nat n "lvl/const")])
 
-(defn lvl/shift [n]
-  [L/Shift (lvl/check-nat n "lvl/shift")])
+(defn shift [n]
+  [L/Shift (check-nat n "lvl/shift")])
 
-(def lvl/id (lvl/const 0))
+(def id (const 0))
 
-(defn lvl/const? [l]
+(defn const? [l]
   (and (tuple? l) (= (get l 0) L/Const)))
 
-(defn lvl/shift? [l]
+(defn shift? [l]
   (and (tuple? l) (= (get l 0) L/Shift)))
 
-(defn lvl/value [l]
+(defn value [l]
   "Normalize a level expression to a concrete natural number."
   (cond
-    (int? l) (lvl/check-nat l "lvl/value")
-    (lvl/const? l) (lvl/check-nat (get l 1) "lvl/value")
-    (lvl/shift? l) (lvl/check-nat (get l 1) "lvl/value")
+    (int? l) (check-nat l "lvl/value")
+    (const? l) (check-nat (get l 1) "lvl/value")
+    (shift? l) (check-nat (get l 1) "lvl/value")
     true (errorf "invalid level expression: %v" l)))
 
-(defn lvl/<= [l1 l2]
-  (<= (lvl/value l1) (lvl/value l2)))
+(defn leq [l1 l2]
+  (<= (value l1) (value l2)))
 
-(defn lvl/< [l1 l2]
-  (< (lvl/value l1) (lvl/value l2)))
+(defn lt [l1 l2]
+  (< (value l1) (value l2)))
 
-(defn lvl/eq? [l1 l2]
-  (= (lvl/value l1) (lvl/value l2)))
+(defn eq? [l1 l2]
+  (= (value l1) (value l2)))
 
-(defn lvl/succ [l]
-  (inc (lvl/value l)))
+(defn succ [l]
+  (inc (value l)))
 
-(defn lvl/max [l1 l2]
-  (max (lvl/value l1) (lvl/value l2)))
+(defn max* [l1 l2]
+  (max (value l1) (value l2)))
 
-(defn lvl/apply-shift [shift l]
-  (+ (lvl/value shift) (lvl/value l)))
+(defn apply-shift [shift-val l]
+  (+ (value shift-val) (value l)))
 
-(defn lvl/compose [s1 s2]
-  (lvl/shift (+ (lvl/value s1) (lvl/value s2))))
+(defn compose [s1 s2]
+  (shift (+ (value s1) (value s2))))
 
-(defn lvl/str [l]
-  (string "l" (lvl/value l)))
+(defn str [l]
+  (string "l" (value l)))
 
 (def exports
   {:L/Const L/Const
    :L/Shift L/Shift
-   :const lvl/const
-   :shift lvl/shift
-   :id lvl/id
-   :const? lvl/const?
-   :shift? lvl/shift?
-   :value lvl/value
-   :<= lvl/<=
-   :< lvl/<
-   :eq? lvl/eq?
-   :succ lvl/succ
-   :max lvl/max
-   :apply-shift lvl/apply-shift
-   :compose lvl/compose
-   :str lvl/str})
+   :const const
+   :shift shift
+   :id id
+   :const? const?
+   :shift? shift?
+   :value value
+   :leq leq
+   :lt lt
+   :eq? eq?
+   :succ succ
+   :max max*
+   :apply-shift apply-shift
+   :compose compose
+   :str str})

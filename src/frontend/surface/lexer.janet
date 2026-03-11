@@ -24,59 +24,82 @@
       (= c (chr "^")) (= c (chr "@")) (= c (chr "!")) (= c (chr "?"))
       (= c (chr "|")) (= c (chr "&")) (= c (chr "%")) (= c (chr "."))))
 
+(defn- token/new [k v line col]
+  {:k k :v v :line line :col col})
+
 (defn lex [text sx]
   (let [tokens @[]
-        n (length text)]
+         n (length text)]
     (var i 0)
+    (var line 1)
+    (var col 1)
     (while (< i n)
       (let [c (text i)]
-        (if (is-space-byte? c)
-          (++ i)
+        (if (or (is-space-byte? c) (= c (chr "\n")))
+          (do
+            (++ i)
+            (if (= c (chr "\n"))
+              (do (++ line) (set col 1))
+              (++ col)))
           (if-let [lt (x/syntax/match-literal sx text i)]
             (do
-              (array/push tokens {:k (lt :k) :v (lt :v)})
-              (set i (+ i (length (lt :lit)))))
+              (array/push tokens (token/new (lt :k) (lt :v) line col))
+              (let [lit-len (length (lt :lit))]
+                (set i (+ i lit-len))
+                (set col (+ col lit-len))))
             (cond
-              (= c (chr "(")) (do (array/push tokens {:k :lparen :v "("}) (++ i))
-              (= c (chr ")")) (do (array/push tokens {:k :rparen :v ")"}) (++ i))
-              (= c (chr ",")) (do (array/push tokens {:k :comma :v ","}) (++ i))
-              (= c (chr ":")) (do (array/push tokens {:k :colon :v ":"}) (++ i))
-              (= c (chr ".")) (do (array/push tokens {:k :dot :v "."}) (++ i))
-              (= c (chr "=")) (do (array/push tokens {:k :eq :v "="}) (++ i))
+              (= c (chr "(")) (do (array/push tokens (token/new :lparen "(" line col)) (++ i) (++ col))
+              (= c (chr ")")) (do (array/push tokens (token/new :rparen ")" line col)) (++ i) (++ col))
+              (= c (chr ",")) (do (array/push tokens (token/new :comma "," line col)) (++ i) (++ col))
+              (= c (chr ":")) (do (array/push tokens (token/new :colon ":" line col)) (++ i) (++ col))
+              (= c (chr ".")) (do (array/push tokens (token/new :dot "." line col)) (++ i) (++ col))
+              (= c (chr "=")) (do (array/push tokens (token/new :eq "=" line col)) (++ i) (++ col))
 
               (= c (chr "?"))
-              (let [start i]
+              (let [start i
+                    start-col col]
                 (++ i)
+                (++ col)
                 (while (and (< i n) (is-ident-byte? (text i))) (++ i))
+                (set col (+ start-col (- i start)))
                 (let [raw (string/slice text start i)]
                   (if (= (length raw) 1)
-                    (array/push tokens {:k :hole :v nil})
-                    (array/push tokens {:k :hole :v (string/slice raw 1)}))))
+                    (array/push tokens (token/new :hole nil line start-col))
+                    (array/push tokens (token/new :hole (string/slice raw 1) line start-col)))))
 
               (is-digit-byte? c)
-              (let [start i]
+              (let [start i
+                    start-col col]
                 (++ i)
+                (++ col)
                 (while (and (< i n) (is-digit-byte? (text i))) (++ i))
-                (array/push tokens {:k :nat :v (scan-number (string/slice text start i))}))
+                (set col (+ start-col (- i start)))
+                (array/push tokens (token/new :nat (scan-number (string/slice text start i)) line start-col)))
 
               (is-ident-start-byte? c)
-              (let [start i]
+              (let [start i
+                    start-col col]
                 (++ i)
+                (++ col)
                 (while (and (< i n) (is-ident-byte? (text i))) (++ i))
+                (set col (+ start-col (- i start)))
                 (let [name (string/slice text start i)]
                   (cond
-                    (= name "let") (array/push tokens {:k :kw/let :v name})
-                    (= name "in") (array/push tokens {:k :kw/in :v name})
-                    true (array/push tokens {:k :ident :v name}))))
+                    (= name "let") (array/push tokens (token/new :kw/let name line start-col))
+                    (= name "in") (array/push tokens (token/new :kw/in name line start-col))
+                    true (array/push tokens (token/new :ident name line start-col)))))
 
               (is-op-byte? c)
-              (let [start i]
+              (let [start i
+                    start-col col]
                 (++ i)
+                (++ col)
                 (while (and (< i n) (is-op-byte? (text i))) (++ i))
-                (array/push tokens {:k :op :v (string/slice text start i)}))
+                (set col (+ start-col (- i start)))
+                (array/push tokens (token/new :op (string/slice text start i) line start-col)))
 
               true
-              (errorf "lex: unexpected byte %v in '%v'" c text))))))
+              (errorf "lex error at %d:%d: unexpected byte %q" line col c))))))
     tokens))
 
 (def exports

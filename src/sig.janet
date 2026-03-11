@@ -46,12 +46,13 @@
       (errorf "sig/ctor: unknown constructor '%v' in '%v'" ctor-name data-name)))
 
 (defn sig/ctor-name-set [sig]
-  (let [out @{}]
-    (eachp [_ entry] sig
-      (when (= (entry :kind) :data)
-        (each ctor (entry :ctors)
-          (put out (ctor :name) true))))
-    out))
+  (reduce
+    (fn [out entry]
+      (if (= (entry :kind) :data)
+        (reduce (fn [acc ctor] (put acc (ctor :name) true)) out (entry :ctors))
+        out))
+    @{}
+    (values sig)))
 
 (defn vars [delta]
   (map |($ :name) delta))
@@ -62,7 +63,7 @@
           args))
 
 (defn build-lambda [body delta]
-  (reduce (fn [inner _binder]
+  (reduce (fn [inner _]
             (tt/tm/lam (fn [_] inner)))
           body
           (reverse delta)))

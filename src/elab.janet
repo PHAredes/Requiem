@@ -174,11 +174,6 @@
           rest (slice params 1)]
       [:lam (fn [x] (elab/lam-chain (env/extend env name x) sig-env rest body))])))
 
-(defn list/head [xs]
-  (if (and (> (length xs) 0) (l/node/atom? (xs 0)))
-    (l/node/atom (xs 0))
-    nil))
-
 (defn list/expect-arity [form xs expected]
   (let [got (length xs)]
     (when (not= got expected)
@@ -210,6 +205,32 @@
         body (list/parse-body (slice tail 1) form)]
     [binders body]))
 
+(defn list/parse-lam-binders [spec]
+  (cond
+    (and (tuple? spec) (= (spec 0) :atom))
+    @([:bind (spec 1) nil])
+
+    (and (tuple? spec) (= (spec 0) :list))
+    (let [xs (spec 1)]
+      (if (l/bind/single-spec? spec)
+        @[(l/bind/from-node spec)]
+        (map (fn [item]
+               (match item
+                 [:atom name] [:bind name nil]
+                 _ (l/bind/from-node item)))
+             xs)))
+
+    true
+    (errorf "invalid lambda binder specification: %v\nSupported formats:\n  x - single untyped binder\n  (x y z) - multiple untyped binders\n  (x: A) - single typed binder\n  ((x: A) (y: B)) - multiple typed binders" spec)))
+
+(defn list/parse-lam-body [xs]
+  (when (< (length xs) 3)
+    (errorf "lambda needs binders and a body: %v" [:list xs]))
+  (let [tail (slice xs 1)
+        binders (list/parse-lam-binders (tail 0))
+        body (list/parse-body (slice tail 1) "lambda")]
+    [binders body]))
+
 (defn list/parse-ann-binder [node]
   (match node
     [:list xs]
@@ -226,7 +247,7 @@
     (elab/pi-chain env sig-env binders body)))
 
 (defn elab/list-lam [env sig-env xs]
-  (let [[binders body] (list/parse-binders-body xs "lambda")]
+  (let [[binders body] (list/parse-lam-body xs)]
     (elab/lam-chain env sig-env binders body)))
 
 (defn elab/list-lam-ann [env sig-env xs]
@@ -315,21 +336,36 @@
 (defn elab/list [env sig-env node xs]
   (if (or (l/term/forall? node) (l/term/arrow? node))
     (elab/list-pi env sig-env node)
-    (if-let [handler (get elab/list-dispatch (list/head xs))]
-      (handler env sig-env xs)
-      (elab/app-list env sig-env xs))))
+    (let [head (if (and (> (length xs) 0) (l/node/atom? (xs 0)))
+                 (l/node/atom (xs 0))
+                 nil)]
+      (if-let [handler (get elab/list-dispatch head)]
+        (handler env sig-env xs)
+        (elab/app-list env sig-env xs)))))
 
 (set elab/term
      (fn [env sig-env node]
        (match node
-         [:atom tok]
-         (elab/atom env sig-env tok true)
+         [:atom tok] (elab/atom env sig-env tok true)
+         [:nat n] [:var (string n)]
+         [:list xs] (elab/list env sig-env node xs)
 
-          [:list xs]
-          (elab/list env sig-env node xs)
+         # Surface AST nodes
+         [:ty/universe lvl _] [:type lvl]
+         [:ty/hole name _] [:hole name]
+         [:ty/var x _] (elab/atom env sig-env x true)
+         [:ty/name x _] (elab/atom env sig-env x true)
+         [:ty/arrow dom cod _] [:t-pi (elab/term env sig-env dom) (fn [_] (elab/term env sig-env cod))]
+         [:ty/app f a _] [:app (elab/term env sig-env f) (elab/term env sig-env a)]
+         
+         [:tm/nat n _] [:var (string n)]
+         [:tm/var x _] (elab/atom env sig-env x true)
+         [:tm/ref x _] (elab/atom env sig-env x true)
+         [:tm/hole name _] [:hole name]
+         [:tm/app f a _] [:app (elab/term env sig-env f) (elab/term env sig-env a)]
+         [:tm/lam params body _] (elab/lam-chain env sig-env params body)
 
-          _
-          (errorf "cannot elaborate node: %v" node))))
+         _ (errorf "cannot elaborate node: %v" node))))
 
 (defn binders/elab [env sig-env binders]
   (let [[out final-env]
@@ -342,15 +378,12 @@
                 binders)]
     [out final-env]))
 
-(defn seq/contains? [xs x]
-  (not (nil? (find-index |(= $ x) xs))))
-
 (defn clause/vars [patterns]
   "Collect unique pattern variables from clause patterns."
   (defn collect [pat seen]
     (match pat
       [:pat/var x]
-      (if (or (= x "_") (seq/contains? seen x))
+      (if (or (= x "_") (find |(= $ x) seen))
         seen
         [;seen x])
       [:pat/con _ args]
@@ -368,9 +401,6 @@
       [:core/clause patterns (elab/term env sig-env body)])
     _
     (errorf "invalid clause: %v" clause)))
-
-(defn text/contains? [s sub]
-  (not (nil? (string/find sub (string s)))))
 
 (defn node/atom/new [tok]
   [:atom tok])
@@ -453,12 +483,6 @@
             params (map l/bind/from-node (slice items 1 (length items)))]
         [name params]))))
 
-(defn entry/line [entry]
-  (entry 1))
-
-(defn entry/children [entry]
-  (entry 2))
-
 (defn items/eq-index [items]
   (find-index |(and (tuple? $) (= ($ 0) :atom) (= ($ 1) "=")) items))
 
@@ -467,28 +491,28 @@
     (slice items 0 eq-index)
     items))
 
-(defn items->node [items]
-  (if (and (= (length items) 1)
-           (tuple? (items 0))
-           (= ((items 0) 0) :list))
-    (items 0)
-    [:list items]))
-
 (defn field/binder-from-line [line]
   (let [lhs-items (items/lhs-of-eq (line/items line))
-        node (items->node lhs-items)]
+        node (if (and (= (length lhs-items) 1)
+                      (tuple? (lhs-items 0))
+                      (= ((lhs-items 0) 0) :list))
+               (lhs-items 0)
+               [:list lhs-items])]
     (if (l/bind/single-spec? node)
       (l/bind/from-node node)
       nil)))
 
 (defn entry/field-binders [entry]
-  (map |(field/binder-from-line (entry/line $)) (entry/children entry)))
-
-(defn seq/all? [pred xs]
-  (reduce (fn [acc x] (and acc (pred x))) true xs))
+  (map |(field/binder-from-line ($ 1)) (entry 2)))
 
 (defn seq/concat [xs ys]
   (reduce (fn [acc y] [;acc y]) xs ys))
+
+(defn node/list [items]
+  [:list items])
+
+(defn clause/list [items]
+  (node/list (seq/concat @[[:atom "|"]] items)))
 
 (defn term/sigma-from-binders [binders]
   (when (zero? (length binders))
@@ -513,22 +537,20 @@
 (defn term/app-head [head args]
   (if (zero? (length args))
     [:atom head]
-    [:list (reduce (fn [acc a] [;acc [:atom a]]) @[[:atom head]] args)]))
+    (node/list (reduce (fn [acc a] [;acc [:atom a]]) @[[:atom head]] args))))
 
 (defn form/def-from-type+clauses [name ann clauses]
-  [:list (reduce (fn [acc x] [;acc x])
-                 @[[:atom "def"] [:atom (string name ":")] ann]
-                 clauses)])
+  (node/list (seq/concat @[[:atom "def"] [:atom (string name ":")] ann]
+                         clauses)))
 
 (defn form/clause [patterns body]
-  [:list (reduce (fn [acc x] [;acc x])
-                 (reduce (fn [acc p] [;acc [:atom p]])
-                         @[[:atom "|"]]
-                         patterns)
-                 @[[:atom "="] body])])
+  (clause/list
+    (seq/concat
+      (map |[:atom $] patterns)
+      @[[:atom "="] body])))
 
 (defn entry/child-binder-node [entry]
-  (let [items0 (line/items (entry/line entry))
+  (let [items0 (line/items (entry 1))
         eq-index (items/eq-index items0)
         lhs-items (if (nil? eq-index)
                     items0
@@ -540,9 +562,9 @@
       [:list lhs-items])))
 
 (defn entry/ctor-items [entry]
-  (let [base (line/items (entry/line entry))
-        child-binders (map entry/child-binder-node (entry/children entry))]
-    (reduce (fn [acc b] [;acc b]) base child-binders)))
+  (let [base (line/items (entry 1))
+        child-binders (map entry/child-binder-node (entry 2))]
+    (seq/concat base child-binders)))
 
 (defn atom/type-token? [node]
   (and (tuple? node)
@@ -597,19 +619,11 @@
   (let [items (entry/ctor-items entry)
         eq-index (items/eq-index items)]
     (if (nil? eq-index)
-      [:list (reduce (fn [acc x] [;acc x])
-                     @[[:atom "|"]]
-                     items)]
+      (clause/list items)
       (let [selectors (slice items 0 eq-index)
             rhs (slice items (+ eq-index 1) (length items))
             full-selectors (selectors/for-clause params selectors rhs)]
-        [:list (reduce (fn [acc x] [;acc x])
-                       @[[:atom "|"]]
-                       (reduce (fn [acc x] [;acc x])
-                               (reduce (fn [acc x] [;acc x])
-                                       full-selectors
-                                       @[[:atom "="]])
-                               rhs))]))))
+        (clause/list (seq/concat (seq/concat full-selectors @[[:atom "="]]) rhs))))))
 
 (defn patterns/normalize-arity [pat-items arity]
   (cond
@@ -619,43 +633,35 @@
     true pat-items))
 
 (defn entry/func-clause-node [arity entry]
-  (let [items (line/items (entry/line entry))
+  (let [items (line/items (entry 1))
         eq-index (items/eq-index items)]
     (if (nil? eq-index)
-      [:list (reduce (fn [acc x] [;acc x])
-                     @[[:atom "|"]]
-                     items)]
+      (clause/list items)
       (let [patterns0 (slice items 0 eq-index)
             body (slice items (+ eq-index 1) (length items))
             patterns (patterns/normalize-arity patterns0 arity)]
-        [:list (reduce (fn [acc x] [;acc x])
-                       @[[:atom "|"]]
-                       (reduce (fn [acc x] [;acc x])
-                               (reduce (fn [acc x] [;acc x])
-                                       patterns
-                                       @[[:atom "="]])
-                               body))]))))
+        (clause/list (seq/concat (seq/concat patterns @[[:atom "="]]) body))))))
 
 (defn record/function-type-line? [line]
   (let [t (string/trim (string line))]
-    (or (text/contains? t "->")
-        (text/contains? t "→")
-        (text/contains? t "∀"))))
+    (or (string/find "->" t)
+        (string/find "→" t)
+        (string/find "∀" t))))
 
 (defn record/sigma-shape? [entries]
   (and (= (length entries) 1)
-       (> (length (entry/children (entries 0))) 0)
-       (let [ctor-items (line/items (entry/line (entries 0)))
+       (> (length ((entries 0) 2)) 0)
+       (let [ctor-items (line/items ((entries 0) 1))
              ctor-ok (and (> (length ctor-items) 0)
                           (tuple? (ctor-items 0))
                           (= ((ctor-items 0) 0) :atom)
                           (nil? (items/eq-index ctor-items)))
              binders (entry/field-binders (entries 0))]
-         (and ctor-ok (seq/all? |(not (nil? $)) binders)))))
+         (and ctor-ok (all |(not (nil? $)) binders)))))
 
 (defn record->sigma-forms [name params entries]
   (let [ctor-entry (entries 0)
-        ctor-items (line/items (entry/line ctor-entry))
+        ctor-items (line/items (ctor-entry 1))
         ctor-name ((ctor-items 0) 1)
         fields (entry/field-binders ctor-entry)
         sigma-body (term/sigma-from-binders fields)
@@ -679,36 +685,30 @@
           is-func
           (or (not (nil? rhs))
               (and (> (length entries) 0)
-                   (record/function-type-line? (entry/line (entries 0)))))]
+                   (record/function-type-line? ((entries 0) 1))))]
       (if sigma-record?
         (record->sigma-forms name params entries)
         (if is-func
-        (let [ann-text (if rhs rhs (entry/line (entries 0)))
-              ann (line/term ann-text)
-              [fn-params _] (l/term/split-pi ann)
-              arity (length fn-params)
-              clause-entries (if rhs entries (slice entries 1 (length entries)))
-              clauses (map |(entry/func-clause-node arity $) clause-entries)
-              head-nodes
-              (if (zero? (length param-nodes))
-                @[[:atom "def"] [:atom (string name ":")] ann]
-                (reduce (fn [acc x] [;acc x])
-                        (reduce (fn [acc p] [;acc p])
-                                @[[:atom "def"] [:atom name]]
-                                param-nodes)
-                        @[[:atom ":"] ann]))]
-          @[[:list (reduce (fn [acc x] [;acc x])
-                           head-nodes
-                           clauses)]])
+          (let [ann-text (if rhs rhs ((entries 0) 1))
+                ann (line/term ann-text)
+                [fn-params _] (l/term/split-pi ann)
+                arity (length fn-params)
+                clause-entries (if rhs entries (slice entries 1 (length entries)))
+                clauses (map |(entry/func-clause-node arity $) clause-entries)
+                head-nodes
+                (if (zero? (length param-nodes))
+                  @[[:atom "def"] [:atom (string name ":")] ann]
+                  (seq/concat (seq/concat @[[:atom "def"] [:atom name]]
+                                          param-nodes)
+                              @[[:atom ":"] ann]))]
+            @[(node/list (seq/concat head-nodes clauses))])
           (let [sort (if rhs (line/term rhs) [:atom "Type"])
-                clauses (map |(entry/data-clause-node params $) entries)]
-            @[[:list (reduce (fn [acc x] [;acc x])
-                             (reduce (fn [acc p] [;acc p])
-                                     @[[:atom "data"] [:atom name]]
-                                     param-nodes)
-                             (reduce (fn [acc c] [;acc c])
-                                     @[[:atom ":"] sort]
-                                     clauses))]]))))
+                clauses (map |(entry/data-clause-node params $) entries)
+                data-nodes (seq/concat (seq/concat @[[:atom "data"] [:atom name]]
+                                                   param-nodes)
+                                       (seq/concat @[[:atom ":"] sort]
+                                                   clauses))]
+            @[(node/list data-nodes)]))))
     _
     (errorf "expected :decl/record, got: %v" decl)))
 
@@ -742,8 +742,16 @@
           core-ctors (map (fn [ctor]
                             (match ctor
                               [:ctor ctor-name pat-binders patterns ctor-params encoded-type _]
-                              [:core/ctor ctor-name pat-binders patterns ctor-params
-                               (elab/term env sig-env encoded-type)]
+                              [:core/ctor ctor-name
+                               pat-binders
+                               patterns
+                               (map (fn [b]
+                                      (match b
+                                        [:bind bname bty]
+                                        [:bind bname (elab/term env sig-env bty)]
+                                        _ (errorf "invalid ctor parameter binder: %v" b)))
+                                    ctor-params)
+                                (elab/term env sig-env encoded-type)]
                               _ (errorf "invalid constructor: %v" ctor)))
                           ctors)]
       [:core/data name core-params core-sort core-ctors])
@@ -754,6 +762,12 @@
           core-type (elab/pi-chain @[] sig-env params result)
           core-clauses (map |(clause/elab env sig-env $) clauses)]
       [:core/func name core-params core-result core-type core-clauses])
+
+    [:decl/compute tm]
+    [:core/compute (elab/term @[] sig-env tm)]
+
+    [:decl/check tm ty]
+    [:core/check (elab/term @[] sig-env tm) (elab/term @[] sig-env ty)]
 
     _
     (errorf "invalid declaration: %v" decl)))
