@@ -5,9 +5,8 @@
 (defn make [deps]
   (let [goals @[]
         ty/type (deps :ty/type)
-        lower (deps :lower)
         ctx/lookup (deps :ctx/lookup)
-        print/sem (deps :print/sem)]
+        goal-ty (ty/type 100)]
     (var collect? false)
 
     (defn context-vars [Γ]
@@ -15,8 +14,8 @@
 
     (defn report [name expected Γ]
       (let [goal {:name name
-                  :expected (lower (ty/type 100) expected)
-                  :ctx (map (fn [k] [k (lower (ty/type 100) (ctx/lookup Γ k))]) (h/keys Γ))}]
+                  :expected expected
+                  :ctx (map (fn [k] [k (ctx/lookup Γ k)]) (h/keys Γ))}]
         (array/push goals goal)))
 
     (defn set-collect! [enabled]
@@ -26,7 +25,7 @@
     (defn error-infer [name Γ]
       (if collect?
         (do
-          (report name (ty/type 100) Γ)
+          (report name goal-ty Γ)
           [:type 100])
         (errorf "unsolved goal ?%v during inference\nNo expected type is available in inference mode.\nContext variables: %v"
                 name
@@ -37,9 +36,8 @@
         (do
           (report name expected Γ)
           true)
-        (errorf "unsolved goal ?%v during checking\nExpected type: %s\nContext variables: %v"
+        (errorf "unsolved goal ?%v during checking\nContext variables: %v"
                 name
-                (print/sem expected)
                 (context-vars Γ))))
 
     {:goals goals

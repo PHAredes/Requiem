@@ -168,7 +168,7 @@
        (sc/tagged :decl/prec @[(sc/lit :infixr) nonneg-int (sc/string) schema/span])
        (sc/tagged :decl/prec @[(sc/lit :prefix) nonneg-int (sc/string) schema/span])
        (sc/tagged :decl/prec @[(sc/lit :postfix) nonneg-int (sc/string) schema/span])
-       (sc/tagged :decl/data @[(sc/string) (sc/array schema/param) (sc/array schema/ctor) schema/span])
+       (sc/tagged :decl/data @[(sc/string) (sc/array schema/param) schema/type (sc/array schema/ctor) schema/span])
        (sc/tagged :decl/func @[(sc/string) (sc/lazy (fn [] schema/type)) (sc/array schema/clause) schema/span])]))
 
 (def schema/program
