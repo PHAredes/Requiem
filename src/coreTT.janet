@@ -3,6 +3,11 @@
 # Requiem CoreTT
 # NbE kernel with HOAS, bidirectional type checking, and J-eliminator
 
+(import ./levels :as lvl)
+(import ./meta :as meta)
+(import ./checker :as checker)
+(import ./print :as printer)
+
 # Tags
 (def T/Type 0x01)
 (def T/Pi 0x02)
@@ -22,42 +27,17 @@
 (def NF/Id 0x4000)
 (def NF/Refl 0x8000)
 
-# Semantic values:
-#   [T/Type l]           - universes
-#   function            - Pi types (HOAS)
-#   [v1 v2]             - Sigma types (pairs)
-#   [T/Id A x y]        - Identity type
-#   [T/Refl x]          - Reflexivity proof
-#   [T/Neutral ne]      - stuck terms
-
-# Normal forms:
-#   [NF/Lam body]        - lambda abstraction
-#   [NF/Pair l r]        - pair
-#   [NF/Type l]          - type universe
-#   [NF/Pi A B]          - Pi type
-#   [NF/Sigma A B]       - Sigma type
-#   [NF/Id A x y]        - Identity type
-#   [NF/Refl x]          - Reflexivity
-#   [NF/Neut ne]         - neutral term
-
-# Neutral terms:
-#   [:nvar x]           - variable
-#   [:napp f x]         - application
-#   [:nfst p]           - first projection
-#   [:nsnd p]           - second projection
-#   [:nJ A x P d y p]   - J eliminator (stuck)
-# (Keywords kept for AST readability)
-
-(import ./levels :as lvl)
-
 # ---------------------
 # Type constructors
 # ---------------------
-(defn ty/type [lvl] [T/Type (lvl/lvl/value lvl)])
+(defn ty/type [lvl*] [T/Type (lvl/value lvl*)])
 (defn ty/pi [A B] [T/Pi A B])
 (defn ty/sigma [A B] [T/Sigma A B])
 (defn ty/id [A x y] [T/Id A x y])
 (defn ty/pair [v1 v2] [T/Pair v1 v2])
+
+(def T/Type0 [T/Type 0])
+(def T/Type100 (ty/type 100))
 
 # Term constructors
 (defn tm/var [x] [:var x])
@@ -107,9 +87,22 @@
     (errorf "unbound variable '%v' - not found in context.\nAvailable variables: %v" x (map keyword (h/keys Γ)))
     v))
 
+(var print/sem nil)
+(var print/ne nil)
+(var print/nf nil)
+(var print/tm nil)
+(var goals nil)
+(var goals/set-collect! nil)
+
 # NbE: raise / lower
 (var raise nil)
 (var lower nil)
+
+(defn- tag-of [x]
+  (if (tuple? x) (get x 0) 0))
+
+(defn- sem/neutral [ne]
+  [T/Neutral ne])
 
 (defn- raise/pi [A B ne]
   (fn [x]
@@ -123,35 +116,35 @@
 
 (set raise
      (fn [ty ne]
-       (let [tag (if (tuple? ty) (get ty 0) 0)]
+       (let [tag (tag-of ty)]
          (cond
-           (= tag T/Pi)
-           (let [[_ A B] ty] (raise/pi A B ne))
-           (= tag T/Sigma)
-           (let [[_ A B] ty] (raise/sigma A B ne))
-           true [T/Neutral ne]))))
+            (= tag T/Pi)
+            (let [[_ A B] ty] (raise/pi A B ne))
+            (= tag T/Sigma)
+            (let [[_ A B] ty] (raise/sigma A B ne))
+            true (sem/neutral ne)))))
 
 (defn- lower/type [sem]
-  (let [tag (if (tuple? sem) (get sem 0) 0)]
+  (let [tag (tag-of sem)]
     (cond
       (= tag T/Neutral) (nf/neut (get sem 1))
       (= tag T/Type) (nf/type (get sem 1))
       (= tag T/Pi) (let [[_ A B] sem]
                      (nf/pi (lower/type A)
-                            (let [fresh (gensym)
-                                  arg (raise A (ne/var fresh))]
-                              (lower (ty/type 100) (B arg))))) # Use a high-level universe for lower/type recursion
+                            (fn [fresh]
+                              (let [arg (raise A (ne/var fresh))]
+                                (lower T/Type100 (B arg))))))
       (= tag T/Sigma) (let [[_ A B] sem]
                         (nf/sigma (lower/type A)
-                                  (let [fresh (gensym)
-                                        arg (raise A (ne/var fresh))]
-                                    (lower (ty/type 100) (B arg)))))
+                                  (fn [fresh]
+                                    (let [arg (raise A (ne/var fresh))]
+                                      (lower T/Type100 (B arg))))))
       (= tag T/Id) (let [[_ A x y] sem]
                      (nf/id (lower/type A) (lower A x) (lower A y)))
       true sem)))
 
 (defn- lower/pi [A B sem]
-  (let [stag (if (tuple? sem) (get sem 0) 0)]
+  (let [stag (tag-of sem)]
     (if (= stag T/Neutral)
       (let [ne (get sem 1)]
         (nf/lam
@@ -165,7 +158,7 @@
             (lower (B arg-sem) (sem arg-sem))))))))
 
 (defn- lower/sigma [A B sem]
-  (let [stag (if (tuple? sem) (get sem 0) 0)]
+  (let [stag (tag-of sem)]
     (if (= stag T/Neutral)
       (let [ne (get sem 1)
             v1 (raise A (ne/fst ne))
@@ -175,38 +168,61 @@
         (nf/pair (lower A v1) (lower (B v1) v2))))))
 
 (defn- lower/id [ty sem]
-  (let [stag (if (tuple? sem) (get sem 0) 0)]
+  (let [stag (tag-of sem)]
     (cond
       (= stag T/Refl) (nf/refl (lower (get ty 1) (get sem 1)))
       (= stag T/Neutral) (nf/neut (get sem 1))
       true sem)))
 
 (defn- lower/neutral [sem]
-  (let [stag (if (tuple? sem) (get sem 0) 0)]
+  (let [stag (tag-of sem)]
     (if (= stag T/Neutral)
       (nf/neut (get sem 1))
       sem)))
 
 (set lower
      (fn [ty sem]
-       (let [tag (if (tuple? ty) (get ty 0) 0)]
+       (let [tag (tag-of ty)]
          (cond
-           (= tag T/Type) (lower/type sem)
-           (= tag T/Pi) (let [[_ A B] ty] (lower/pi A B sem))
+            (= tag T/Type) (lower/type sem)
+            (= tag T/Pi) (let [[_ A B] ty] (lower/pi A B sem))
            (= tag T/Sigma) (let [[_ A B] ty] (lower/sigma A B sem))
            (= tag T/Id) (lower/id ty sem)
            (= tag T/Neutral) (lower/neutral sem)
            true sem))))
 
+(let [pp (printer/make {:T/Type T/Type
+                        :T/Pi T/Pi
+                        :T/Sigma T/Sigma
+                        :T/Id T/Id
+                        :T/Refl T/Refl
+                        :T/Neutral T/Neutral
+                        :T/Pair T/Pair
+                        :NF/Neut NF/Neut
+                        :NF/Lam NF/Lam
+                        :NF/Pi NF/Pi
+                        :NF/Sigma NF/Sigma
+                        :NF/Type NF/Type
+                        :NF/Pair NF/Pair
+                        :NF/Id NF/Id
+                        :NF/Refl NF/Refl
+                        :ty/type ty/type
+                        :lower lower
+                        :lvl/value lvl/value})]
+  (set print/sem (pp :print/sem))
+  (set print/ne (pp :print/ne))
+  (set print/nf (pp :print/nf))
+  (set print/tm (pp :print/tm)))
+
 # Definitional equality
 (var sem-eq nil)
 
 (defn- sem-eq/type [ty v1 v2]
-  (let [t1 (if (tuple? v1) (get v1 0) 0)
-        t2 (if (tuple? v2) (get v2 0) 0)]
+  (let [t1 (tag-of v1)
+        t2 (tag-of v2)]
     (cond
       (and (= t1 T/Type) (= t2 T/Type))
-      (lvl/lvl/eq? (get v1 1) (get v2 1))
+      (lvl/eq? (get v1 1) (get v2 1))
 
       (and (= t1 T/Pi) (= t2 T/Pi))
       (let [[_ A1 B1] v1 [_ A2 B2] v2]
@@ -229,30 +245,34 @@
       true (= v1 v2))))
 
 (defn- sem-eq/pi [A B v1 v2]
-  (let [fresh (gensym)
-        arg-sem (raise A (ne/var fresh))
-        t1 (if (tuple? v1) (get v1 0) 0)
-        t2 (if (tuple? v2) (get v2 0) 0)]
+  (let [t1 (tag-of v1)
+        t2 (tag-of v2)]
     (cond
       (and (= t1 T/Neutral) (= t2 T/Neutral))
       (= (get v1 1) (get v2 1))
 
       (= t1 T/Neutral)
-      (sem-eq (B arg-sem)
-              (raise (B arg-sem) (ne/app (get v1 1) (lower A arg-sem)))
-              (v2 arg-sem))
+      (let [fresh (gensym)
+            arg-sem (raise A (ne/var fresh))]
+        (sem-eq (B arg-sem)
+                (raise (B arg-sem) (ne/app (get v1 1) (lower A arg-sem)))
+                (v2 arg-sem)))
 
       (= t2 T/Neutral)
-      (sem-eq (B arg-sem)
-              (v1 arg-sem)
-              (raise (B arg-sem) (ne/app (get v2 1) (lower A arg-sem))))
+      (let [fresh (gensym)
+            arg-sem (raise A (ne/var fresh))]
+        (sem-eq (B arg-sem)
+                (v1 arg-sem)
+                (raise (B arg-sem) (ne/app (get v2 1) (lower A arg-sem)))))
 
       true
-      (sem-eq (B arg-sem) (v1 arg-sem) (v2 arg-sem)))))
+      (let [fresh (gensym)
+            arg-sem (raise A (ne/var fresh))]
+        (sem-eq (B arg-sem) (v1 arg-sem) (v2 arg-sem))))))
 
 (defn- sem-eq/sigma [A B v1 v2]
-  (let [t1 (if (tuple? v1) (get v1 0) 0)
-        t2 (if (tuple? v2) (get v2 0) 0)]
+  (let [t1 (tag-of v1)
+        t2 (tag-of v2)]
     (cond
       (and (= t1 T/Neutral) (= t2 T/Neutral))
       (= (get v1 1) (get v2 1))
@@ -260,16 +280,16 @@
       (= t1 T/Neutral)
       (let [[_ l2 r2] v2
             ne1 (get v1 1)
-            p1-fst [T/Neutral (ne/fst ne1)]
-            p1-snd [T/Neutral (ne/snd ne1)]]
+            p1-fst (sem/neutral (ne/fst ne1))
+            p1-snd (sem/neutral (ne/snd ne1))]
         (and (sem-eq A p1-fst l2)
              (sem-eq (B p1-fst) p1-snd r2)))
 
       (= t2 T/Neutral)
       (let [[_ l1 r1] v1
             ne2 (get v2 1)
-            p2-fst [T/Neutral (ne/fst ne2)]
-            p2-snd [T/Neutral (ne/snd ne2)]]
+            p2-fst (sem/neutral (ne/fst ne2))
+            p2-snd (sem/neutral (ne/snd ne2))]
         (and (sem-eq A l1 p2-fst)
              (sem-eq (B l1) r1 p2-snd)))
 
@@ -278,9 +298,9 @@
         (and (sem-eq A l1 l2)
              (sem-eq (B l1) r1 r2))))))
 
-(defn- sem-eq/id [A x y v1 v2]
-  (let [t1 (if (tuple? v1) (get v1 0) 0)
-        t2 (if (tuple? v2) (get v2 0) 0)]
+(defn- sem-eq/id [A v1 v2]
+  (let [t1 (tag-of v1)
+        t2 (tag-of v2)]
     (cond
       (and (= t1 T/Refl) (= t2 T/Refl))
       (sem-eq A (get v1 1) (get v2 1))
@@ -292,18 +312,19 @@
 
 (set sem-eq
      (fn [ty v1 v2]
-       "Check if two semantic values are equal at given type (with eta)"
-       (let [tag (if (tuple? ty) (get ty 0) 0)]
-         (cond
-           (= tag T/Type) (sem-eq/type ty v1 v2)
-           (= tag T/Pi) (let [[_ A B] ty] (sem-eq/pi A B v1 v2))
-           (= tag T/Sigma) (let [[_ A B] ty] (sem-eq/sigma A B v1 v2))
-           (= tag T/Id) (let [[_ A x y] ty] (sem-eq/id A x y v1 v2))
-           true (= v1 v2)))))
+        "Check if two semantic values are equal at given type (with eta)"
+       (if (= v1 v2)
+         true
+         (let [tag (tag-of ty)]
+           (cond
+             (= tag T/Type) (sem-eq/type ty v1 v2)
+             (= tag T/Pi) (let [[_ A B] ty] (sem-eq/pi A B v1 v2))
+             (= tag T/Sigma) (let [[_ A B] ty] (sem-eq/sigma A B v1 v2))
+             (= tag T/Id) (let [[_ A _ _] ty] (sem-eq/id A v1 v2))
+             true false)))))
 
 # Evaluator
 (var eval nil)
-
 
 (defn- eval/var [Γ x]
   (if (or (string? x) (symbol? x))
@@ -316,9 +337,9 @@
 (defn- eval/app [Γ f x]
   (let [fv (eval Γ f)
         xv (eval Γ x)]
-    (let [tag (if (tuple? fv) (get fv 0) 0)]
+    (let [tag (tag-of fv)]
       (if (= tag T/Neutral)
-        [T/Neutral (ne/app (get fv 1) (lower [T/Type 0] xv))]
+        (sem/neutral (ne/app (get fv 1) (lower T/Type0 xv)))
         (fv xv)))))
 
 (defn- eval/t-pi [Γ A B]
@@ -332,19 +353,21 @@
 
 (defn- eval/fst [Γ p]
   (let [v (eval Γ p)
-        tag (if (tuple? v) (get v 0) 0)]
+        tag (tag-of v)]
     (cond
       (= tag T/Pair) (get v 1)
-      (= tag T/Neutral) [T/Neutral (ne/fst (get v 1))]
-      true (errorf "fst expects a pair value (Σ type), but got: %v\nExpected: [T/Pair first second]\nActual: %v" v v))))
+      (= tag T/Neutral) (sem/neutral (ne/fst (get v 1)))
+      true (errorf "fst expects a pair value (Σ type), but got: %s"
+                   (print/sem v)))))
 
 (defn- eval/snd [Γ p]
   (let [v (eval Γ p)
-        tag (if (tuple? v) (get v 0) 0)]
+        tag (tag-of v)]
     (cond
       (= tag T/Pair) (get v 2)
-      (= tag T/Neutral) [T/Neutral (ne/snd (get v 1))]
-      true (errorf "snd expects a pair value (Σ type), but got: %v\nExpected: [T/Pair first second]\nActual: %v" v v))))
+      (= tag T/Neutral) (sem/neutral (ne/snd (get v 1)))
+      true (errorf "snd expects a pair value (Σ type), but got: %s"
+                   (print/sem v)))))
 
 (defn- eval/t-id [Γ A x y]
   (ty/id (eval Γ A) (eval Γ x) (eval Γ y)))
@@ -359,17 +382,18 @@
         Pv (eval Γ P)
         dv (eval Γ d)
         yv (eval Γ y)
-        tag (if (tuple? pv) (get pv 0) 0)]
+        tag (tag-of pv)]
     (cond
       (= tag T/Refl)
       (let [zv (get pv 1)]
         (if (sem-eq Av zv xv) dv
-          [T/Neutral (ne/J Av xv Pv dv yv pv)]))
+          (sem/neutral (ne/J Av xv Pv dv yv pv))))
 
       (= tag T/Neutral)
-      [T/Neutral (ne/J Av xv Pv dv yv pv)]
+      (sem/neutral (ne/J Av xv Pv dv yv pv))
 
-      true (errorf "J eliminator requires a proof of identity (Id A x y), but got: %v\nExpected either [T/Refl proof] or [T/Neutral neutral-term]" pv))))
+      true (errorf "J eliminator requires a proof of identity (Id A x y), but got: %s"
+                   (print/sem pv)))))
 
 (set eval
      (fn [Γ tm]
@@ -404,218 +428,47 @@
 (defn nf [ty tm]
   (eval/session (fn [] (lower ty (eval (ctx/empty) tm)))))
 
-# Bidirectional checker
+# Bidirectional checker / metas are installed later.
 (var infer nil)
 (var check nil)
 (var subtype nil)
 
-(defn- subtype/pi [A1 B1 A2 B2]
-  (and (subtype A2 A1)
-       (let [fresh (gensym)
-             arg-sem (raise A2 (ne/var fresh))]
-         (subtype (B1 arg-sem) (B2 arg-sem)))))
+(let [meta-state (meta/make {:ty/type ty/type
+                             :lower lower
+                             :ctx/lookup ctx/lookup
+                             :print/sem print/sem})
+        checker-state (checker/make {:T/Type T/Type
+                                    :T/Pi T/Pi
+                                    :T/Sigma T/Sigma
+                                    :T/Pair T/Pair
+                                    :T/Neutral T/Neutral
+                                    :ty/type ty/type
+                                    :ty/id ty/id
+                                    :lvl/<= lvl/leq
+                                    :lvl/max lvl/max*
+                                    :lvl/succ lvl/succ
+                                    :sem-eq sem-eq
+                                    :eval eval
+                                    :raise raise
+                                    :ctx/add ctx/add
+                                    :ctx/lookup ctx/lookup
+                                    :ne/var ne/var
+                                    :ne/fst ne/fst
+                                    :print/sem print/sem
+                                    :print/tm print/tm
+                                    :meta meta-state})]
+  (set goals (meta-state :goals))
+  (set goals/set-collect! (meta-state :set-collect!))
+  (set infer (checker-state :infer))
+  (set check (checker-state :check))
+  (set subtype (checker-state :subtype)))
 
-(defn- subtype/sigma [A1 B1 A2 B2]
-  (and (subtype A1 A2)
-       (let [fresh (gensym)
-             arg-sem (raise A1 (ne/var fresh))]
-         (subtype (B1 arg-sem) (B2 arg-sem)))))
-
-(set subtype
-     (fn [A B]
-       "Semantic subtyping with cumulative universes and Pi/Sigma variance."
-       (let [tagA (if (tuple? A) (get A 0) 0)
-             tagB (if (tuple? B) (get B 0) 0)]
-         (cond
-           (and (= tagA T/Type) (= tagB T/Type))
-           (lvl/lvl/<= (get A 1) (get B 1))
-
-           (and (= tagA T/Pi) (= tagB T/Pi))
-           (let [[_ A1 B1] A
-                 [_ A2 B2] B]
-             (subtype/pi A1 B1 A2 B2))
-
-           (and (= tagA T/Sigma) (= tagB T/Sigma))
-           (let [[_ A1 B1] A
-                 [_ A2 B2] B]
-             (subtype/sigma A1 B1 A2 B2))
-
-           true
-           (sem-eq (ty/type 100) A B)))))
-
-(defn check-univ [Γ A]
-  "Check that A is a universe and return its level"
-  (let [UA (infer Γ A)
-        tag (if (tuple? UA) (get UA 0) 0)]
-    (if (= tag T/Type)
-      (get UA 1)
-      (errorf "expected a universe Type (Type_l), but got: %v\nTip: Make sure your type expression evaluates to a Type, e.g., Type 0, Type 1, etc." UA))))
-
-(defn goal/context-vars [Γ]
-  (map keyword (h/keys Γ)))
-
-(defn goal/error-infer [name Γ]
-  (errorf "unsolved goal ?%v during inference\nNo expected type is available in inference mode.\nContext variables: %v"
-          name
-          (goal/context-vars Γ)))
-
-(defn goal/error-check [name expected Γ]
-  (errorf "unsolved goal ?%v during checking\nExpected type: %v\nContext variables: %v"
-          name
-          expected
-          (goal/context-vars Γ)))
-
-(set infer
-     (fn [Γ t]
-       "Infer the type of term t in context Γ (returns semantic type)"
-       (match t
-         [:var x]
-         (if (or (string? x) (symbol? x))
-           (ctx/lookup Γ x)
-            (errorf "variable must be a string or symbol, but got: %v\nVariable names should be like 'x', 'y', 'myVar', etc." x))
-
-          [:type l] (ty/type (lvl/lvl/succ l))
-
-          [:lam _] (errorf "cannot infer type of lambda expression %v\nLambda types require annotation because they have principal types.\nSuggestion: Annotate with a Pi type: (λx. body) : (Πx:A. B)" t)
-
-          [:hole name]
-          (goal/error-infer name Γ)
-
-         [:app f x]
-         (let [fA (infer Γ f)
-               tag (if (tuple? fA) (get fA 0) 0)]
-           (if (= tag T/Pi)
-             (let [[_ A B] fA]
-               (do (check Γ x A)
-                 (B (eval Γ x))))
-             (errorf "cannot apply function - expected a Pi type (Πx:A. B), but got: %v\nTip: Make sure the function has a proper Pi type annotation or can be inferred as one." fA)))
-
-          [:t-pi A B]
-          (let [lvlA (check-univ Γ A)
-                fresh (gensym)
-                A-sem (eval Γ A)
-                Γ2 (ctx/add Γ fresh A-sem)
-                lvlB (check-univ Γ2 (B [:var fresh]))]
-            (ty/type (lvl/lvl/max lvlA lvlB)))
-
-          [:t-sigma A B]
-          (let [lvlA (check-univ Γ A)
-                fresh (gensym)
-                A-sem (eval Γ A)
-                Γ2 (ctx/add Γ fresh A-sem)
-                lvlB (check-univ Γ2 (B [:var fresh]))]
-            (ty/type (lvl/lvl/max lvlA lvlB)))
-
-         [:fst p]
-         (let [pA (infer Γ p)
-               tag (if (tuple? pA) (get pA 0) 0)]
-           (if (= tag T/Sigma)
-             (get pA 1) # A from [T/Sigma A B]
-             (errorf "fst projection requires a Σ (Sigma) type product, but got: %v\nExpected format: Σx:A. B or a term that evaluates to a Sigma type" pA)))
-
-         [:snd p]
-         (let [pA (infer Γ p)
-               tag (if (tuple? pA) (get pA 0) 0)]
-           (if (= tag T/Sigma)
-             (let [[_ A B] pA]
-               (B (eval Γ [:fst p])))
-              (errorf "snd projection requires a Σ (Sigma) type product, but got: %v\nExpected format: Σx:A. B or a term that evaluates to a Sigma type" pA)))
-
-          [:pair _ _] (errorf "cannot infer type of pair %v\nPairs require explicit Sigma type annotation because they lack principal types.\nSuggestion: (pair a b) : (Σx:A. B)" t)
-
-         # Identity type: Id A x y : Type_l where A : Type_l
-         [:t-id A x y]
-         (let [A-ty (infer Γ A)
-               A-sem (eval Γ A)
-               tag (if (tuple? A-ty) (get A-ty 0) 0)]
-           (if (= tag T/Type)
-             (do (check Γ x A-sem)
-               (check Γ y A-sem)
-               (ty/type (get A-ty 1)))
-             (errorf "Identity type (Id A x y) expects 'A' to be a universe Type, but got: %v\nThe first argument must evaluate to a Type, e.g., Type 0, Type 1, etc." A-ty)))
-
-         # Reflexivity: refl x : Id A x x
-         [:t-refl x]
-         (let [A (infer Γ x)
-               xv (eval Γ x)]
-           (ty/id A xv xv))
-
-         # J eliminator
-         [:t-J A x P d y p]
-         (let [lvlA (check-univ Γ A)
-               A-sem (eval Γ A)]
-           (check Γ x A-sem)
-
-           # P : (y : A) → Id A x y → Type_l
-           (let [fresh-y (gensym)
-                 fresh-p (gensym)
-                 xv (eval Γ x)
-                 Γ-y (ctx/add Γ fresh-y A-sem)
-                 id-ty (ty/id A-sem xv [:var fresh-y])
-                 Γ-yp (ctx/add Γ-y fresh-p id-ty)]
-             (check-univ Γ-yp (P [:var fresh-y] [:var fresh-p]))
-
-             # d : P x (refl x)
-             (let [P-refl (eval Γ (P xv [:refl xv]))]
-               (check Γ d P-refl))
-
-             # y : A
-             (check Γ y A-sem)
-             (let [yv (eval Γ y)]
-
-               # p : Id A x y
-               (check Γ p (ty/id A-sem xv yv))
-
-               # Result type: P y p
-               (let [pv (eval Γ p)]
-                 (eval Γ (P yv pv))))))
-
-         _ (errorf "infer: unknown term %v\nThis term is not recognized by the type checker.\nSupported forms: var, type, lambda, application, pi, sigma, pair, fst, snd, id, refl, J" t))))
-
-(set check
-     (fn [Γ t A]
-       "Check that term t has type A in context Γ"
-        (match t
-          [:hole name]
-          (goal/error-check name A Γ)
-
-          [:lam body]
-          (let [tag (if (tuple? A) (get A 0) 0)]
-           (if (= tag T/Pi)
-             (let [[_ dom cod] A
-                   fresh (gensym)
-                   arg-sem (raise dom (ne/var fresh))]
-               (check (ctx/add Γ fresh dom)
-                      (body [:var fresh])
-                      (cod arg-sem)))
-             (errorf "lambda checking failed - expected a Pi type (Πx:A. B), but got: %v\nLambda expressions can only be checked against function types." A)))
-
-         [:pair l r]
-         (let [tag (if (tuple? A) (get A 0) 0)]
-           (if (= tag T/Sigma)
-             (let [[_ A1 B1] A]
-               (do (check Γ l A1)
-                 (check Γ r (B1 (eval Γ l)))))
-              (errorf "pair checking failed - expected a Sigma type (Σx:A. B), but got: %v\nPair expressions can only be checked against Sigma product types." A)))
-
-          _
-          (let [A1 (infer Γ t)]
-            (if (subtype A1 A)
-              true
-              (errorf "type mismatch between expected type and inferred type\nExpected: %v\nInferred: %v\nSuggestion: Check if the terms are actually equal or if there's a type annotation issue." A A1))))))
-
-# ---------------------
-# Top-level helpers
-# ---------------------
 (defn type-eq [Γ A B]
-  "Check if two types are equal"
-  (= (eval Γ A) (eval Γ B)))
+  (sem-eq T/Type100 (eval Γ A) (eval Γ B)))
 
 (defn term-eq [Γ A t u]
-  "Check if two terms are equal at type A"
-  (or
-    (= t u)
-    (sem-eq (eval Γ A) (eval Γ t) (eval Γ u))))
+  (or (= t u)
+      (sem-eq (eval Γ A) (eval Γ t) (eval Γ u))))
 
 (defn check-top [t expected]
   (let [Γ (ctx/empty)]
@@ -688,4 +541,6 @@
    :ctx/empty ctx/empty
    :ctx/add ctx/add
    :ctx/lookup ctx/lookup
-   :eval/session eval/session})
+   :eval/session eval/session
+   :goals goals
+   :goals/set-collect! goals/set-collect!})
