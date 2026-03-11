@@ -63,6 +63,56 @@ id: ∀(A: U0). A -> A
       (= (s/node/tag prog) :program)))
   "Program parse output matches schema tool")
 
+(test/assert
+  (let [prog (s/parse/program "sum(n,m: Nat): Nat\n  n zero = n\n")
+        decls (prog 1)
+        sum (decls 0)
+        ty (sum 2)]
+    (and (= (sum 0) :decl/func)
+         (= (s/node/tag ty) :ty/pi)
+         (= ((ty 1) 1) "n")
+         (= (s/node/tag (ty 2)) :ty/pi)
+         (= (((ty 2) 1) 1) "m")))
+  "Grouped function parameters expand to separate Pi binders")
+
+(test/assert
+  (let [prog (s/parse/program "Vec(A: Type, n: Nat):\n  A, (succ n) = vcons (x: A) (xs: Vec A n)\n")
+        decls (prog 1)
+        vec (decls 0)
+        ctor ((vec 4) 0)]
+    (and (= (ctor 0) :ctor/indexed)
+         (= (ctor 2) "vcons")
+         (= (length (ctor 3)) 2)))
+  "Adjacent parenthesized constructor fields parse separately")
+
+(test/assert
+  (let [prog (s/parse/program "Nat:\n  zero\n  succ Nat\n\nclassify: Nat -> Nat\n  zero = zero\n  succ zero = succ zero\n  succ succ n = succ succ n\n")
+        decls (prog 1)
+        classify (decls 1)
+        clauses (classify 3)
+        c1 ((clauses 1) 1)
+        c2 ((clauses 2) 1)
+        nested (((c2 0) 2) 0)]
+    (and (= (length clauses) 3)
+         (= ((c1 0) 0) :pat/con)
+         (= ((c1 0) 1) "succ")
+         (= ((((c1 0) 2) 0) 1) "zero")
+         (= ((c2 0) 0) :pat/con)
+         (= (nested 0) :pat/con)
+         (= (nested 1) "succ")
+         (= (((nested 2) 0) 1) "n")))
+  "Single-argument nested constructor patterns do not need parens")
+
+(test/assert
+  (let [prog (s/parse/program "Nat: Type3\n  zero\n")
+        decls (prog 1)
+        nat (decls 0)
+        sort (nat 3)]
+    (and (= (nat 0) :decl/data)
+         (= (s/node/tag sort) :ty/universe)
+         (= (sort 1) 3)))
+  "Data headers accept explicit universe levels")
+
 (test/assert-error
   (fn []
     (s/parse/type-text "Forall(A: U0). A"))

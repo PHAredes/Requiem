@@ -1,0 +1,18 @@
+# Prelude.requiem
+# Standard Library for Requiem Surface Syntax
+
+# Quantifier Aliases
+alias U = Type
+alias forall = Pi
+alias ∀ = Pi
+alias Π = Pi
+alias sigma = Sigma
+alias Σ = Sigma
+alias ∃ = Sigma
+
+# Arrow Aliases
+infixr 20 ->
+alias → = ->
+
+# Lambda Aliases
+alias λ = \

@@ -4,6 +4,8 @@
   (let [T/Type (deps :T/Type)
         T/Pi (deps :T/Pi)
         T/Sigma (deps :T/Sigma)
+        T/Pair (deps :T/Pair)
+        T/Neutral (deps :T/Neutral)
         ty/type (deps :ty/type)
         ty/id (deps :ty/id)
         lvl/<= (deps :lvl/<=)
@@ -12,11 +14,10 @@
         sem-eq (deps :sem-eq)
         eval (deps :eval)
         raise (deps :raise)
-        lower (deps :lower)
-        ctx/empty (deps :ctx/empty)
         ctx/add (deps :ctx/add)
         ctx/lookup (deps :ctx/lookup)
         ne/var (deps :ne/var)
+        ne/fst (deps :ne/fst)
         print/sem (deps :print/sem)
         print/tm (deps :print/tm)
         meta (deps :meta)]
@@ -37,14 +38,24 @@
                  arg-sem (raise A1 (ne/var fresh))]
              (subtype (B1 arg-sem) (B2 arg-sem)))))
 
+    (defn tag-of [x]
+      (if (tuple? x) (get x 0) 0))
+
+    (defn fst-sem [p-sem]
+      (let [tag (tag-of p-sem)]
+        (cond
+          (= tag T/Pair) (get p-sem 1)
+          (= tag T/Neutral) [T/Neutral (ne/fst (get p-sem 1))]
+          true (errorf "fst expected pair semantics, got: %s" (print/sem p-sem)))))
+
     (set subtype
          (fn [A B]
-           "Semantic subtyping with cumulative universes and Pi/Sigma variance."
-           (let [tagA (if (tuple? A) (get A 0) 0)
-                 tagB (if (tuple? B) (get B 0) 0)]
-             (cond
-               (and (= tagA T/Type) (= tagB T/Type))
-               (lvl/<= (get A 1) (get B 1))
+            "Semantic subtyping with cumulative universes and Pi/Sigma variance."
+            (let [tagA (tag-of A)
+                  tagB (tag-of B)]
+              (cond
+                (and (= tagA T/Type) (= tagB T/Type))
+                (lvl/<= (get A 1) (get B 1))
 
                (and (= tagA T/Pi) (= tagB T/Pi))
                (let [[_ A1 B1] A
@@ -62,11 +73,19 @@
     (defn check-univ [Γ A]
       "Check that A is a universe and return its level"
       (let [UA (infer Γ A)
-            tag (if (tuple? UA) (get UA 0) 0)]
+            tag (tag-of UA)]
         (if (= tag T/Type)
           (get UA 1)
           (errorf "expected a universe Type (Type_l), but got: %s\nTip: Make sure your type expression evaluates to a Type, e.g., Type 0, Type 1, etc."
                   (print/sem UA)))))
+
+    (defn infer-binder [Γ A B]
+      (let [lvlA (check-univ Γ A)
+            fresh (gensym)
+            A-sem (eval Γ A)
+            Γ2 (ctx/add Γ fresh A-sem)
+            lvlB (check-univ Γ2 (B [:var fresh]))]
+        (ty/type (lvl/max lvlA lvlB))))
 
     (set infer
          (fn [Γ t]
@@ -84,62 +103,53 @@
                      (print/tm t))
 
              [:hole name]
-             ((meta :error-infer) name Γ)
+              ((meta :error-infer) name Γ)
 
-             [:app f x]
-             (let [fA (infer Γ f)
-                   tag (if (tuple? fA) (get fA 0) 0)]
-               (if (= tag T/Pi)
-                 (let [[_ A B] fA]
-                   (do (check Γ x A)
+              [:app f x]
+              (let [fA (infer Γ f)
+                    tag (tag-of fA)]
+                (if (= tag T/Pi)
+                  (let [[_ A B] fA]
+                    (do (check Γ x A)
                        (B (eval Γ x))))
                  (errorf "cannot apply function - expected a Pi type (Πx:A. B), but got: %s\nTip: Make sure the function has a proper Pi type annotation or can be inferred as one."
-                         (print/sem fA))))
+                          (print/sem fA))))
 
-             [:t-pi A B]
-             (let [lvlA (check-univ Γ A)
-                   fresh (gensym)
-                   A-sem (eval Γ A)
-                   Γ2 (ctx/add Γ fresh A-sem)
-                   lvlB (check-univ Γ2 (B [:var fresh]))]
-               (ty/type (lvl/max lvlA lvlB)))
+              [:t-pi A B]
+              (infer-binder Γ A B)
 
-             [:t-sigma A B]
-             (let [lvlA (check-univ Γ A)
-                   fresh (gensym)
-                   A-sem (eval Γ A)
-                   Γ2 (ctx/add Γ fresh A-sem)
-                   lvlB (check-univ Γ2 (B [:var fresh]))]
-               (ty/type (lvl/max lvlA lvlB)))
+              [:t-sigma A B]
+              (infer-binder Γ A B)
 
-             [:fst p]
-             (let [pA (infer Γ p)
-                   tag (if (tuple? pA) (get pA 0) 0)]
-               (if (= tag T/Sigma)
-                 (get pA 1)
-                 (errorf "fst projection requires a Σ (Sigma) type product, but got: %s\nExpected format: Σx:A. B or a term that evaluates to a Sigma type"
+              [:fst p]
+              (let [pA (infer Γ p)
+                    tag (tag-of pA)]
+                (if (= tag T/Sigma)
+                  (get pA 1)
+                  (errorf "fst projection requires a Σ (Sigma) type product, but got: %s\nExpected format: Σx:A. B or a term that evaluates to a Sigma type"
                          (print/sem pA))))
 
-             [:snd p]
-             (let [pA (infer Γ p)
-                   tag (if (tuple? pA) (get pA 0) 0)]
-               (if (= tag T/Sigma)
-                 (let [[_ A B] pA]
-                   (B (eval Γ [:fst p])))
-                 (errorf "snd projection requires a Σ (Sigma) type product, but got: %s\nExpected format: Σx:A. B or a term that evaluates to a Sigma type"
-                         (print/sem pA))))
+              [:snd p]
+              (let [pA (infer Γ p)
+                    tag (tag-of pA)]
+                (if (= tag T/Sigma)
+                  (let [[_ _ B] pA
+                        p-sem (eval Γ p)]
+                    (B (fst-sem p-sem)))
+                  (errorf "snd projection requires a Σ (Sigma) type product, but got: %s\nExpected format: Σx:A. B or a term that evaluates to a Sigma type"
+                          (print/sem pA))))
 
              [:pair _ _]
              (errorf "cannot infer type of pair %s\nPairs require explicit Sigma type annotation because they lack principal types.\nSuggestion: (pair a b) : (Σx:A. B)"
                      (print/tm t))
 
-             [:t-id A x y]
-             (let [A-ty (infer Γ A)
-                   A-sem (eval Γ A)
-                   tag (if (tuple? A-ty) (get A-ty 0) 0)]
-               (if (= tag T/Type)
-                 (do (check Γ x A-sem)
-                     (check Γ y A-sem)
+              [:t-id A x y]
+              (let [A-ty (infer Γ A)
+                    A-sem (eval Γ A)
+                    tag (tag-of A-ty)]
+                (if (= tag T/Type)
+                  (do (check Γ x A-sem)
+                      (check Γ y A-sem)
                      (ty/type (get A-ty 1)))
                  (errorf "Identity type (Id A x y) expects 'A' to be a universe Type, but got: %s\nThe first argument must evaluate to a Type, e.g., Type 0, Type 1, etc."
                          (print/sem A-ty))))
@@ -178,11 +188,11 @@
              [:hole name]
              ((meta :error-check) name A Γ)
 
-             [:lam body]
-             (let [tag (if (tuple? A) (get A 0) 0)]
-               (if (= tag T/Pi)
-                 (let [[_ dom cod] A
-                       fresh (gensym)
+              [:lam body]
+              (let [tag (tag-of A)]
+                (if (= tag T/Pi)
+                  (let [[_ dom cod] A
+                        fresh (gensym)
                        arg-sem (raise dom (ne/var fresh))]
                    (check (ctx/add Γ fresh dom)
                           (body [:var fresh])
@@ -190,11 +200,11 @@
                  (errorf "lambda checking failed - expected a Pi type (Πx:A. B), but got: %s\nLambda expressions can only be checked against function types."
                          (print/sem A))))
 
-             [:pair l r]
-             (let [tag (if (tuple? A) (get A 0) 0)]
-               (if (= tag T/Sigma)
-                 (let [[_ A1 B1] A]
-                   (do (check Γ l A1)
+              [:pair l r]
+              (let [tag (tag-of A)]
+                (if (= tag T/Sigma)
+                  (let [[_ A1 B1] A]
+                    (do (check Γ l A1)
                        (check Γ r (B1 (eval Γ l)))))
                  (errorf "pair checking failed - expected a Sigma type (Σx:A. B), but got: %s\nPair expressions can only be checked against Sigma product types."
                          (print/sem A))))

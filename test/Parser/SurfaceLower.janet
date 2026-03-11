@@ -31,4 +31,21 @@
          (= ((lowered 1) 0) :decl/func)))
   "Full program lowers correctly")
 
+(test/assert
+  (let [prog (s/parse/program "Nat:\n  zero\n  succ Nat\n\nBool:\n  true\n  false\n\nisZero: Nat -> Nat -> Bool\n  zero m = true\n  (succ k) m = false\n")
+        lowered (s/lower/program prog)
+        isZero (lowered 2)
+        clauses (isZero 4)
+        c0 (clauses 0)
+        c1 (clauses 1)]
+    (and (= (isZero 0) :decl/func)
+         (= (isZero 1) "isZero")
+         (= (length clauses) 2)
+         (= (((c0 1) 0) 0) :pat/con)
+         (= (((c0 1) 0) 1) "zero")
+         (= (((c1 1) 0) 0) :pat/con)
+         (= (((c1 1) 0) 1) "succ")
+         (= (((((c1 1) 0) 2) 0) 1) "k")))
+  "Current selector-style syntax lowers first-parameter constructor clauses")
+
 (test/end-suite)
