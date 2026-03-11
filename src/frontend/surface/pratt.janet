@@ -111,8 +111,8 @@
       (when (zero? (length params))
         (errorf "parse error at %s: lambda expects at least one parameter" (tok/at tok)))
       (let [sep (pstate/next st)]
-        (when (and (not= (sep :k) :dot) (not= (sep :k) :fat-arrow))
-          (errorf "parse error at %s: lambda expects '.' or '=>', got %s" (tok/at sep) (tok/render sep))))
+        (when (not= (sep :k) :dot)
+          (errorf "parse error at %s: lambda expects '.', got %s" (tok/at sep) (tok/render sep))))
       (a/tm/lam params (parse/expr st 0) (a/span/none)))
     :kw/let
     (let [name ((pstate/expect st :ident) :v)]

@@ -1,0 +1,2 @@
+#!/bin/sh
+exec janet "/home/user/Repos/Requiem/requiem.janet" "$@"

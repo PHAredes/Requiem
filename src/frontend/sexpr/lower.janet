@@ -21,9 +21,6 @@
 (defn node/atom= [node tok]
   (and (node/atom? node) (= (node 1) tok)))
 
-(defn node/atom/new [tok]
-  [:atom tok])
-
 (defn record/entry/lower [node]
   (when (not (node/list? node))
     (errorf "record entry must be a list, got: %v" node))
@@ -90,7 +87,7 @@
     @[(bind/from-node spec)]
     (if (node/list? spec)
       (map bind/from-node (node/list-items spec))
-      (errorf "invalid forall binder specification: %v\nSupported formats:\n  (x: Type) - single binder\n  (x: Type y: Type) - multiple binders in a list\n  ((x: Type) (y: Type)) - multiple binders as separate specs" spec))))
+      (errorf "invalid forall binder specification: %v\nSupported formats:\n  (x: Type) - single binder\n  (x: Type, y: Type) - multiple binders in a list\n  ((x: Type) (y: Type)) - multiple binders as separate specs" spec))))
 
 (defn term/forall? [node]
   (and (node/list? node)
@@ -130,18 +127,6 @@
                 [:list (slice xs 2 n)]))]
         [(binders/from-spec binder-spec) body]))))
 
-(defn find-index [pred xs]
-  (defn find-iter [i xs]
-    (if (empty? xs)
-      nil
-      (if (pred (first xs))
-        i
-        (find-iter (+ i 1) (slice xs 1)))))
-  (find-iter 0 xs))
-
-(defn seq/contains? [xs x]
-  (not (nil? (find-index |(= $ x) xs))))
-
 (defn assoc/get [pairs key]
   (defn scan [i]
     (if (< i 0)
@@ -152,24 +137,18 @@
           (scan (- i 1))))))
   (scan (- (length pairs) 1)))
 
-(defn assoc/has? [pairs key]
-  (not (nil? (assoc/get pairs key))))
-
 (defn data/env-get [data-env name]
   (assoc/get data-env name))
 
 (defn data/env-extend [data-env name ctors]
   [;data-env [name ctors]])
 
-(defn seq/concat [xs ys]
-  (reduce (fn [acc y] [;acc y]) xs ys))
-
 (defn term/split-pi [node]
   (defn split-loop [cur index binders]
     (cond
       (term/forall? cur)
       (let [[bs body] (term/unpack-forall cur)]
-        (split-loop body index (seq/concat binders bs)))
+        (split-loop body index (tuple/join binders bs)))
 
       (term/arrow? cur)
       (let [[dom cod] (term/unpack-arrow cur)
@@ -201,8 +180,8 @@
     (cond
       (node/atom? node)
       (let [tok (node/atom node)]
-        (if (and (assoc/has? var-types tok)
-                 (not (seq/contains? seen tok)))
+        (if (and (assoc/get var-types tok)
+                 (nil? (find-index |(= $ tok) seen)))
           [[;seen tok] [;out tok]]
           [seen out]))
 
@@ -217,7 +196,7 @@
 (defn pat/from-term [term pat-var-set]
   (match term
     [:atom tok]
-    (if (seq/contains? pat-var-set tok)
+    (if (not (nil? (find-index |(= $ tok) pat-var-set)))
       [:pat/var tok]
       [:pat/con tok @[]])
 
@@ -237,7 +216,7 @@
     [:pat/con c args]
     (if (zero? (length args))
       [:atom c]
-      [:list (seq/concat @[[:atom c]] (map pat/to-term args))])
+      [:list (tuple/join @[[:atom c]] (map pat/to-term args))])
     [:pat/impossible]
     (errorf "cannot convert impossible pattern to term\nThe 'impossible' pattern is internal-only and cannot be converted back to a term")
     _
@@ -246,14 +225,14 @@
 (defn term/build-data-app [name args]
   (if (zero? (length args))
     [:atom name]
-    [:list (seq/concat @[[:atom name]] args)]))
+    [:list (tuple/join @[[:atom name]] args)]))
 
 (defn term/build-forall [binders body]
   (defn fold-binders [acc binder]
     (let [name (if (>= (length binder) 2) (binder 1) "_")
           ty (if (>= (length binder) 3) (binder 2) [:atom "Type"])
-          binder-node [:list @[(node/atom/new (string name ":")) ty]]]
-      [:list @[(node/atom/new "forall") binder-node (node/atom/new ".") acc]]))
+          binder-node [:list @[[ :atom (string name ":") ] ty]]]
+      [:list @[[ :atom "forall" ] binder-node [ :atom "." ] acc]]))
   (reduce fold-binders body (reverse binders)))
 
 (defn decl/parse-name-and-ann [nodes]
@@ -377,14 +356,14 @@
   "Keep last binder for each name (reverse first so last wins)."
   (let [step (fn [[seen out] b]
                (let [name (b 1)]
-                 (if (seq/contains? seen name)
-                   [seen out]
-                   [[;seen name] [;out b]])))
+                  (if (not (nil? (find-index |(= $ name) seen)))
+                    [seen out]
+                    [[;seen name] [;out b]])))
         [_ out] (reduce step [@[] @[]] (reverse binders))]
     (reverse out)))
 
 (defn term/build-id [ty lhs rhs]
-  [:list @[(node/atom/new "Id") ty lhs rhs]])
+  [:list @[[ :atom "Id" ] ty lhs rhs]])
 
 (defn ctor/ford-eqs [data-params ret-args]
   (let [n (length data-params)]
@@ -403,16 +382,16 @@
 (defn ctor/ford-encoded [data-name data-params pat-binders ctor-params eq-binders]
   (let [data-param-terms (map |[:atom ($ 1)] data-params)
         result-term (term/build-data-app data-name data-param-terms)
-        base-binders (binders/unique-by-name (seq/concat data-params (seq/concat pat-binders ctor-params)))
-        all-binders (seq/concat base-binders eq-binders)]
+        base-binders (binders/unique-by-name (tuple/join data-params pat-binders ctor-params))
+        all-binders (tuple/join base-binders eq-binders)]
     (term/build-forall all-binders result-term)))
 
 (defn ctor/lower-indexed [data-name data-params name ctor-binders ret-args]
-  (let [var-types (binders/name->type (binders/unique-by-name (seq/concat data-params ctor-binders)))
+  (let [var-types (binders/name->type (binders/unique-by-name (tuple/join data-params ctor-binders)))
         ordered-vars (term/collect-var-order ret-args var-types)
         pat-var-set ordered-vars
         pat-binders (map |[:bind $ (assoc/get var-types $)] ordered-vars)
-        ctor-params (filter |(not (seq/contains? pat-var-set ($ 1))) ctor-binders)
+        ctor-params (filter (fn [b] (nil? (find-index |(= $ (b 1)) pat-var-set))) ctor-binders)
         eq-binders (ctor/ford-eqs data-params ret-args)
         patterns (map |(pat/from-term $ pat-var-set) ret-args)
         encoded (ctor/ford-encoded data-name data-params pat-binders ctor-params eq-binders)]
@@ -469,7 +448,7 @@
             ctor-binders (ctor/args->binders (slice rhs 1 (length rhs)))]
         (let [ret-term (term/build-data-app data-name selectors)
               ctor-type (term/build-forall ctor-binders ret-term)
-              synthetic [:list @[(node/atom/new ctor-name) ctor-type]]]
+              synthetic [:list @[[ :atom ctor-name ] ctor-type]]]
           (ctor/lower data-name data-params synthetic))))))
 
 (defn data/lower [nodes]
@@ -517,7 +496,7 @@
   (map |($ 1) (slice params 0 end-exclusive)))
 
 (defn node/binder [name ty]
-  [:list @[(node/atom/new (string name ":")) ty]])
+  [:list @[[ :atom (string name ":") ] ty]])
 
 (defn term/build-lam [binders body]
   (if (zero? (length binders))
@@ -526,7 +505,7 @@
           (if (= (length binders) 1)
             (node/binder ((binders 0) 1) ((binders 0) 2))
             [:list (map |(node/binder ($ 1) ($ 2)) binders)])]
-      [:list @[(node/atom/new "fn") spec body]])))
+      [:list @[[ :atom "fn" ] spec body]])))
 
 (defn term/self-call? [node func-name param-names target-index rec-var]
   (let [[head args] (term/as-head-app node)]
@@ -577,12 +556,7 @@
     true (errorf "invalid match target: %v\nMatch target must be a variable or annotated variable like 'x:Type'" node)))
 
 (defn match/param-index [params name]
-  (defn find-param-iter [i params]
-    (when (not (empty? params))
-      (if (= ((first params) 1) name)
-        i
-        (find-param-iter (+ i 1) (slice params 1)))))
-  (find-param-iter 0 params))
+  (find-index |(= ($ 1) name) params))
 
 (defn case/split [case-node]
   (let [xs (node/list-items case-node)]
@@ -614,23 +588,12 @@
        (range 2 (length xs))))
 
 (defn match/wildcard-body [entries]
-  (defn find-wildcard [entries]
-    (when (not (empty? entries))
-      (let [e (first entries)]
-        (if (and (= ((e 0) 0) :pat/var)
-                 (= ((e 0) 1) "_"))
-          (e 1)
-          (find-wildcard (slice entries 1))))))
-  (find-wildcard entries))
+  (when-let [entry (find |(and (= (($ 0) 0) :pat/var)
+                               (= (($ 0) 1) "_")) entries)]
+    (entry 1)))
 
 (defn match/find-ctor-entry [entries ctor-name]
-  (defn find-ctor [entries]
-    (when (not (empty? entries))
-      (let [e (first entries)]
-        (if (ctor/case-args (e 0) ctor-name)
-          e
-          (find-ctor (slice entries 1))))))
-  (find-ctor entries))
+  (find |(ctor/case-args ($ 0) ctor-name) entries))
 
 (def M/Yes :match/yes)
 (def M/No :match/no)
@@ -659,8 +622,8 @@
   [;subst [x term]])
 
 (defn selector/head-ctor? [head ctor-names var-names]
-  (and (seq/contains? ctor-names head)
-       (not (seq/contains? var-names head))))
+  (and (find-index |(= $ head) ctor-names)
+       (nil? (find-index |(= $ head) var-names))))
 
 (defn selector/mismatch [head ctor-names var-names]
   (if (selector/head-ctor? head ctor-names var-names)
@@ -788,7 +751,7 @@
     (cond
       (= tok "impossible") [:pat/impossible]
       (= tok "_") [:pat/var "_"]
-      (and (= depth 0) (seq/contains? ctor-names tok)) [:pat/con tok @[]]
+      (and (= depth 0) (not (nil? (find-index |(= $ tok) ctor-names)))) [:pat/con tok @[]]
       true [:pat/var tok])
 
     [:list xs]
@@ -822,7 +785,7 @@
                       @[]
                       (range consumed))
               wildcard-patterns (map (fn [_] [:pat/var "_"]) (range (- (length params) consumed)))
-              patterns (seq/concat parsed-patterns wildcard-patterns)
+              patterns (tuple/join parsed-patterns wildcard-patterns)
               rest-params (slice params consumed (length params))
               wrapped-body (term/build-lam rest-params body)]
           [:clause patterns wrapped-body]))
@@ -868,7 +831,7 @@
     (walk 0 @[] @[])))
 
 (defn branch/with-obligations [branch-binders obligations]
-  (seq/concat branch-binders obligations))
+  (tuple/join branch-binders obligations))
 
 (defn branch/rewrite-self-calls [body rec-pairs func-name param-names target-index]
   (reduce (fn [acc pair]
@@ -918,9 +881,9 @@
                 wildcard-body (match/wildcard-body entries)
                 motive (term/build-lam @[[ :bind target target-ty ]] result)
                 branches (match/build-branches data-name ctors func-name param-names target-index result entries wildcard-body status-by-ctor)]
-            (let [app (seq/concat
-                       (seq/concat @[(node/atom/new (string data-name "-elim")) motive] branches)
-                       @[[:atom target]])]
+            (let [app (tuple/join @[[ :atom (string data-name "-elim") ] motive]
+                                   branches
+                                   @[[:atom target]])]
               [:list app]))
           (errorf "unknown data type %v in match target %v\nEnsure the data declaration appears before this function" data-name target))))))
 
@@ -976,6 +939,7 @@
   {:lower/program lower/program
    :decl/lower decl/lower
    :record/lower record/lower
+   :bind/single-spec? bind/single-spec?
    :bind/from-node bind/from-node
    :binders/from-spec binders/from-spec
    :term/split-pi term/split-pi

@@ -79,7 +79,7 @@
   (ensure-int>= level 0 "decl/prec.level >= 0")
   [:decl/prec fixity level op sp])
 
-(defn decl/data [name params ctors sp] [:decl/data name params ctors sp])
+(defn decl/data [name params sort ctors sp] [:decl/data name params sort ctors sp])
 (defn decl/func [name ty clauses sp] [:decl/func name ty clauses sp])
 (defn decl/compute [tm sp] [:decl/compute tm sp])
 (defn decl/check [tm ty sp] [:decl/check tm ty sp])
