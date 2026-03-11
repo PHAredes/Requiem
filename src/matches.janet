@@ -61,15 +61,10 @@
     [:napp _ _] true
     [:nfst _] true
     [:nsnd _] true
-    true false))
+     true false))
 
 (defn pat/var? [p] (and (tuple? p) (= (p 0) :pat/var)))
 (defn pat/con? [p] (and (tuple? p) (= (p 0) :pat/con)))
-(defn pat/hole? [p] (and (tuple? p) (= (p 0) :hole)))
-
-(defn pat/var-name [p] (p 1))
-(defn pat/con-name [p] (p 1))
-(defn pat/con-args [p] (p 2))
 
 (defn pat/vars [p]
   (match p
@@ -110,14 +105,14 @@
          (outcome/yes (subst/extend (subst/empty) (p 1) u))
 
          (pat/var? p)
-         (let [x (pat/var-name p)]
+         (let [x (p 1)]
            (if (= x "_")
              (outcome/yes (subst/empty))
              (outcome/yes (subst/extend (subst/empty) x u))))
 
          (pat/con? p)
-         (let [ctor (pat/con-name p)
-               pats (pat/con-args p)
+         (let [ctor (p 1)
+               pats (p 2)
                [head args] (term/head-args u)]
            (cond
              (term/neutral? u) (outcome/stuck)
