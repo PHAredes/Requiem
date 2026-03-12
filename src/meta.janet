@@ -8,7 +8,8 @@
         ctx/lookup (deps :ctx/lookup)
         goal-ty (deps :goal-ty)
         goal-term (deps :goal-term)
-        print/sem (deps :print/sem)]
+        print/sem (deps :print/sem)
+        sem-eq (deps :sem-eq)]
     (var collect? false)
 
     (defn expected/placeholder? [expected]
@@ -24,7 +25,7 @@
         (and (not (expected/placeholder? current))
              (expected/placeholder? next))
         current
-        (not= current next)
+        (not (sem-eq goal-ty current next))
         (errorf "named hole ?%v has inconsistent expected types: %s vs %s"
                 name
                 (print/sem current)
