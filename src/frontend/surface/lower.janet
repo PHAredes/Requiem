@@ -14,6 +14,17 @@
 (defn- atom [tok] [:atom tok])
 (defn- lst [xs] [:list xs])
 
+(defn- atom-or-head-app [head args]
+  (if (zero? (length args))
+    (atom head)
+    (lst (tuple/join @[(atom head)] args))))
+
+(defn- lower/name [name]
+  (atom name))
+
+(defn- lower/op [op args lower-node]
+  (lst (tuple/join @[(atom op)] (map lower-node args))))
+
 (defn- node/binder [name ty]
   [:list @[(atom (string name ":")) ty]])
 
@@ -99,9 +110,7 @@
   (reduce fold-binders body (reverse binders)))
 
 (defn- build-data-app [name args]
-  (if (zero? (length args))
-    (atom name)
-    (lst (tuple/join @[(atom name)] args))))
+  (atom-or-head-app name args))
 
 (defn- term/build-lam [binders body]
   (if (zero? (length binders))
@@ -263,11 +272,11 @@
          [:ty/universe level _sp]
           (atom (string "Type" level))
 
-         [:ty/name name _sp]
-         (atom name)
+          [:ty/name name _sp]
+          (lower/name name)
 
-         [:ty/var name _sp]
-         (atom name)
+          [:ty/var name _sp]
+          (lower/name name)
 
          [:ty/app f x _sp]
          (flatten-app (lower/type f) (lower/type x))
@@ -279,10 +288,10 @@
          (lst @[(atom "forall") (lower/binder binder) (atom ".") (lower/type body)])
 
           [:ty/sigma binder body _sp]
-          (lst @[(atom "Sigma") (lower/binder binder) (atom ".") (lower/type body)])
+           (lst @[(atom "Sigma") (lower/binder binder) (atom ".") (lower/type body)])
 
-          [:ty/op op args _sp]
-          (lst (tuple/join @[(atom op)] (map lower/type args)))
+           [:ty/op op args _sp]
+           (lower/op op args lower/type)
 
          _ (errorf "lower/type: unknown node %v" node))))
 
@@ -298,11 +307,11 @@
          [:tm/hole name _sp]
          (if name (atom (string "?" name)) (atom "?"))
 
-         [:tm/var name _sp]
-         (atom name)
+          [:tm/var name _sp]
+          (lower/name name)
 
-         [:tm/ref name _sp]
-         (atom name)
+          [:tm/ref name _sp]
+          (lower/name name)
 
          [:tm/nat value _sp]
          (atom (string value))
@@ -324,13 +333,13 @@
                    (lower/term body)]))
 
          [:tm/let name value body _sp]
-          (lst @[(atom "let")
-                 (atom (string name ":"))
-                 (lower/term value)
-                 (lower/term body)])
+           (lst @[(atom "let")
+                  (atom (string name ":"))
+                  (lower/term value)
+                  (lower/term body)])
 
-          [:tm/op op args _sp]
-          (lst (tuple/join @[(atom op)] (map lower/term args)))
+           [:tm/op op args _sp]
+           (lower/op op args lower/term)
 
          _ (errorf "lower/term: unknown node %v" node))))
 
@@ -364,9 +373,7 @@
     [:pat/var name _sp] (atom name)
     [:pat/nat value _sp] (atom (string value))
     [:pat/con name args _sp]
-    (if (zero? (length args))
-      (atom name)
-      (lst (tuple/join @[(atom name)] (map lower/pat-to-term args))))
+    (atom-or-head-app name (map lower/pat-to-term args))
     _ (errorf "lower/pat-to-term: unknown pattern %v" pat)))
 
 # ---------------------------------------------------------------
@@ -510,12 +517,9 @@
 # Clause lowering
 # ---------------------------------------------------------------
 
-(defn- data/env-get [data-env name]
-  (assoc/get data-env name))
-
 (defn- type/ctor-names [ty data-env]
   (let [[head _] (term/as-head-app ty)]
-    (if-let [ctors (data/env-get data-env head)]
+    (if-let [ctors (assoc/get data-env head)]
       (map |($ 1) ctors)
       @[])))
 

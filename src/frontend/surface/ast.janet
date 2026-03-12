@@ -87,6 +87,11 @@
 
 (defn node/tag [node] (if (tuple? node) (node 0) nil))
 
+(defn- node/tag-in? [node tags]
+  (if-let [tag (node/tag node)]
+    (not (nil? (find-index |(= $ tag) tags)))
+    false))
+
 (defn- span-node? [x]
   (and (tuple? x)
        (> (length x) 0)
@@ -104,28 +109,21 @@
           nil)))))
 
 (defn node/type? [n]
-  (let [t (node/tag n)]
-    (or (= t :ty/hole) (= t :ty/universe) (= t :ty/name) (= t :ty/var)
-        (= t :ty/app) (= t :ty/arrow) (= t :ty/pi) (= t :ty/sigma)
-        (= t :ty/op))))
+  (node/tag-in? n @[:ty/hole :ty/universe :ty/name :ty/var
+                    :ty/app :ty/arrow :ty/pi :ty/sigma :ty/op]))
 
 (defn node/term? [n]
-  (let [t (node/tag n)]
-    (or (= t :tm/hole) (= t :tm/var) (= t :tm/ref) (= t :tm/nat)
-        (= t :tm/app) (= t :tm/lam) (= t :tm/let) (= t :tm/op))))
+  (node/tag-in? n @[:tm/hole :tm/var :tm/ref :tm/nat
+                    :tm/app :tm/lam :tm/let :tm/op]))
 
 (defn node/type-or-term? [n]
   (or (node/type? n) (node/term? n)))
 
 (defn node/pat? [n]
-  (let [t (node/tag n)]
-    (or (= t :pat/wild) (= t :pat/hole) (= t :pat/var)
-        (= t :pat/con) (= t :pat/nat))))
+  (node/tag-in? n @[:pat/wild :pat/hole :pat/var :pat/con :pat/nat]))
 
 (defn node/decl? [n]
-  (let [t (node/tag n)]
-    (or (= t :decl/prec) (= t :decl/data) (= t :decl/func)
-        (= t :decl/compute) (= t :decl/check))))
+  (node/tag-in? n @[:decl/prec :decl/data :decl/func :decl/compute :decl/check]))
 
 (def exports
   {:ast/debug-checks? ast/debug-checks?
@@ -174,5 +172,6 @@
    :node/span node/span
    :node/type? node/type?
    :node/term? node/term?
+   :node/type-or-term? node/type-or-term?
    :node/pat? node/pat?
    :node/decl? node/decl?})

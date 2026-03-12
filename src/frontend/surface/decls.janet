@@ -57,36 +57,17 @@
 (defn- is-upper-byte? [c]
   (and (>= c (chr "A")) (<= c (chr "Z"))))
 
-(defn- is-lower-byte? [c]
-  (and (>= c (chr "a")) (<= c (chr "z"))))
-
-(defn- is-ident-start-byte? [c]
-  (or (is-upper-byte? c) (is-lower-byte? c) (= c (chr "_"))))
-
-(defn- find-top-level-colon [text]
-  (let [n (length text)]
-    (var depth 0)
-    (var last-colon nil)
-    (for i 0 n
-      (let [c (text i)]
-        (cond
-          (= c (chr "(")) (++ depth)
-          (= c (chr ")")) (when (> depth 0) (-- depth))
-          (and (= c (chr ":")) (= depth 0))
-          (set last-colon i))))
-    last-colon))
-
 (defn- extract-name-and-params [lhs]
-  (let [trimmed (ly/trim lhs)]
+  (let [trimmed (string/trim lhs)]
     (if-let [lp (string/find "(" trimmed)]
       (let [rp (- (length trimmed) 1)]
         (if (= (trimmed rp) (chr ")"))
-          [(ly/trim (string/slice trimmed 0 lp))
+          [(string/trim (string/slice trimmed 0 lp))
            (string/slice trimmed (+ lp 1) rp)]
           [trimmed nil]))
       [trimmed nil])))
 
-(defn read-parenthesized-end [text start]
+(defn- read-parenthesized-end [text start]
   (let [n (length text)]
     (var depth 0)
     (var i start)
@@ -106,12 +87,21 @@
     (if found i nil)))
 
 (defn- parse/field-fragment [text syntax mk-named mk-anon]
-  (let [colon-ix (find-top-level-colon text)]
+  (let [colon-ix (ly/find-top-level-char text (chr ":"))]
     (if colon-ix
-      (let [name (ly/trim (string/slice text 0 colon-ix))
-            ty-text (ly/trim (string/slice text (+ colon-ix 1)))]
+      (let [name (string/trim (string/slice text 0 colon-ix))
+            ty-text (string/trim (string/slice text (+ colon-ix 1)))]
         (mk-named name (pr/parse/type-text ty-text syntax) (a/span/none)))
       (mk-anon (pr/parse/type-text text syntax) (a/span/none)))))
+
+(defn- parse/field-text [text syntax mk-named mk-anon]
+  (let [trimmed (string/trim text)
+        n (length trimmed)]
+    (if (and (> n 1)
+             (= (trimmed 0) (chr "("))
+             (= (trimmed (- n 1)) (chr ")")))
+      (parse/field-fragment (string/slice trimmed 1 (- n 1)) syntax mk-named mk-anon)
+      (parse/field-fragment trimmed syntax mk-named mk-anon))))
 
 (defn parse/fields [text syntax mk-named mk-anon]
   (if (or (nil? text) (= text ""))
@@ -119,32 +109,20 @@
     (let [parts (ly/split-top-level text (chr ","))
           out @[]]
       (each p parts
-        (let [trimmed (ly/trim p)]
+        (let [trimmed (string/trim p)]
           (when (not= trimmed "")
-            (if (and (string/has-prefix? "(" trimmed) (string/has-suffix? ")" trimmed))
-              (array/push out (parse/field-fragment (string/slice trimmed 1 (- (length trimmed) 1)) syntax mk-named mk-anon))
-              (array/push out (parse/field-fragment trimmed syntax mk-named mk-anon))))))
+            (array/push out (parse/field-text trimmed syntax mk-named mk-anon)))))
       out)))
 
-(defn- strip-optional-parens [text]
-  (let [trimmed (ly/trim text)
-        n (length trimmed)]
-    (if (and (> n 1)
-             (= (trimmed 0) (chr "("))
-             (= (trimmed (- n 1)) (chr ")"))
-             (= (read-parenthesized-end trimmed 0) n))
-      (string/slice trimmed 1 (- n 1))
-      trimmed)))
-
 (defn- parse/type-params [text syntax]
-  (if (or (nil? text) (= (ly/trim text) ""))
+  (if (or (nil? text) (= (string/trim text) ""))
     @[]
     (let [raw-parts (ly/split-top-level text (chr ","))
           parts @[]
           out @[]]
       (var pending nil)
       (each raw raw-parts
-        (let [part (ly/trim raw)]
+        (let [part (string/trim raw)]
           (when (not= part "")
             (let [chunk (if pending
                           (string pending "," part)
@@ -157,14 +135,14 @@
       (when pending
         (array/push parts pending))
       (each p parts
-        (let [x (ly/trim p)]
+        (let [x (string/trim p)]
           (when (not= x "")
             (if-let [ix (ly/find-top-level-char x (chr ":"))]
-              (let [names-part (ly/trim (string/slice x 0 ix))
-                    ty (pr/parse/type-text (ly/trim (string/slice x (+ ix 1))) syntax)
+              (let [names-part (string/trim (string/slice x 0 ix))
+                    ty (pr/parse/type-text (string/trim (string/slice x (+ ix 1))) syntax)
                     names (ly/split-top-level names-part (chr ","))]
                 (each name names
-                  (let [trimmed-name (ly/trim name)]
+                  (let [trimmed-name (string/trim name)]
                     (when (not= trimmed-name "")
                       (array/push out
                                   (a/decl/param trimmed-name
@@ -174,7 +152,7 @@
       out)))
 
 (defn- split-field-segments [text]
-  (let [trimmed (ly/trim text)
+  (let [trimmed (string/trim text)
         out @[]
         n (length trimmed)]
     (var i 0)
@@ -195,30 +173,26 @@
     out))
 
 (defn- parse/field-segment [segment syntax mk-named mk-anon]
-  (let [trimmed (ly/trim segment)
-        n (length trimmed)]
+  (let [trimmed (string/trim segment)]
     (if (or (= trimmed "") (= trimmed "()"))
       @[]
-      (if (and (> n 1)
-               (= (trimmed 0) (chr "("))
-               (= (trimmed (- n 1)) (chr ")")))
-        (parse/fields (string/slice trimmed 1 (- n 1)) syntax mk-named mk-anon)
+      (if (and (string/has-prefix? "(" trimmed)
+               (string/has-suffix? ")" trimmed))
+        (parse/fields (string/slice trimmed 1 (- (length trimmed) 1)) syntax mk-named mk-anon)
         @[(parse/field-fragment trimmed syntax mk-named mk-anon)]))))
 
 (defn- parse/ctor-rhs [rhs syntax]
-  (let [trimmed (ly/trim rhs)
+  (let [trimmed (string/trim rhs)
         n (length trimmed)]
     (cond
       (or (= trimmed "()") (= trimmed ""))
       [nil @[]]
 
       true
-      (let [name-end (or (ly/find-top-level-char trimmed (chr " "))
-                         (ly/find-top-level-char trimmed (chr "\t"))
-                         (ly/find-top-level-char trimmed (chr "("))
+      (let [name-end (or (ly/find-first-top-level-char trimmed @[(chr " ") (chr "\t") (chr "(")])
                          n)
-            name (ly/trim (string/slice trimmed 0 name-end))
-            rest (ly/trim (string/slice trimmed name-end n))
+            name (string/trim (string/slice trimmed 0 name-end))
+            rest (string/trim (string/slice trimmed name-end n))
             segments (ly/split-ws-top-level rest)
             fields @[]]
         (when (= name "")
@@ -250,20 +224,20 @@
 (defn- parse/data-body-line [ln syntax]
   (let [text (ln :text)]
     (if-let [eq (peg/match peg/split-eq-line text)]
-    (let [lhs (ly/trim (eq 0))
-          rhs (ly/trim (eq 1))
-          idx-parts (ly/split-top-level lhs (chr ","))
-          indices @[]]
-      (each p idx-parts
-        (array/push indices (pat/parse/pat-text p)))
-      (let [[name fields] (parse/ctor-rhs rhs syntax)]
+      (let [lhs (string/trim (eq 0))
+            rhs (string/trim (eq 1))
+            idx-parts (ly/split-top-level lhs (chr ","))
+            indices @[]]
+        (each p idx-parts
+          (array/push indices (pat/parse/pat-text p)))
+        (let [[name fields] (parse/ctor-rhs rhs syntax)]
+          (if name
+            [(a/decl/ctor-indexed indices name fields (a/span/none))]
+            [])))
+      (let [[name fields] (parse/ctor-rhs (string/trim text) syntax)]
         (if name
-          [(a/decl/ctor-indexed indices name fields (a/span/none))]
-          [])))
-    (let [[name fields] (parse/ctor-rhs (ly/trim text) syntax)]
-      (if name
-        [(a/decl/ctor-plain name fields (a/span/none))]
-        [])))))
+          [(a/decl/ctor-plain name fields (a/span/none))]
+          [])))))
 
 (defn- type/arity [ty]
   (match ty
@@ -285,7 +259,7 @@
 
 (defn- parse/pat-from-parts [parts start ctor-env]
   (let [part (parts start)
-        trimmed (ly/trim part)
+        trimmed (string/trim part)
         n (length trimmed)
         paren-token? (and (> n 1)
                           (= (trimmed 0) (chr "("))
@@ -328,43 +302,43 @@
 (defn- parse/term-body-line [ln syntax arity ctor-env]
   (let [text (ln :text)]
     (if-let [eq (peg/match peg/split-eq-line text)]
-    (let [lhs (ly/trim (eq 0))
-          rhs (ly/trim (eq 1))
+    (let [lhs (string/trim (eq 0))
+          rhs (string/trim (eq 1))
           pats (parse/clause-patterns lhs arity ctor-env)]
       (a/decl/clause pats (pr/parse/expr-text rhs syntax) (a/span/none)))
     (diag/error ln (string "invalid clause line: " text)))))
 
 (defn- classify-top [ln]
   (let [text (ln :text)
-        trimmed (ly/trim text)]
+         trimmed (string/trim text)
+         prec-match (peg/match peg/prec-line text)
+         alias-match (peg/match peg/alias-line text)
+         import-match (peg/match peg/import-line text)
+         compute-match (peg/match peg/compute-line text)
+         check-match (peg/match peg/check-line text)]
     (cond
       (string/has-prefix? "#" trimmed)
       [:top/comment]
 
-      (peg/match peg/prec-line text)
-      (let [m (peg/match peg/prec-line text)]
-        [:top/prec (m 0) (scan-number (ly/trim (m 1))) (ly/trim (m 2))])
+      prec-match
+      [:top/prec (prec-match 0) (scan-number (string/trim (prec-match 1))) (string/trim (prec-match 2))]
 
-      (peg/match peg/alias-line text)
-      (let [m (peg/match peg/alias-line text)]
-        [:top/alias (m 0) (m 1)])
+      alias-match
+      [:top/alias (alias-match 0) (alias-match 1)]
 
-      (peg/match peg/import-line text)
-      (let [m (peg/match peg/import-line text)]
-        [:top/import (m 0)])
+      import-match
+      [:top/import (import-match 0)]
 
-      (peg/match peg/compute-line text)
-      (let [m (peg/match peg/compute-line text)]
-        [:top/compute (m 0)])
+      compute-match
+      [:top/compute (compute-match 0)]
 
-      (peg/match peg/check-line text)
-      (let [m (peg/match peg/check-line text)]
-        [:top/check (m 0) (m 1)])
+      check-match
+      [:top/check (check-match 0) (check-match 1)]
 
       true
-      (if-let [colon-idx (find-top-level-colon text)]
-        (let [lhs (ly/trim (string/slice text 0 colon-idx))
-              rhs (ly/trim (string/slice text (+ colon-idx 1)))
+      (if-let [colon-idx (ly/find-top-level-char text (chr ":"))]
+        (let [lhs (string/trim (string/slice text 0 colon-idx))
+              rhs (string/trim (string/slice text (+ colon-idx 1)))
               [name params-text] (extract-name-and-params lhs)]
           (if (and (> (length name) 0) (is-upper-byte? (name 0)))
             [:top/type-head name params-text rhs]
@@ -396,7 +370,7 @@
                     (each bl source-for-ctors
                       (let [new-ctors (parse/data-body-line bl syn)]
                         (each c new-ctors (array/push ctors c))))
-                    (let [sort (if (= (ly/trim sort-text) "")
+                    (let [sort (if (= (string/trim sort-text) "")
                                  (a/ty/universe 0 (a/span/none))
                                  (pr/parse/type-text sort-text syn))
                           decl (a/decl/data (current :name) params sort ctors (a/span/none))]
@@ -490,7 +464,7 @@
                                        :body @[]}))))))
              (if current
                 (array/push (current :body) ln)
-                (when (not (string/has-prefix? "#" (ly/trim (ln :text))))
+                (when (not (string/has-prefix? "#" (string/trim (ln :text))))
                   (diag/error ln (string "indented line without declaration: " (ln :text)))))))
 
          (flush-current)

@@ -33,6 +33,13 @@
     (= (c/infer-top pair-ty) expected)
     "Dependent type: (A : Type₀) × (A → A)"))
 
+(let [id-ty [:t-pi [:type 0] (fn [_] [:type 0])]
+      pair-ty (c/ty/sigma (c/ty/type 1) (fn [A] A))
+      pair [:pair id-ty [:lam (fn [x] x)]]]
+  (test/assert suite
+    (c/check-top pair pair-ty)
+    "Pair checks against dependent Sigma via shared binder helper"))
+
 # Property: Sigma Projections Inverse
 (var rng (math/rng 42))
 

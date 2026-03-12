@@ -64,14 +64,31 @@
   (or (get ((st :sx) :type/quant-builders) q)
       (errorf "parse error: unknown quantified alias %v" q)))
 
+(defn- parse-grouped [st]
+  (let [e (parse/expr st 0)]
+    (pstate/expect st :rparen)
+    e))
+
+(defn- parse-prefix-op [st tok mk-op label]
+  (if-let [spec (prec/spec st (tok :v))]
+    (if (= (spec :fixity) :prefix)
+      (let [rhs (parse/expr st (op-lbp (spec :level)))]
+        (mk-op (tok :v) @[rhs] (a/span/none)))
+      (errorf "parse error at %s: operator %v is not prefix in %s position"
+              (tok/at tok)
+              (tok :v)
+              label))
+    (errorf "parse error at %s: unknown prefix %s operator %v"
+            (tok/at tok)
+            label
+            (tok :v))))
+
 (defn- nud/type [st tok]
   (match (tok :k)
     :hole (a/ty/hole (tok :v) (a/span/none))
     :nat (a/ty/universe (tok :v) (a/span/none))
     :ident (resolve-type-ident st (tok :v))
-    :lparen (let [e (parse/expr st 0)]
-              (pstate/expect st :rparen)
-              e)
+    :lparen (parse-grouped st)
     :quant
     (let [q (tok :v)
           binder (parse-binder st)]
@@ -79,13 +96,7 @@
       (let [body (parse/expr st 0)
             mk (quant-builder st q)]
         (mk binder body (a/span/none))))
-    :op
-    (if-let [spec (prec/spec st (tok :v))]
-      (if (= (spec :fixity) :prefix)
-        (let [rhs (parse/expr st (op-lbp (spec :level)))]
-          (a/ty/op (tok :v) @[rhs] (a/span/none)))
-        (errorf "parse error at %s: operator %v is not prefix in type position" (tok/at tok) (tok :v)))
-      (errorf "parse error at %s: unknown prefix type operator %v" (tok/at tok) (tok :v)))
+    :op (parse-prefix-op st tok a/ty/op "type")
     _ (errorf "parse error at %s: unexpected type token %s" (tok/at tok) (tok/render tok))))
 
 (defn- nud/term [st tok]
@@ -93,9 +104,7 @@
     :hole (a/tm/hole (tok :v) (a/span/none))
     :nat (a/tm/nat (tok :v) (a/span/none))
     :ident (a/tm/var (tok :v) (a/span/none))
-    :lparen (let [e (parse/expr st 0)]
-              (pstate/expect st :rparen)
-              e)
+    :lparen (parse-grouped st)
     :lambda
     (let [params @[]]
       (while true
@@ -120,13 +129,7 @@
       (let [v (parse/expr st 0)]
         (pstate/expect st :kw/in)
         (a/tm/let name v (parse/expr st 0) (a/span/none))))
-    :op
-    (if-let [spec (prec/spec st (tok :v))]
-      (if (= (spec :fixity) :prefix)
-        (let [rhs (parse/expr st (op-lbp (spec :level)))]
-          (a/tm/op (tok :v) @[rhs] (a/span/none)))
-        (errorf "parse error at %s: operator %v is not prefix in term position" (tok/at tok) (tok :v)))
-      (errorf "parse error at %s: unknown prefix term operator %v" (tok/at tok) (tok :v)))
+    :op (parse-prefix-op st tok a/tm/op "term")
     _ (errorf "parse error at %s: unexpected term token %s" (tok/at tok) (tok/render tok))))
 
 (defn- can-start-atom? [tok]
