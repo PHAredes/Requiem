@@ -22,15 +22,10 @@
 (defn subst/lookup [sigma x] (get sigma x))
 
 (defn- subst/copy [sigma]
-  (let [out @{}]
-    (eachp [k v] sigma
-      (put out k v))
-    out))
+  (table/clone sigma))
 
 (defn subst/extend [sigma x u]
-  (let [s2 (subst/copy sigma)]
-    (put s2 x u)
-    s2))
+  (put (subst/copy sigma) x u))
 
 (defn subst/merge [left right]
   (let [out (subst/copy left)]
@@ -87,10 +82,11 @@
 (defn pat/vars [p]
   (match p
     [:pat/var _] (if-let [name (pat/binding-name p)] @[name] @[])
-    [:hole _] (if-let [name (pat/binding-name p)] @[name] @[])
-    [:pat/con _ args] (reduce (fn [acc a] [;acc ;(pat/vars a)]) @[] args)
+    [:hole _]    (if-let [name (pat/binding-name p)] @[name] @[])
+    [:pat/con _ args] (reduce (fn [acc a] (array/concat acc (pat/vars a))) @[] args)
     [:pat/impossible] @[]
     _ @[]))
+
 
 (defn pat/to-term [p]
   (match p
@@ -165,7 +161,7 @@
 (defn ctors/available [type-args ctors ctor-name-set]
   (reduce (fn [acc ctor]
             (match (ctor/available? type-args ctor ctor-name-set)
-              [:yes sigma] [;acc {:ctor ctor :subst sigma}]
+              [:yes sigma] (array/push acc {:ctor ctor :subst sigma})
               [:no] acc
               [:stuck]
               (errorf "constructor %v availability is stuck on indices %v"
@@ -175,10 +171,7 @@
           ctors))
 
 (def exports
-  {:YES YES
-   :NO NO
-   :STUCK STUCK
-   :outcome/yes outcome/yes
+  {:outcome/yes outcome/yes
    :outcome/no outcome/no
    :outcome/stuck outcome/stuck
    :outcome/yes? outcome/yes?

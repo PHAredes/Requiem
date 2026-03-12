@@ -6,15 +6,6 @@
       (errorf "conflicting solutions for %v" mv))
     (put solved mv value)))
 
-(defn- unify/value-kind [c]
-  (cond
-    (c :solution) :solution
-    (c :expected) :expected
-    true nil))
-
-(defn- unify/value [c]
-  (or (c :solution) (c :expected)))
-
 (defn- unify/merge-named! [named name value kind]
   (when value
     (if-let [entry (get named name)]
@@ -31,14 +22,25 @@
           nil))
       (put named name {:value value :kind kind}))))
 
+(defn- unify/fill-named! [constraints solved named]
+  (reduce (fn [changed c]
+            (if-not (and (c :name) (nil? (c :solution)))
+              changed
+              (if-let [entry (get named (c :name))]
+                (do (put c :solution (entry :value))
+                    (unify/assign! solved (c :mv) (entry :value))
+                    true)
+                changed)))
+          false
+          constraints))
+
 (defn unify/solve [constraints]
   (let [solved @{}
         named  @{}]
-
     (each c constraints
       (let [mv    (c :mv)
-            value (unify/value c)
-            kind  (unify/value-kind c)
+            value (or (c :solution) (c :expected))
+            kind  (if (c :solution) :solution :expected)
             name  (c :name)]
         (when value
           (unify/assign! solved mv value)
@@ -46,12 +48,7 @@
         (when name
           (unify/merge-named! named name value kind))))
 
-    (each c constraints
-      (when (and (c :name) (nil? (c :solution)))
-        (when-let [entry (get named (c :name))]
-          (let [v (entry :value)]
-            (put c :solution v)
-            (unify/assign! solved (c :mv) v)))))
+    (while (unify/fill-named! constraints solved named))
 
     (each c constraints
       (when (and (c :name) (nil? (c :solution)))

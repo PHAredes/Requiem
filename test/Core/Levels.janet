@@ -10,7 +10,9 @@
   "const comparison")
 
 (test/assert suite
-  (= (lvl/value (lvl/compose (lvl/shift 1) (lvl/shift 2))) 3)
+  (let [composed (lvl/compose (lvl/shift 1) (lvl/shift 2))]
+    (and (lvl/shift? composed)
+         (= (composed 1) 3)))
   "shift composition")
 
 (test/assert suite

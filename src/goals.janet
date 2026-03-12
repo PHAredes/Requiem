@@ -18,12 +18,12 @@
   (goal/make :type name nil ctx))
 
 (defn- ctx/partition [ctx names]
-  (reduce (fn [[local global] entry]
-            (if (get names (entry 0))
-              [local [;global entry]]
-              [[;local entry] global]))
-          [@[] @[]]
-          ctx))
+  (let [local @[] global @[]]
+    (each entry ctx
+      (if (get names (entry 0))
+        (array/push global entry)
+        (array/push local entry)))
+    [local global]))
 
 (defn- goal/split-ctx [goal local-names]
   (ctx/partition (goal :ctx) local-names))
@@ -44,9 +44,9 @@
 
 (defn goals/without-name-set [goals hidden-names]
   (reduce (fn [acc goal]
-            (if (get hidden-names (goal :name))
-              acc
-              [;acc goal]))
+            (when (not (get hidden-names (goal :name)))
+              (array/push acc goal))
+            acc)
           @[]
           goals))
 

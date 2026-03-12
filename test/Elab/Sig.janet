@@ -68,7 +68,7 @@
                       @[{:name "x" :type [:var "Nat"]}]
                       [:var "Nat"]
                       [:t-pi [:var "Nat"] (fn [_] [:var "Nat"])] )
-      (let [ref (s/sig/exact-ref sig "id")]
+      (let [ref (s/sig/delta-ref sig "id")]
         (and (= (ref 0) :lam)
              (= ((ref 1) [:var "z"])
                 [:app [:var "id"] [:var "z"]])))))
@@ -77,7 +77,7 @@
 (test/assert-error
   (fn []
     (let [sig (mk-nat-sig)]
-      (s/sig/exact-ref sig "Nat")))
+      (s/sig/delta-ref sig "Nat")))
   "Exact-ref rejects non-function names")
 
 (test/end-suite)
