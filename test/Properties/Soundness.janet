@@ -3,62 +3,91 @@
 (import ../Utils/TestRunner :as test)
 (import ../../src/coreTT :as c)
 (import ../Utils/Generators :as gen)
+(import ../Utils/ReductionPaths :as red)
 
 (def suite (test/start-suite "Property Soundness"))
 
 (var rng (gen/rng))
 
-# Property: Function Application Type Soundness
-(defn prop-app-soundness [n]
-  "Property: Application preserves typing"
+(defn value? [tm]
+  (if (not (tuple? tm))
+    false
+    (case (tm 0)
+      :type true
+      :t-pi true
+      :t-sigma true
+      :t-id true
+      :lam true
+      :pair (and (value? (tm 1)) (value? (tm 2)))
+      :t-refl (value? (tm 1))
+      false)))
+
+(defn prop-progress [n]
+  "Property: every generated closed witness in the fragment is a value or takes a step"
   (var passed true)
   (repeat n
-    (let [A (gen/gen-univ rng)
-          f [:lam (fn [x] [:var x])] # Identity
-          arg (gen/gen-univ rng)
-          Γ (c/ctx/empty)]
-      (try
-        (let [A-sem (c/eval Γ A)
-              # Check f : A → A
-              _ (c/check Γ f (c/ty/pi A-sem (fn [x] A-sem)))
-              # Check arg : A
-              _ (c/check Γ arg A-sem)
-              # Infer type of application
-              app-ty (c/infer Γ [:app f arg])]
-          # Result type should equal A
-          (unless (c/sem-eq (c/ty/type 100) app-ty A-sem)
+    (let [sample (gen/gen-fragment-sample rng)
+          tm (sample :term)
+          step (red/step-reduce tm)]
+      (unless (or (value? tm) step)
+        (set passed false)
+        (print "Progress failed:")
+        (print "  seed =" (gen/seed/current))
+        (print "  kind =" (sample :kind))
+        (print "  term =" tm)
+        (print "  type =" (sample :type-tm)))))
+  passed)
+
+(test/assert suite
+  (prop-progress (test/property-count 50))
+  "Property: generated closed witnesses satisfy progress")
+
+(defn prop-witnessed-step-is-the-next-step [n]
+  "Property: reducible witnesses step exactly to their declared contractum"
+  (var passed true)
+  (repeat n
+    (let [sample (gen/gen-reducible-sample rng)
+          tm (sample :term)
+          expected-step (sample :contractum)
+          actual-step (red/step-reduce tm)]
+      (unless (= actual-step expected-step)
+        (set passed false)
+        (print "Unexpected reduction step:")
+        (print "  seed =" (gen/seed/current))
+        (print "  kind =" (sample :kind))
+        (print "  term =" tm)
+        (print "  expected =" expected-step)
+        (print "  actual =" actual-step))))
+  passed)
+
+(test/assert suite
+  (prop-witnessed-step-is-the-next-step (test/property-count 50))
+  "Property: reducible witnesses contract as expected")
+
+(defn prop-normal-forms-are-values [n]
+  "Property: normalizing a generated witness produces a canonical value"
+  (var passed true)
+  (let [Γ (c/ctx/empty)]
+    (repeat n
+      (let [sample (gen/gen-fragment-sample rng)
+            ty (c/eval Γ (sample :type-tm))
+            nf (c/nf ty (sample :term))]
+      (match nf
+        [c/NF/Type _] true
+        [c/NF/Lam _] true
+        [c/NF/Pair _ _] true
+        [c/NF/Refl _] true
+        _ (do
             (set passed false)
-            (print "Application type unsound")))
-        ([err] nil))))
+            (print "Unexpected normal form:")
+            (print "  seed =" (gen/seed/current))
+            (print "  kind =" (sample :kind))
+            (print "  term =" (sample :term))
+            (print "  nf =" nf))))))
   passed)
 
 (test/assert suite
-  (prop-app-soundness 20)
-  "Property: function application is type-sound")
-
-# Property: Type Well-Formedness
-(defn prop-type-well-formed [n]
-  "Property: Inferred types are themselves well-formed"
-  (var passed true)
-  (repeat n
-    (let [tm (case (math/rng-int rng 3)
-               0 (gen/gen-univ rng)
-               1 [:t-pi (gen/gen-univ rng) (fn [x] (gen/gen-univ rng))]
-               2 [:t-sigma (gen/gen-univ rng) (fn [x] (gen/gen-univ rng))])
-          Γ (c/ctx/empty)]
-      (try
-        (let [ty (c/infer Γ tm)]
-          # The type should be a universe
-          (match ty
-            [c/T/Type _] true
-            _ (do
-                (set passed false)
-                (print "Inferred non-universe type:" ty "for term:" tm))))
-        ([err] nil))))
-  passed)
-
-(test/assert suite
-  (prop-type-well-formed 30)
-  "Property: inferred types are well-formed")
+  (prop-normal-forms-are-values (test/property-count 50))
+  "Property: generated witnesses normalize to canonical values")
 
 (test/end-suite suite)
