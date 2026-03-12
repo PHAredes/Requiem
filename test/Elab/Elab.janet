@@ -38,9 +38,9 @@
                     [:t-pi [:var "Nat"] (fn [_] [:var "Nat"])])
     sig))
 
-(test/start-suite "Elab Bridge")
+(def suite (test/start-suite "Elab Bridge"))
 
-(test/assert
+(test/assert suite
   (let [state (e/elab/state)
         h1 (e/elab/hole state "a")
         h2 (e/elab/hole state "a")
@@ -50,7 +50,7 @@
          (= (length (state :constraints)) 2)))
   "Named holes share metavar; anonymous holes are fresh")
 
-(test/assert
+(test/assert suite
   (let [sig (mk-sig)
         env {:check-arg (fn [_env _sig arg _ty] arg)}
         result (e/elab/ctor-call env
@@ -62,7 +62,7 @@
     (= ((result :term) 0) :var))
   "IxCall succeeds for available constructor")
 
-(test/assert-error
+(test/assert-error suite
   (fn []
     (let [sig (mk-sig)
           env {:check-arg (fn [_env _sig arg _ty] arg)}]
@@ -74,7 +74,7 @@
                         @[[:var "x"] [:var "xs"]])))
   "IxCall rejects unavailable constructor")
 
-(test/assert-error
+(test/assert-error suite
   (fn []
     (let [sig (mk-sig)
           env {:check-arg (fn [_env _sig arg _ty] arg)}]
@@ -86,10 +86,10 @@
                         @[[:var "x"] [:var "xs"]])))
   "IxCall reports stuck availability for neutral indices")
 
-(test/assert
+(test/assert suite
   (let [sig (mk-sig)
         ref (e/elab/func-ref sig "id")]
     (= (ref 0) :lam))
   "Function references elaborate to exact-ref")
 
-(test/end-suite)
+(test/end-suite suite)

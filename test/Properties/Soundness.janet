@@ -4,7 +4,7 @@
 (import ../../src/coreTT :as c)
 (import ../Utils/Generators :as gen)
 
-(test/start-suite "Property Soundness")
+(def suite (test/start-suite "Property Soundness"))
 
 (var rng (gen/rng))
 
@@ -32,7 +32,7 @@
         ([err] nil))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-app-soundness 20)
   "Property: function application is type-sound")
 
@@ -57,8 +57,8 @@
         ([err] nil))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-type-well-formed 30)
   "Property: inferred types are well-formed")
 
-(test/end-suite)
+(test/end-suite suite)

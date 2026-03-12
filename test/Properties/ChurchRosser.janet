@@ -5,7 +5,7 @@
 (import ../Utils/Generators :as gen)
 (import ../Utils/Assertions :as a)
 
-(test/start-suite "Property Church-Rosser")
+(def suite (test/start-suite "Property Church-Rosser"))
 
 (var rng (gen/rng))
 
@@ -32,7 +32,7 @@
         ([err] nil))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-church-rosser 30)
   "Property: Church-Rosser - convertible terms normalize equally")
 
@@ -54,19 +54,19 @@
           (cond
             (= ltag c/NF/Neut)
             (let [ne2 (get lowered 1)]
-              (test/assert (= ne ne2)
+              (test/assert suite (= ne ne2)
                            (string/format "Raise-lower roundtrip preserves neutrals: ty=%v, %v ≡ %v" ty ne ne2)))
 
             (= ltag c/NF/Lam) true # Eta-expansion
             (= ltag c/NF/Pair) true # Eta-expansion
-            (test/assert false (string/format "Unexpected lowered form: tag=%v, val=%v" ltag lowered))))
+            (test/assert suite false (string/format "Unexpected lowered form: tag=%v, val=%v" ltag lowered))))
         ([err]
           (printf "Error in raise-lower: %v" err)
           (set passed false)))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-raise-lower-roundtrip 30)
   "Property: raise-lower roundtrip preserves neutrals (modulo eta)")
 
-(test/end-suite)
+(test/end-suite suite)

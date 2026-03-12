@@ -1,6 +1,8 @@
 (import ./TestRunner :as test)
 (import ../../src/coreTT :as c)
 
+(def MAX_UNIVERSE_LEVEL 100)
+
 (defn assert-throws [f msg]
   "Helper to assert that a function throws an error"
   (var threw false)
@@ -13,7 +15,7 @@
   "Check that term t has type expected-ty and evaluation preserves this"
   (try
     (let [inferred-ty (c/infer Γ t)]
-      (c/sem-eq (c/ty/type 100) inferred-ty expected-ty))
+      (c/sem-eq (c/ty/type MAX_UNIVERSE_LEVEL) inferred-ty expected-ty))
     ([err]
       (print "Type preservation error:" err)
       false)))
@@ -32,13 +34,7 @@
                 b2 (get v2 1)]
             (nf-eq? (b1 fresh) (b2 fresh)))
           true (if (= (length v1) (length v2))
-                 (let [len (length v1)]
-                   (var eq true)
-                   (for i 1 len
-                     (unless (nf-eq? (get v1 i) (get v2 i))
-                       (set eq false)
-                       (break)))
-                   eq)
+                 (all |(nf-eq? (get v1 $) (get v2 $)) (range 1 (length v1)))
                  false))))))
 
 (defn normalization-stable [ty tm]

@@ -4,7 +4,7 @@
 (import ../../src/coreTT :as c)
 (import ../Utils/Generators :as gen)
 
-(test/start-suite "Property Confluence")
+(def suite (test/start-suite "Property Confluence"))
 
 (var rng (gen/rng))
 
@@ -36,7 +36,7 @@
         ([err] nil))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-confluence 50)
   "Property: confluence - all reduction paths converge")
 
@@ -59,7 +59,7 @@
         ([err] nil))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-pi-syntactic-equality 20)
   "Property: syntactically identical Pi types are equal")
 
@@ -82,7 +82,7 @@
             (print "App congruence failed"))))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-app-congruence 20)
   "Property: application is congruent")
 
@@ -108,7 +108,7 @@
             (print "Extensionality failed"))))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-extensionality 10)
   "Property: extensional equality for functions")
 
@@ -126,8 +126,8 @@
           (print "Beta reduction failed for:" a)))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-id-function 20)
   "Property: identity function beta-reduces correctly")
 
-(test/end-suite)
+(test/end-suite suite)

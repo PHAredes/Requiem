@@ -3,24 +3,24 @@
 (import ../Utils/TestRunner :as test)
 (import ../../src/coreTT :as c)
 
-(test/start-suite "Type Sigma")
+(def suite (test/start-suite "Type Sigma"))
 
 # Test 10: Sigma Type Formation (from coreTT.janet)
 (let [sigma-type [:t-sigma
                   [:type 0]
                   (fn [x] [:type 0])]]
-  (test/assert
+  (test/assert suite
     (= (c/infer-top sigma-type) (c/ty/type 1))
     "Sigma formation: (Type₀ × Type₀) : Type₁"))
 
 # Test 7: Pair Projections (from coreTT.janet)
 (let [Γ (c/ctx/empty)]
-  (test/assert
+  (test/assert suite
     (= (c/eval Γ [:fst [:pair [:type 0] [:type 1]]])
        (c/ty/type 0))
     "Projection: fst (a, b) ≡ a")
 
-  (test/assert
+  (test/assert suite
     (= (c/eval Γ [:snd [:pair [:type 0] [:type 1]]])
        (c/ty/type 1))
     "Projection: snd (a, b) ≡ b"))
@@ -29,7 +29,7 @@
 (let [pair-ty [:t-sigma [:type 0] (fn [A] [:t-pi A (fn [x] A)])]
       # (A : Type₀) × (A → A)
       expected (c/ty/type 1)]
-  (test/assert
+  (test/assert suite
     (= (c/infer-top pair-ty) expected)
     "Dependent type: (A : Type₀) × (A → A)"))
 
@@ -59,8 +59,8 @@
         ([err] nil))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-sigma-projections 30)
   "Property: fst and snd correctly project from pairs")
 
-(test/end-suite)
+(test/end-suite suite)

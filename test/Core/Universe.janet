@@ -4,33 +4,33 @@
 (import ../../src/coreTT :as c)
 (import ../Utils/Generators :as gen)
 
-(test/start-suite "Core Universe")
+(def suite (test/start-suite "Core Universe"))
 
-(var rng (gen/rng))
+(var rng (gen/rng 42))
 
 # Test 8: Universe Levels
 # Test 8: Universe Levels
-(test/assert
+(test/assert suite
   (= (c/infer-top [:type 0]) [c/T/Type 1])
   "Universe hierarchy: Type₀ : Type₁")
 
-(test/assert
+(test/assert suite
   (= (c/infer-top [:type 5]) [c/T/Type 6])
   "Universe hierarchy: Type₅ : Type₆")
 
-(test/assert
+(test/assert suite
   (c/check-top [:type 0] (c/ty/type 3))
   "Cumulativity: Type₀ checks against Type₃")
 
-(test/assert-error
+(test/assert-error suite
   (fn [] (c/check-top [:type 3] (c/ty/type 1)))
   "Cumulativity is not symmetric")
 
-(test/assert
+(test/assert suite
   (c/subtype (c/ty/type 0) (c/ty/type 4))
   "Subtype: Type₀ <: Type₄")
 
-(test/assert
+(test/assert suite
   (not (c/subtype (c/ty/type 4) (c/ty/type 0)))
   "Subtype: Type₄ is not a subtype of Type₀")
 
@@ -51,7 +51,7 @@
           (print "Error in universe hierarchy")))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-universe-hierarchy 10)
   "Property: universe hierarchy")
 
@@ -78,7 +78,7 @@
           (print "Error checking universe hierarchy:" err)))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-universe-hierarchy-strict 20)
   "Property: universe hierarchy Type_i : Type_(i+1)")
 
@@ -108,8 +108,8 @@
           (print "Universe subsumption chain error:" err)))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-universe-subsumption-chains 40)
   "Property: cumulative universe subsumption chains")
 
-(test/end-suite)
+(test/end-suite suite)

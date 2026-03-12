@@ -3,7 +3,7 @@
 (import ../Utils/TestRunner :as test)
 (import ../../src/coreTT :as c)
 
-(test/start-suite "J Eliminator - Advanced Properties")
+(def suite (test/start-suite "J Eliminator - Advanced Properties"))
 
 # Test: Transport (J as cast along equality)
 (defn test-transport []
@@ -25,7 +25,7 @@
         # Transport: J gives us (Type₀ → Type₀) at position y
         transported [:t-J A x P id-fn y p]]
 
-    (test/assert
+    (test/assert suite
       (c/term-eq Γ (c/ty/pi (c/ty/type 0) (fn [_] (c/ty/type 0)))
                  transported id-fn)
       "Transport: J transports functions along equality")))
@@ -59,13 +59,31 @@
         # Symmetry: J A x P (refl x) y p : Id A y x
         sym [:t-J A x motive base y p]]
 
-    (test/assert
+    (test/assert suite
       (let [res (c/infer Γxyp sym)]
         (and (= (get res 0) c/T/Id)
              (= (get (get res 1) 0) c/T/Type)))
       "Symmetry: J derives Id A y x from Id A x y")))
 
 (test-symmetry-derivation)
+
+# Regression: checker should instantiate J motives with term syntax,
+# not semantic values or internal proof tags.
+(defn test-j-motive-syntax-substitution []
+  (let [A [:type 1]
+        x [:type 0]
+        motive (fn [y p]
+                 (match p
+                   [:var _] [:type 1]
+                   [:t-refl _] [:type 1]
+                   _ (errorf "unexpected proof syntax in J motive: %v" p)))
+        d [:type 0]
+        j-term [:t-J A x motive d x [:t-refl x]]]
+    (test/assert suite
+      (= (c/infer-top j-term) (c/ty/type 1))
+      "J instantiates motives with surface proof syntax")))
+
+(test-j-motive-syntax-substitution)
 
 # Test: Transitivity (composition of paths)
 (defn test-transitivity []
@@ -95,7 +113,7 @@
         # Apply to q: (J ...) q : Id A x z
         trans [:app j1 q]]
 
-    (test/assert
+    (test/assert suite
       (c/term-eq Γ (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0))
                  trans [:t-refl [:type 0]])
       "Transitivity: composing refl ∘ refl = refl")))
@@ -126,7 +144,7 @@
         # Congruence: J A x P base y p : Id B (f x) (f y)
         ap [:t-J A x motive base y p]]
 
-    (test/assert
+    (test/assert suite
       (let [res (c/infer Γf ap)]
         (and (= (get res 0) c/T/Id)))
       "Congruence: J derives ap for functions")))
@@ -155,7 +173,7 @@
         # Subst: J A x M px y p : P y
         subst [:t-J A x motive px y p]]
 
-    (test/assert
+    (test/assert suite
       (c/term-eq Γ (c/ty/type 1) subst px)
       "Subst: J implements type substitution")))
 
@@ -178,7 +196,7 @@
                        [c/T/Refl (c/ty/type 0)]
                        [c/T/Refl (c/ty/type 0)])]
 
-    (test/assert
+    (test/assert suite
       # Both are inhabitants of Id A x x
       (and (c/check-top p (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0)))
            (c/check-top q (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0))))
@@ -186,4 +204,4 @@
 
 (test-UIP-k-axiom)
 
-(test/end-suite)
+(test/end-suite suite)
