@@ -6,7 +6,7 @@
 
 (def suite (test/start-suite "Core Universe"))
 
-(var rng (gen/rng 42))
+(var rng (gen/rng))
 
 # Test 8: Universe Levels
 # Test 8: Universe Levels

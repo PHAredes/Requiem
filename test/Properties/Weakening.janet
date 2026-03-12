@@ -8,54 +8,82 @@
 
 (var rng (gen/rng))
 
-# Property Tests: Weakening (Context Extension)
-
-(defn prop-weakening [n]
-  "Property: If Γ ⊢ t : A, then Γ, x : B ⊢ t : A (x not in t)"
+(defn prop-judgments-ignore-extra-bindings [n]
+  "Property: adding an irrelevant binding does not change the inferred type of an inferable judgment"
   (var passed true)
   (repeat n
-    (let [Γ (c/ctx/empty)
+    (let [sample (gen/gen-inferable-judgment rng)
+          tm (sample :term)
+          Γ (sample :ctx)
           x (gensym)
-          B [:type (math/rng-int rng 3)]
-          tm (case (math/rng-int rng 3)
-               0 [:type (math/rng-int rng 3)]
-               1 [:lam (fn [y] [:var y])]
-               2 [:pair [:type (math/rng-int rng 3)] [:type (math/rng-int rng 3)]])]
+          extra-ty (c/eval (c/ctx/empty) (gen/gen-simple-type rng))
+          Γ+ (c/ctx/add Γ x extra-ty)]
       (try
         (let [ty (c/infer Γ tm)
-              Γ2 (c/ctx/add Γ x B)
-              ty2 (c/infer Γ2 tm)]
-          (unless (c/sem-eq (c/ty/type 100) ty ty2)
+              ty+ (c/infer Γ+ tm)]
+          (unless (c/sem-eq (c/ty/type 100) ty ty+)
             (set passed false)
-            (print "Weakening failed for:" tm)))
-        ([err] nil)))) # Skip ill-typed terms
+            (print "Weakening inference failed:")
+            (print "  seed =" (gen/seed/current))
+            (print "  kind =" (sample :kind))
+            (print "  term =" tm)
+            (print "  ty =" ty)
+            (print "  ty+ =" ty+)))
+        ([err]
+          (set passed false)
+          (print "Inferable judgment rejected during weakening:")
+          (print "  seed =" (gen/seed/current))
+          (print "  kind =" (sample :kind))
+          (print "  ctx =" Γ)
+          (print "  term =" tm)
+          (print "  err =" err)))))
   passed)
 
 (test/assert suite
-  (prop-weakening 20)
-  "Property: weakening preserves types")
+  (prop-judgments-ignore-extra-bindings (test/property-count 50))
+  "Property: irrelevant context extension preserves inferred types")
 
-# Property: Context Extension Preserves Types
-(defn prop-context-extension [n]
-  "Property: Extending context preserves well-typedness of closed terms"
+(defn prop-judgments-keep-declared-types [n]
+  "Property: adding an irrelevant binding keeps the inferred type equal to the declared type"
   (var passed true)
   (repeat n
-    (let [tm (gen/gen-univ rng) # Closed term
-          Γ (c/ctx/empty)
+    (let [sample (gen/gen-inferable-judgment rng)
+          tm (sample :term)
+          type-tm (sample :type-tm)
+          Γ (sample :ctx)
           x (gensym)
-          A [:type (math/rng-int rng 3)]
-          Γ2 (c/ctx/add Γ x (c/eval Γ A))]
+          extra-ty (c/eval (c/ctx/empty) (gen/gen-simple-type rng))
+          Γ+ (c/ctx/add Γ x extra-ty)]
       (try
-        (let [ty1 (c/infer Γ tm)
-              ty2 (c/infer Γ2 tm)]
-          (unless (c/sem-eq [:Type 100] ty1 ty2)
-            (set passed false)
-            (print "Context extension changed type for:" tm)))
-        ([err] nil))))
+        (do
+          (let [expected (c/eval Γ type-tm)
+                expected+ (c/eval Γ+ type-tm)
+                ty (c/infer Γ tm)
+                ty+ (c/infer Γ+ tm)]
+            (unless (and (c/sem-eq (c/ty/type 100) ty expected)
+                         (c/sem-eq (c/ty/type 100) ty+ expected+))
+              (set passed false)
+              (print "Weakening declared-type mismatch:")
+              (print "  seed =" (gen/seed/current))
+              (print "  kind =" (sample :kind))
+              (print "  ctx =" Γ)
+              (print "  term =" tm)
+              (print "  expected =" type-tm)
+              (print "  ty =" ty)
+              (print "  ty+ =" ty+))))
+        ([err]
+          (set passed false)
+          (print "Weakening declared-type check failed:")
+          (print "  seed =" (gen/seed/current))
+          (print "  kind =" (sample :kind))
+          (print "  ctx =" Γ)
+          (print "  term =" tm)
+          (print "  type =" type-tm)
+          (print "  err =" err)))))
   passed)
 
 (test/assert suite
-  (prop-context-extension 30)
-  "Property: context extension preserves closed term types")
+  (prop-judgments-keep-declared-types (test/property-count 50))
+  "Property: irrelevant context extension preserves declared types")
 
 (test/end-suite suite)

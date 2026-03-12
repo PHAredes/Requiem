@@ -8,7 +8,7 @@
 (import /build/hamt :as h)
 (import /build/timer :as timer)
 (import ./src/levels :as lvl)
-(import ./src/pretty :as pp)
+(import ./src/core_printer :as pp)
 (import ./src/matches :as mt)
 
 (defn- print/node [tm]
