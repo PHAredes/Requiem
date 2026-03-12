@@ -82,17 +82,10 @@
   (h/put Γ (string x) A))
 
 (defn ctx/lookup [Γ x]
-  (def v (h/get Γ (string x)))
-  (if (nil? v)
-    (errorf "unbound variable '%v' - not found in context.\nAvailable variables: %v" x (map keyword (h/keys Γ)))
-    v))
-
-(var print/sem nil)
-(var print/ne nil)
-(var print/nf nil)
-(var print/tm nil)
-(var goals nil)
-(var goals/set-collect! nil)
+  (let [v (h/get Γ (string x))]
+    (if (nil? v)
+      (errorf "unbound variable '%v' - not found in context.\nAvailable variables: %v" x (map keyword (h/keys Γ)))
+      v)))
 
 # NbE: raise / lower
 (var raise nil)
@@ -103,6 +96,14 @@
 
 (defn- sem/neutral [ne]
   [T/Neutral ne])
+
+(defn- named-neutral [A fresh]
+  (raise A (ne/var fresh)))
+
+(defn- with-fresh-neutral [A f]
+  (let [fresh (gensym)
+        arg-sem (named-neutral A fresh)]
+    (f fresh arg-sem)))
 
 (defn- raise/pi [A B ne]
   (fn [x]
@@ -131,14 +132,14 @@
       (= tag T/Type) (nf/type (get sem 1))
       (= tag T/Pi) (let [[_ A B] sem]
                      (nf/pi (lower/type A)
-                            (fn [fresh]
-                              (let [arg (raise A (ne/var fresh))]
+                             (fn [fresh]
+                              (let [arg (named-neutral A fresh)]
                                 (lower T/Type100 (B arg))))))
       (= tag T/Sigma) (let [[_ A B] sem]
                         (nf/sigma (lower/type A)
-                                  (fn [fresh]
-                                    (let [arg (raise A (ne/var fresh))]
-                                      (lower T/Type100 (B arg))))))
+                                   (fn [fresh]
+                                    (let [arg (named-neutral A fresh)]
+                                       (lower T/Type100 (B arg))))))
       (= tag T/Id) (let [[_ A x y] sem]
                      (nf/id (lower/type A) (lower A x) (lower A y)))
       true sem)))
@@ -149,12 +150,12 @@
       (let [ne (get sem 1)]
         (nf/lam
           (fn [fresh]
-            (let [arg-sem (raise A (ne/var fresh))]
+            (let [arg-sem (named-neutral A fresh)]
               (lower (B arg-sem)
                      (raise (B arg-sem) (ne/app ne (lower A arg-sem))))))))
       (nf/lam
         (fn [fresh]
-          (let [arg-sem (raise A (ne/var fresh))]
+          (let [arg-sem (named-neutral A fresh)]
             (lower (B arg-sem) (sem arg-sem))))))))
 
 (defn- lower/sigma [A B sem]
@@ -191,28 +192,30 @@
            (= tag T/Neutral) (lower/neutral sem)
            true sem))))
 
-(let [pp (printer/make {:T/Type T/Type
-                        :T/Pi T/Pi
-                        :T/Sigma T/Sigma
-                        :T/Id T/Id
-                        :T/Refl T/Refl
-                        :T/Neutral T/Neutral
-                        :T/Pair T/Pair
-                        :NF/Neut NF/Neut
-                        :NF/Lam NF/Lam
-                        :NF/Pi NF/Pi
-                        :NF/Sigma NF/Sigma
-                        :NF/Type NF/Type
-                        :NF/Pair NF/Pair
-                        :NF/Id NF/Id
-                        :NF/Refl NF/Refl
-                        :ty/type ty/type
-                        :lower lower
-                        :lvl/value lvl/value})]
-  (set print/sem (pp :print/sem))
-  (set print/ne (pp :print/ne))
-  (set print/nf (pp :print/nf))
-  (set print/tm (pp :print/tm)))
+(def pp
+  (printer/make {:T/Type T/Type
+                 :T/Pi T/Pi
+                 :T/Sigma T/Sigma
+                 :T/Id T/Id
+                 :T/Refl T/Refl
+                 :T/Neutral T/Neutral
+                 :T/Pair T/Pair
+                 :NF/Neut NF/Neut
+                 :NF/Lam NF/Lam
+                 :NF/Pi NF/Pi
+                 :NF/Sigma NF/Sigma
+                 :NF/Type NF/Type
+                 :NF/Pair NF/Pair
+                 :NF/Id NF/Id
+                 :NF/Refl NF/Refl
+                 :ty/type ty/type
+                 :lower lower
+                 :lvl/value lvl/value}))
+
+(def print/sem (pp :print/sem))
+(def print/ne (pp :print/ne))
+(def print/nf (pp :print/nf))
+(def print/tm (pp :print/tm))
 
 # Definitional equality
 (var sem-eq nil)
@@ -227,16 +230,16 @@
       (and (= t1 T/Pi) (= t2 T/Pi))
       (let [[_ A1 B1] v1 [_ A2 B2] v2]
         (and (sem-eq ty A1 A2)
-             (let [fresh (gensym)
-                   arg-sem (raise A1 (ne/var fresh))]
-               (sem-eq ty (B1 arg-sem) (B2 arg-sem)))))
+             (with-fresh-neutral A1
+               (fn [_ arg-sem]
+                 (sem-eq ty (B1 arg-sem) (B2 arg-sem))))))
 
       (and (= t1 T/Sigma) (= t2 T/Sigma))
       (let [[_ A1 B1] v1 [_ A2 B2] v2]
         (and (sem-eq ty A1 A2)
-             (let [fresh (gensym)
-                   arg-sem (raise A1 (ne/var fresh))]
-               (sem-eq ty (B1 arg-sem) (B2 arg-sem)))))
+             (with-fresh-neutral A1
+               (fn [_ arg-sem]
+                 (sem-eq ty (B1 arg-sem) (B2 arg-sem))))))
 
       (and (= t1 T/Id) (= t2 T/Id))
       (let [[_ A1 x1 y1] v1 [_ A2 x2 y2] v2]
@@ -252,23 +255,23 @@
       (= (get v1 1) (get v2 1))
 
       (= t1 T/Neutral)
-      (let [fresh (gensym)
-            arg-sem (raise A (ne/var fresh))]
-        (sem-eq (B arg-sem)
-                (raise (B arg-sem) (ne/app (get v1 1) (lower A arg-sem)))
-                (v2 arg-sem)))
+      (with-fresh-neutral A
+        (fn [_ arg-sem]
+          (sem-eq (B arg-sem)
+                  (raise (B arg-sem) (ne/app (get v1 1) (lower A arg-sem)))
+                  (v2 arg-sem))))
 
       (= t2 T/Neutral)
-      (let [fresh (gensym)
-            arg-sem (raise A (ne/var fresh))]
-        (sem-eq (B arg-sem)
-                (v1 arg-sem)
-                (raise (B arg-sem) (ne/app (get v2 1) (lower A arg-sem)))))
+      (with-fresh-neutral A
+        (fn [_ arg-sem]
+          (sem-eq (B arg-sem)
+                  (v1 arg-sem)
+                  (raise (B arg-sem) (ne/app (get v2 1) (lower A arg-sem))))))
 
       true
-      (let [fresh (gensym)
-            arg-sem (raise A (ne/var fresh))]
-        (sem-eq (B arg-sem) (v1 arg-sem) (v2 arg-sem))))))
+      (with-fresh-neutral A
+        (fn [_ arg-sem]
+          (sem-eq (B arg-sem) (v1 arg-sem) (v2 arg-sem)))))))
 
 (defn- sem-eq/sigma [A B v1 v2]
   (let [t1 (tag-of v1)
@@ -336,11 +339,11 @@
 
 (defn- eval/app [Γ f x]
   (let [fv (eval Γ f)
-        xv (eval Γ x)]
-    (let [tag (tag-of fv)]
+        xv (eval Γ x)
+        tag (tag-of fv)]
       (if (= tag T/Neutral)
         (sem/neutral (ne/app (get fv 1) (lower T/Type0 xv)))
-        (fv xv)))))
+        (fv xv))))
 
 (defn- eval/t-pi [Γ A B]
   (ty/pi (eval Γ A) (fn [x] (eval Γ (B x)))))
@@ -429,39 +432,45 @@
   (eval/session (fn [] (lower ty (eval (ctx/empty) tm)))))
 
 # Bidirectional checker / metas are installed later.
-(var infer nil)
-(var check nil)
-(var subtype nil)
+(def meta-state
+  (meta/make {:ty/type ty/type
+              :lower lower
+              :ctx/lookup ctx/lookup
+              :goal-ty T/Type100
+              :goal-term (tm/type 100)
+              :print/sem print/sem
+              :sem-eq sem-eq}))
 
-(let [meta-state (meta/make {:ty/type ty/type
-                             :lower lower
-                             :ctx/lookup ctx/lookup
-                             :print/sem print/sem})
-        checker-state (checker/make {:T/Type T/Type
-                                    :T/Pi T/Pi
-                                    :T/Sigma T/Sigma
-                                    :T/Pair T/Pair
-                                    :T/Neutral T/Neutral
-                                    :ty/type ty/type
-                                    :ty/id ty/id
-                                    :lvl/<= lvl/leq
-                                    :lvl/max lvl/max*
-                                    :lvl/succ lvl/succ
-                                    :sem-eq sem-eq
-                                    :eval eval
-                                    :raise raise
-                                    :ctx/add ctx/add
-                                    :ctx/lookup ctx/lookup
-                                    :ne/var ne/var
-                                    :ne/fst ne/fst
-                                    :print/sem print/sem
-                                    :print/tm print/tm
-                                    :meta meta-state})]
-  (set goals (meta-state :goals))
-  (set goals/set-collect! (meta-state :set-collect!))
-  (set infer (checker-state :infer))
-  (set check (checker-state :check))
-  (set subtype (checker-state :subtype)))
+(def checker-state
+  (checker/make {:T/Type T/Type
+                 :T/Pi T/Pi
+                 :T/Sigma T/Sigma
+                 :T/Refl T/Refl
+                 :T/Pair T/Pair
+                 :T/Neutral T/Neutral
+                 :ty/type ty/type
+                 :eq-type T/Type100
+                 :ty/id ty/id
+                 :lvl/<= lvl/<=
+                 :lvl/max lvl/max
+                 :lvl/succ lvl/succ
+                 :sem-eq sem-eq
+                 :eval eval
+                 :raise raise
+                 :ctx/add ctx/add
+                 :ctx/lookup ctx/lookup
+                 :ne/var ne/var
+                 :ne/fst ne/fst
+                 :print/sem print/sem
+                 :print/tm print/tm
+                 :meta meta-state}))
+
+(def goals (meta-state :goals))
+(def goals/set-collect! (meta-state :set-collect!))
+(def goals/collect? (meta-state :collect?))
+(def infer (checker-state :infer))
+(def check (checker-state :check))
+(def subtype (checker-state :subtype))
 
 (defn type-eq [Γ A B]
   (sem-eq T/Type100 (eval Γ A) (eval Γ B)))
@@ -543,4 +552,5 @@
    :ctx/lookup ctx/lookup
    :eval/session eval/session
    :goals goals
-   :goals/set-collect! goals/set-collect!})
+   :goals/set-collect! goals/set-collect!
+   :goals/collect? goals/collect?})
