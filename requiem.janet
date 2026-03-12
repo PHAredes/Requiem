@@ -418,8 +418,14 @@
 (defn- mode/runs-computes? [mode]
   (or (= mode :run) (= mode :compile)))
 
+(defn- requiem-root []
+  (or (os/getenv "REQUIEM_ROOT") "."))
+
+(defn- default-prelude-import []
+  (string (requiem-root) "/Prelude"))
+
 (defn- with-default-prelude [src]
-  (string "import \"Prelude\"\n\n" src))
+  (string "import \"" (default-prelude-import) "\"\n\n" src))
 
 (defn- print/help []
   (print "Usage: requiem [mode] <file.requiem>")
@@ -760,7 +766,11 @@
         (each decl core
           (match decl
             [:core/func name params result ty clauses]
-            nil
+            (do
+              (let [Γ (binders->ctx params global-ctx)
+                    expected result]
+                (each c clauses
+                  (check/with-ctors Γ (c 2) expected ctor-env))))
 
             [:core/compute tm]
             (when (mode/runs-computes? mode)

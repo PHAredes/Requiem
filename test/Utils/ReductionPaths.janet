@@ -55,26 +55,30 @@
         nil))))
 
 (defn step-rightmost [tm]
-  (if (reducible? tm)
-    (contract tm)
-    (if (not (tuple? tm))
-      nil
-      (case (tm 0)
-        :app (let [x-step (step-rightmost (tm 2))]
-               (if x-step
-                 [:app (tm 1) x-step]
-                 (let [f-step (step-rightmost (tm 1))]
-                   (if f-step [:app f-step (tm 2)] nil))))
-        :fst (let [p-step (step-rightmost (tm 1))]
-               (if p-step [:fst p-step] nil))
-        :snd (let [p-step (step-rightmost (tm 1))]
-               (if p-step [:snd p-step] nil))
-        :pair (let [r-step (step-rightmost (tm 2))]
-                (if r-step
-                  [:pair (tm 1) r-step]
-                  (let [l-step (step-rightmost (tm 1))]
-                    (if l-step [:pair l-step (tm 2)] nil))))
-        nil))))
+  (if (not (tuple? tm))
+    nil
+    (case (tm 0)
+      :app (let [x-step (step-rightmost (tm 2))]
+             (if x-step
+               [:app (tm 1) x-step]
+               (let [f-step (step-rightmost (tm 1))]
+                 (if f-step
+                   [:app f-step (tm 2)]
+                   (if (reducible? tm) (contract tm) nil)))))
+      :fst (let [p-step (step-rightmost (tm 1))]
+             (if p-step
+               [:fst p-step]
+               (if (reducible? tm) (contract tm) nil)))
+      :snd (let [p-step (step-rightmost (tm 1))]
+             (if p-step
+               [:snd p-step]
+               (if (reducible? tm) (contract tm) nil)))
+      :pair (let [r-step (step-rightmost (tm 2))]
+              (if r-step
+                [:pair (tm 1) r-step]
+                (let [l-step (step-rightmost (tm 1))]
+                  (if l-step [:pair l-step (tm 2)] nil))))
+      (if (reducible? tm) (contract tm) nil))))
 
 (defn normalize-path [tm step-fn]
   (var out @[tm])

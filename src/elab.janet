@@ -432,10 +432,9 @@
 
 (defn items/to-term [items]
   (let [arrow-idx (find-index node/arrow-token? items)
-        forall-idx (find-index node/forall-token? items)]
+         forall-idx (find-index node/forall-token? items)]
     (cond
       (and forall-idx
-           (>= forall-idx 1)
            (tuple? (items (+ forall-idx 1)))
            (= ((items (+ forall-idx 1)) 0) :list)
            (tuple? (items (+ forall-idx 2)))
@@ -464,6 +463,14 @@
 (defn line/term [line]
   (items/to-term (line/items line)))
 
+(defn atom/strip-trailing-colon [item]
+  (if (and (tuple? item)
+           (= (item 0) :atom)
+           (> (length (item 1)) 1)
+           (= (string/slice (item 1) -1) ":"))
+    [:atom (string/slice (item 1) 0 -1)]
+    item))
+
 (defn header/split-colon [header]
   (let [s (string/trim (string header))
         parsed (p/parse/one (string "(" s ")"))]
@@ -473,11 +480,17 @@
             colon-idx (find-index (fn [item]
                                     (and (tuple? item)
                                          (= (item 0) :atom)
-                                         (= (item 1) ":")))
+                                         (or (= (item 1) ":")
+                                             (and (> (length (item 1)) 1)
+                                                  (= (string/slice (item 1) -1) ":")))))
                                   items)]
         (if (nil? colon-idx)
           [s nil]
-          (let [lhs-items (slice items 0 colon-idx)
+          (let [colon-item (items colon-idx)
+                lhs-items (if (= (colon-item 1) ":")
+                            (slice items 0 colon-idx)
+                            (array/concat (slice items 0 colon-idx)
+                                          @[(atom/strip-trailing-colon colon-item)]))
                 rhs-items (slice items (+ colon-idx 1) (length items))
                 lhs (if (zero? (length lhs-items))
                       ""
