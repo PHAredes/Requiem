@@ -131,20 +131,16 @@
 (defn- layout/block->record-forms [block]
   (let [root {:indent -1 :text nil :children @[]}
         lines (string/split "\n" (string block))]
-    (defn walk [rest stack]
-      (if (zero? (length rest))
-        nil
-        (let [line (first rest)]
-          (if (line/ignored? line)
-            (walk (slice rest 1) stack)
-            (let [indent (line/indent line)
-                  text (string/trim line)
-                  node {:indent indent :text text :children @[]}
-                  trimmed (stack/trim stack indent)
-                  parent (trimmed (- (length trimmed) 1))]
-              (array/push (get parent :children) node)
-              (walk (slice rest 1) [;trimmed node]))))))
-    (walk lines @[root])
+    (var stack @[root])
+    (each line lines
+      (when (not (line/ignored? line))
+        (let [indent (line/indent line)
+              text (string/trim line)
+              node {:indent indent :text text :children @[]}
+              trimmed (stack/trim stack indent)
+              parent (trimmed (- (length trimmed) 1))]
+          (array/push (get parent :children) node)
+          (set stack [;trimmed node]))))
     (map (fn [top]
            [:list (reduce (fn [acc child]
                             [;acc (layout/node->entry-form child)])
@@ -210,20 +206,16 @@
 (defn- layout/block->canonical [block]
   (let [root {:indent -1 :text nil :children @[]}
         lines (string/split "\n" (string block))]
-    (defn walk [rest stack]
-      (if (zero? (length rest))
-        nil
-        (let [line (first rest)]
-          (if (line/ignored? line)
-            (walk (slice rest 1) stack)
-            (let [indent (line/indent line)
-                  text (string/trim line)
-                  node {:indent indent :text text :children @[]}
-                  trimmed (stack/trim stack indent)
-                  parent (trimmed (- (length trimmed) 1))]
-              (array/push (get parent :children) node)
-              (walk (slice rest 1) [;trimmed node]))))))
-    (walk lines @[root])
+    (var stack @[root])
+    (each line lines
+      (when (not (line/ignored? line))
+        (let [indent (line/indent line)
+              text (string/trim line)
+              node {:indent indent :text text :children @[]}
+              trimmed (stack/trim stack indent)
+              parent (trimmed (- (length trimmed) 1))]
+          (array/push (get parent :children) node)
+          (set stack [;trimmed node]))))
     (let [tops (get root :children)]
       (when (zero? (length tops))
         (errorf "invalid layout block: %q" block))

@@ -6,7 +6,7 @@
 
 # Test 3: Eta-Equality for Functions
 # λx. f x ≡ f (when x not free in f)
-(let [id-ty (c/tm/pi [:type 0] (fn [x] [:type 0]))
+(let [id-ty (c/ty/pi (c/ty/type 0) (fn [_] (c/ty/type 0)))
       f [:var "f"]
       eta-expanded [:lam (fn [x] [:app f x])]
       Γ (c/ctx/add (c/ctx/empty) "f" id-ty)]
@@ -16,7 +16,7 @@
 
 # Test 4: Eta-Equality for Pairs
 # (fst p, snd p) ≡ p
-(let [pair-ty (c/tm/sigma [:type 0] (fn [x] [:type 0]))
+(let [pair-ty (c/ty/sigma (c/ty/type 0) (fn [_] (c/ty/type 0)))
       p [:var "p"]
       eta-expanded [:pair [:fst p] [:snd p]]
       Γ (c/ctx/add (c/ctx/empty) "p" pair-ty)]

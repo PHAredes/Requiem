@@ -120,11 +120,14 @@
 
 (defn elab/function-ref [name params]
   (let [n (length params)]
-    (defn build [i args]
+    (defn build [i mk-app]
       (if (= i n)
-        (term/app-chain [:var name] args)
-        [:lam (fn [x] (build (+ i 1) [;args x]))]))
-    (build 0 @[])))
+        (mk-app [:var name])
+        [:lam (fn [x]
+                (build (+ i 1)
+                       (fn [head]
+                         (mk-app [:app head x]))))]))
+    (build 0 (fn [head] head))))
 
 (defn elab/atom [env sig-env tok exact-ref?]
   (if-let [bound (env/lookup env tok)]

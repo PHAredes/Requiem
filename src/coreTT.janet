@@ -90,6 +90,7 @@
 # NbE: raise / lower
 (var raise nil)
 (var lower nil)
+(var infer nil)
 
 (defn- tag-of [x]
   (if (tuple? x) (get x 0) 0))
@@ -339,10 +340,16 @@
 
 (defn- eval/app [Γ f x]
   (let [fv (eval Γ f)
-        xv (eval Γ x)
-        tag (tag-of fv)]
+         xv (eval Γ x)
+         tag (tag-of fv)]
       (if (= tag T/Neutral)
-        (sem/neutral (ne/app (get fv 1) (lower T/Type0 xv)))
+        (let [fA (infer Γ f)
+              ftag (tag-of fA)]
+          (if (= ftag T/Pi)
+            (let [[_ A _] fA]
+              (sem/neutral (ne/app (get fv 1) (lower A xv))))
+            (errorf "cannot apply neutral term with non-function type: %s"
+                    (print/sem fA))))
         (fv xv))))
 
 (defn- eval/t-pi [Γ A B]
@@ -449,6 +456,7 @@
                  :T/Pair T/Pair
                  :T/Neutral T/Neutral
                  :ty/type ty/type
+                 :ty/pi ty/pi
                  :eq-type T/Type100
                  :ty/id ty/id
                  :lvl/<= lvl/<=
@@ -456,9 +464,11 @@
                  :lvl/succ lvl/succ
                  :sem-eq sem-eq
                  :eval eval
+                 :lower lower
                  :raise raise
                  :ctx/add ctx/add
                  :ctx/lookup ctx/lookup
+                 :ne/app ne/app
                  :ne/var ne/var
                  :ne/fst ne/fst
                  :print/sem print/sem
@@ -468,7 +478,7 @@
 (def goals (meta-state :goals))
 (def goals/set-collect! (meta-state :set-collect!))
 (def goals/collect? (meta-state :collect?))
-(def infer (checker-state :infer))
+(set infer (checker-state :infer))
 (def check (checker-state :check))
 (def subtype (checker-state :subtype))
 
