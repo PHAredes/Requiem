@@ -438,7 +438,8 @@
               :ctx/lookup ctx/lookup
               :goal-ty T/Type100
               :goal-term (tm/type 100)
-              :print/sem print/sem}))
+              :print/sem print/sem
+              :sem-eq sem-eq}))
 
 (def checker-state
   (checker/make {:T/Type T/Type
