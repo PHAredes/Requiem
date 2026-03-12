@@ -29,11 +29,8 @@
   (cond
     (int? l) (check-nat l "lvl/value")
     (const? l) (check-nat (get l 1) "lvl/value")
-    (shift? l) (check-nat (get l 1) "lvl/value")
+    (shift? l) (errorf "lvl/value: shift is a displacement operator, not a concrete level: %v" l)
     true (errorf "invalid level expression: %v" l)))
-
-(defn normalize [l]
-  (const (value l)))
 
 (defn leq [l1 l2]
   (<= (value l1) (value l2)))
@@ -55,10 +52,15 @@
 (def max max*)
 
 (defn apply-shift [shift-val l]
-  (const (+ (value shift-val) (value l))))
+  (const (+ (get shift-val 1) (value l))))
 
 (defn compose [s1 s2]
-  (shift (+ (value s1) (value s2))))
+  (shift (+ (get s1 1) (get s2 1))))
+
+(defn normalize [l]
+  (if (shift? l)
+    (apply-shift l (const 0))
+    (const (value l))))
 
 (defn str [l]
   (string "l" (value l)))

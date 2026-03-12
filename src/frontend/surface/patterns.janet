@@ -5,7 +5,7 @@
 (import ./lexer :as lx)
 
 (defn- strip-parens [s]
-  (let [t (ly/trim s)]
+  (let [t (string/trim s)]
     (if (and (> (length t) 1) (= (t 0) (chr "(")) (= (t (- (length t) 1)) (chr ")")))
       (strip-parens (string/slice t 1 (- (length t) 1)))
       t)))

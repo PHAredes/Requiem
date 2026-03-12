@@ -6,23 +6,30 @@
 (defn sig/empty [] @{})
 
 (defn sig/add-data [sig name params sort ctors]
-  (put sig name {:kind :data
-                 :name name
-                 :params (or params @[])
-                 :sort sort
-                 :ctors (or ctors @[])})
+  (put sig
+       name
+       {:kind :data
+        :name name
+        :params (or params @[])
+        :sort sort
+        :ctors (or ctors @[])})
   sig)
 
 (defn sig/add-func [sig name params result core-type]
-  (put sig name {:kind :func
-                 :name name
-                 :params (or params @[])
-                 :result result
-                 :type core-type})
+  (put sig
+       name
+       {:kind :func
+        :name name
+        :params (or params @[])
+        :result result
+        :type core-type})
   sig)
 
+(defn sig/lookup [sig name]
+  (get sig name))
+
 (defn sig/entry [sig name]
-  (or (get sig name)
+  (or (sig/lookup sig name)
       (errorf "sig/entry: unknown name '%v'" name)))
 
 (defn sig/params [sig name]
@@ -46,18 +53,17 @@
       (errorf "sig/ctor: unknown constructor '%v' in '%v'" ctor-name data-name)))
 
 (defn sig/ctor-name-set [sig]
-  (reduce
-    (fn [out entry]
-      (if (= (entry :kind) :data)
-        (reduce (fn [acc ctor] (put acc (ctor :name) true)) out (entry :ctors))
-        out))
-    @{}
-    (values sig)))
+  (let [out @{}]
+    (each entry (values sig)
+      (when (= (entry :kind) :data)
+        (each ctor (entry :ctors)
+          (put out (ctor :name) true))))
+    out))
 
-(defn sig/exact-ref [sig name]
+(defn sig/delta-ref [sig name]
   (let [e (sig/entry sig name)]
     (when (not= (e :kind) :func)
-      (errorf "sig/exact-ref: '%v' is not a function" name))
+      (errorf "sig/delta-ref: '%v' is not a function" name))
     (let [delta (e :params)
           n (length delta)]
       (defn build [i args]
@@ -66,8 +72,8 @@
                   (tt/tm/var name)
                   args)
           (tt/tm/lam
-            (fn [x]
-              (build (+ i 1) [;args x])))))
+           (fn [x]
+             (build (+ i 1) (array/push (array/slice args) x))))))
       (build 0 @[]))))
 
 (defn sig/available-ctors [sig data-name type-args]
@@ -92,13 +98,14 @@
   {:sig/empty sig/empty
    :sig/add-data sig/add-data
    :sig/add-func sig/add-func
+   :sig/lookup sig/lookup
    :sig/entry sig/entry
    :sig/params sig/params
    :sig/type-of sig/type-of
    :sig/ctors sig/ctors
    :sig/ctor sig/ctor
    :sig/ctor-name-set sig/ctor-name-set
-   :sig/exact-ref sig/exact-ref
+   :sig/delta-ref sig/delta-ref
    :sig/available-ctors sig/available-ctors
    :sig/process-decl sig/process-decl
    :sig/build sig/build})

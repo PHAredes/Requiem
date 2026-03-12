@@ -54,10 +54,9 @@
           (string (alpha-name (- q 1)) ch))))
 
     (defn find-name [n build]
-      (let [candidate (build n)]
-        (if (state/used? candidate)
-          (find-name (inc n) build)
-          [n candidate])))
+      (var i n)
+      (while (state/used? (build i)) (++ i))
+      [i (build i)])
 
     (defn fresh-name []
       (let [[n candidate] (find-name state/fresh-id alpha-name)]
@@ -256,12 +255,10 @@
       (let [tag (tag-of sem)]
         (cond
           (= tag T/Neutral) (print/ne* (get sem 1))
-          (= tag T/Type) (print/nf* (lower (ty/type 100) sem))
-          (= tag T/Pi) (print/nf* (lower (ty/type 100) sem))
-          (= tag T/Sigma) (print/nf* (lower (ty/type 100) sem))
-          (= tag T/Id) (print/nf* (lower (ty/type 100) sem))
           (= tag T/Refl) (string "refl " (sem* (get sem 1)))
           (= tag T/Pair) (string "(" (sem* (get sem 1)) ", " (sem* (get sem 2)) ")")
+          (or (= tag T/Type) (= tag T/Pi) (= tag T/Sigma) (= tag T/Id))
+          (print/nf* (lower (ty/type 100) sem))
           true (string/format "%v" sem))))
 
     (defn print/sem [sem]

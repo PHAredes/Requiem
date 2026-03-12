@@ -19,19 +19,15 @@
     :origin (or origin :unknown)})
 
 (defn ctx/from-env [env]
-  (let [latest
-        (reduce (fn [acc i]
-                  (put acc (ctx/entry-name (env i)) i))
-                @{}
-                (range (length env)))]
-    (reduce (fn [acc i]
-              (let [entry (env i)
-                    name (ctx/entry-name entry)]
-                (if (= (get latest name) i)
-                  [;acc [name (ctx/entry-type entry)]]
-                  acc)))
-            @[]
-            (range (length env)))))
+  (let [seen @{}
+        out @[]]
+    (loop [i :down-to [(- (length env) 1) 0]]
+      (let [entry (env i)
+            name (ctx/entry-name entry)]
+        (unless (get seen name)
+          (put seen name true)
+          (array/push out [name (ctx/entry-type entry)]))))
+    (reverse out)))
 
 (defn constraint/hole [mv name env &opt origin]
   (constraint/make mv name nil nil (ctx/from-env env) (or origin :elab/hole)))
@@ -44,7 +40,7 @@
           @{}
           goals))
 
-(defn constraint/merge-goals! [constraints goals]
+(defn constraint/merge-goals [constraints goals]
   (let [expected-by-name (goals/expected-map goals)]
     (map (fn [c]
            (if (or (c :expected) (nil? (c :name)))
@@ -56,18 +52,17 @@
 
 (defn constraints/without-mvs [constraints hidden-mvs]
   (reduce (fn [acc c]
-            (if (get hidden-mvs (c :mv))
-              acc
-              [;acc c]))
+            (when (not (get hidden-mvs (c :mv)))
+              (array/push acc c))
+            acc)
           @[]
           constraints))
 
 (defn constraints/without-name-set [constraints hidden-names]
   (reduce (fn [acc c]
-            (if (and (c :name)
-                     (get hidden-names (c :name)))
-              acc
-              [;acc c]))
+            (when (not (and (c :name) (get hidden-names (c :name))))
+              (array/push acc c))
+            acc)
           @[]
           constraints))
 
@@ -105,7 +100,7 @@
   {:constraint/make constraint/make
    :ctx/from-env ctx/from-env
    :constraint/hole constraint/hole
-   :constraint/merge-goals! constraint/merge-goals!
+   :constraint/merge-goals constraint/merge-goals
    :constraint/mv-set constraint/mv-set
    :constraint/name-map constraint/name-map
    :constraint/name-set constraint/name-set
