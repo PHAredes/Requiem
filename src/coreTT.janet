@@ -339,11 +339,11 @@
 
 (defn- eval/app [Γ f x]
   (let [fv (eval Γ f)
-        xv (eval Γ x)]
-    (let [tag (tag-of fv)]
+        xv (eval Γ x)
+        tag (tag-of fv)]
       (if (= tag T/Neutral)
         (sem/neutral (ne/app (get fv 1) (lower T/Type0 xv)))
-        (fv xv)))))
+        (fv xv))))
 
 (defn- eval/t-pi [Γ A B]
   (ty/pi (eval Γ A) (fn [x] (eval Γ (B x)))))

@@ -1,9 +1,5 @@
 #!/usr/bin/env janet
 
-(defn trim [s] (string/trim s))
-(defn trimr [s] (string/trimr s))
-(defn triml [s] (string/triml s))
-
 (defn is-space-byte? [c]
   (or (= c (chr " ")) (= c (chr "\t"))))
 
@@ -91,10 +87,7 @@
     out))
 
 (def exports
-  {:trim trim
-   :trimr trimr
-   :triml triml
-   :is-space-byte? is-space-byte?
+  {:is-space-byte? is-space-byte?
    :split-top-level split-top-level
    :split-ws-top-level split-ws-top-level
    :find-top-level-char find-top-level-char

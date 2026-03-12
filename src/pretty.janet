@@ -1,5 +1,9 @@
 #!/usr/bin/env janet
 
+# Instantiates the printer with the concrete tags and operations from coreTT.
+# Import this module instead of printer directly.
+# It looks like boilerplate because it is, but it makes testing and adressing stuff easier
+
 (import ./coreTT :as tt)
 (import ./levels :as lvl)
 (import ./print :as printer)

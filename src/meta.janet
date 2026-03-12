@@ -33,27 +33,19 @@
         current))
 
     (defn context-vars [Γ]
-      (map keyword (h/keys Γ)))
+      (h/keys Γ))
 
     (defn report [name expected Γ]
-      (let [ctx (map (fn [k] [k (ctx/lookup Γ k)]) (h/keys Γ))
+      (let [ctx      (map (fn [k] [k (ctx/lookup Γ k)]) (h/keys Γ))
             expected (or expected goal-ty)]
-        (if name
-          (if-let [goal (get named-goals name)]
-            (do
-              (put goal :expected (expected/merge name (goal :expected) expected))
-              (when (> (length ctx) (length (goal :ctx)))
-                (put goal :ctx ctx))
-              goal)
-            (let [goal @{:name name
-                         :expected expected
-                         :ctx ctx}]
-              (put named-goals name goal)
-              (array/push goals goal)
-              goal))
-          (let [goal @{:name name
-                       :expected expected
-                       :ctx ctx}]
+        (if-let [goal (and name (get named-goals name))]
+          (do
+            (put goal :expected (expected/merge name (goal :expected) expected))
+            (when (> (length ctx) (length (goal :ctx)))
+              (put goal :ctx ctx))
+            goal)
+          (let [goal @{:name name :expected expected :ctx ctx}]
+            (when name (put named-goals name goal))
             (array/push goals goal)
             goal))))
 
