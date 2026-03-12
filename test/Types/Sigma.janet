@@ -2,6 +2,7 @@
 
 (import ../Utils/TestRunner :as test)
 (import ../../src/coreTT :as c)
+(import ../Utils/Generators :as gen)
 
 (def suite (test/start-suite "Type Sigma"))
 
@@ -41,7 +42,7 @@
     "Pair checks against dependent Sigma via shared binder helper"))
 
 # Property: Sigma Projections Inverse
-(var rng (math/rng 42))
+(var rng (gen/rng))
 
 (defn gen-univ []
   [:type (math/rng-int rng 4)])

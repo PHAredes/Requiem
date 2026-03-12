@@ -1,2 +1,5 @@
 #!/bin/sh
-exec janet "/home/user/Repos/Requiem/requiem.janet" "$@"
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export REQUIEM_ROOT="$ROOT"
+cd "$ROOT"
+exec janet "$ROOT/requiem.janet" "$@"
