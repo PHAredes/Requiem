@@ -66,15 +66,15 @@
       (errorf "sig/delta-ref: '%v' is not a function" name))
     (let [delta (e :params)
           n (length delta)]
-      (defn build [i args]
+      (defn build [i mk-app]
         (if (= i n)
-          (reduce (fn [acc arg] (tt/tm/app acc arg))
-                  (tt/tm/var name)
-                  args)
+          (mk-app (tt/tm/var name))
           (tt/tm/lam
            (fn [x]
-             (build (+ i 1) (array/push (array/slice args) x))))))
-      (build 0 @[]))))
+             (build (+ i 1)
+                    (fn [head]
+                      (mk-app (tt/tm/app head x))))))))
+      (build 0 (fn [head] head)))))
 
 (defn sig/available-ctors [sig data-name type-args]
   (let [ctors (sig/ctors sig data-name)

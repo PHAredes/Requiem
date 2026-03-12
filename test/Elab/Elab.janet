@@ -4,6 +4,7 @@
 (import ../../src/sig :as s)
 (import ../../src/elab :as e)
 (import ../../src/coreTT :as tt)
+(import ../../src/frontend/sexpr/parser :as p)
 
 (defn mk-sig []
   (let [sig (s/sig/empty)]
@@ -126,5 +127,13 @@
         result ((program 0) 3)]
     (= (result 0) :t-sigma))
   "Dispatch aliases normalize sigma spellings")
+
+(test/assert suite
+  (let [node (p/parse/one "(J Type1 Type0 (fn (y) (fn (p) (Id Type1 Type0 y))) (refl Type0) Type0 (refl Type0))")
+        term ((e/exports :term/elab) @[] node)
+        inferred (tt/infer-top term)]
+    (and (= (term 0) :t-J)
+         (= (get inferred 0) tt/T/Id)))
+  "Elaborated J motives typecheck end-to-end")
 
 (test/end-suite suite)
