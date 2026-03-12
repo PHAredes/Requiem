@@ -52,15 +52,22 @@
           paths (red/get-reduction-paths tm)
           left-path (paths 0)
           right-path (paths 1)
+          left-step (if (> (length left-path) 1) (left-path 1) nil)
+          right-step (if (> (length right-path) 1) (right-path 1) nil)
           left-final (left-path (dec (length left-path)))
           right-final (right-path (dec (length right-path)))
           left-nf (c/nf ty left-final)
           right-nf (c/nf ty right-final)]
-      (unless (a/nf-eq? left-nf right-nf)
+      (unless (and left-step
+                   right-step
+                   (not (= left-step right-step))
+                   (a/nf-eq? left-nf right-nf))
         (set passed false)
         (print "Strategy join failed:")
         (print "  seed =" (gen/seed/current))
         (print "  term =" tm)
+        (print "  actual left step =" left-step)
+        (print "  actual right step =" right-step)
         (print "  left path =" left-path)
         (print "  right path =" right-path)
         (print "  left nf =" left-nf)
