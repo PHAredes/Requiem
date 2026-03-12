@@ -11,6 +11,14 @@
 (defn- is-digit-byte? [c]
   (is-byte-between? c (chr "0") (chr "9")))
 
+(defn- digits-only? [text &opt start]
+  (let [from (or start 0)]
+    (and (>= (length text) from)
+         (reduce (fn [ok i]
+                   (and ok (is-digit-byte? (text i))))
+                 true
+                 (range from (length text))))))
+
 (defn- is-upper-byte? [c]
   (is-byte-between? c (chr "A") (chr "Z")))
 
@@ -21,23 +29,15 @@
 (defn name/is-universe? [name]
   (and (> (length name) 1)
        (= (name 0) (chr "U"))
-       (do
-         (var ok true)
-         (for i 1 (length name)
-           (when (not (is-digit-byte? (name i)))
-             (set ok false)))
-          ok)))
+       (digits-only? name 1)))
 
 (defn name/is-type-universe? [name]
   (and (string/has-prefix? "Type" name)
        (let [suffix (string/slice name 4)]
-         (or (= suffix "")
-             (do
-               (var ok true)
-               (for i 0 (length suffix)
-                 (when (not (is-digit-byte? (suffix i)))
-                   (set ok false)))
-               ok)))))
+         (digits-only? suffix))))
+
+(defn- syntax/find-literal [sx lit]
+  (find |(= ($ :lit) lit) (sx :literals)))
 
 (defn syntax/default []
   @{:literals @[
@@ -88,25 +88,13 @@
 
 (defn syntax/add-operator! [sx op fixity level]
   (put (sx :operators) op {:fixity fixity :level level})
-  # Ensure the operator is also in literals so the lexer can see it
-  (var found-lit false)
-  (each entry (sx :literals)
-    (when (= (entry :lit) op)
-      (set found-lit true)
-      (break)))
-  (when (not found-lit)
+  (when (nil? (syntax/find-literal sx op))
     (syntax/add-literal! sx op :op op))
   sx)
 
 (defn syntax/add-alias! [sx new-lit target-lit]
-  (var found nil)
-  (each entry (sx :literals)
-    (when (= (entry :lit) target-lit)
-      (set found entry)
-      (break)))
-  (if found
+  (if-let [found (syntax/find-literal sx target-lit)]
     (syntax/add-literal! sx new-lit (found :k) (found :v))
-    # If not a literal, maybe it's a known quantifier keyword?
     (match target-lit
       "forall" (syntax/add-literal! sx new-lit :quant :pi)
       "sigma" (syntax/add-literal! sx new-lit :quant :sigma)

@@ -92,4 +92,39 @@
     (= (ref 0) :lam))
   "Function references elaborate to exact-ref")
 
+(test/assert suite
+  (let [program (e/elab/program
+                  @[
+                    [:decl/func "alias-id"
+                     @[]
+                     [:list @[[:atom "Nat"] [:atom "->"] [:atom "Nat"]]]
+                     @[
+                       [:clause @[]
+                        [:list @[[:atom "lambda"]
+                                 [:list @[[:atom "x"]]]
+                                 [:atom "x"]]]]
+                     ]]
+                  ])
+        clause-body ((((program 0) 5) 0) 2)]
+    (= (clause-body 0) :lam))
+  "Dispatch aliases normalize lambda spellings")
+
+(test/assert suite
+  (let [program (e/elab/program
+                  @[
+                    [:decl/func "sig-ty"
+                     @[]
+                     [:list @[[:atom "exists"]
+                              [:list @[[:atom "x:"] [:atom "Nat"]]]
+                              [:atom "."]
+                              [:atom "Nat"]]
+                     ]
+                     @[
+                       [:clause @[] [:atom "zero"]]
+                     ]]
+                  ])
+        result ((program 0) 3)]
+    (= (result 0) :t-sigma))
+  "Dispatch aliases normalize sigma spellings")
+
 (test/end-suite suite)
