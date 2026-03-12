@@ -9,6 +9,7 @@
 
 #define BITS 5
 #define MASK ((1 << BITS) - 1)
+#define MAX_DEPTH 12
 
 static inline uint64_t h_hash(const char *key) {
     uint64_t h = 0xcbf29ce484222325ULL;
@@ -17,7 +18,7 @@ static inline uint64_t h_hash(const char *key) {
 }
 
 static inline int h_pop(uint32_t x) { return __builtin_popcount(x); }
-static inline uint32_t h_frag(uint64_t h, int d) { return (h >> ((d * BITS) % 60)) & MASK; }
+static inline uint32_t h_frag(uint64_t h, int d) { return (h >> (d * BITS)) & MASK; }
 
 /* Pointer tagging: LSB 1 = Leaf, 0 = Node */
 #define T_LEAF  1
@@ -25,7 +26,13 @@ static inline uint32_t h_frag(uint64_t h, int d) { return (h >> ((d * BITS) % 60
 static inline bool is_leaf(void *p) { return ((uintptr_t)p & T_LEAF) != 0; }
 static inline void *get_ptr(void *p) { return (void *)((uintptr_t)p & ~T_LEAF); }
 
-/* Arena allocator */
+/* Arena allocator
+ *
+ * Chunks are bump-allocated and never compacted in place. Memory usage is
+ * therefore proportional to the number of persistent nodes retained across
+ * updates until the owning HAMT becomes unreachable and arena_dec frees the
+ * whole arena.
+ */
 #define ARENA_CHUNK (64 * 1024)
 
 typedef struct Chunk { struct Chunk *next; } Chunk;
@@ -65,11 +72,16 @@ static char *arena_strdup(Arena *a, const char *s) {
 
 /* Node structures */
 typedef struct { uint32_t bits; void *kids[]; } Node;
-typedef struct { uint64_t hash; char *key; Janet val; } Leaf;
+typedef struct Leaf {
+    uint64_t hash;
+    char *key;
+    Janet val;
+    struct Leaf *next;
+} Leaf;
 
-static Leaf *leaf_new(Arena *a, const char *k, Janet v, uint64_t h) {
+static Leaf *leaf_new(Arena *a, const char *k, Janet v, uint64_t h, Leaf *next) {
     Leaf *l = arena_alloc(a, sizeof(Leaf));
-    l->key = arena_strdup(a, k); l->val = v; l->hash = h;
+    l->key = arena_strdup(a, k); l->val = v; l->hash = h; l->next = next;
     return l;
 }
 
@@ -80,17 +92,31 @@ static Node *node_new(Arena *a, uint32_t bits, int count) {
 }
 
 static inline void *mk_leaf(Arena *a, const char *k, Janet v, uint64_t h) {
-    return (void *)((uintptr_t)leaf_new(a, k, v, h) | T_LEAF);
+    return (void *)((uintptr_t)leaf_new(a, k, v, h, NULL) | T_LEAF);
+}
+
+static Leaf *leaf_put(Arena *a, Leaf *old, const char *k, Janet v, uint64_t h, bool *added) {
+    if (!old) {
+        *added = true;
+        return leaf_new(a, k, v, h, NULL);
+    }
+    if (old->hash == h && !strcmp(old->key, k)) {
+        *added = false;
+        return leaf_new(a, k, v, h, old->next);
+    }
+    Leaf *next = leaf_put(a, old->next, k, v, h, added);
+    return leaf_new(a, old->key, old->val, old->hash, next);
 }
 
 /* Core operations - now using pre-computed hash */
 static int h_get(void *n, const char *k, uint64_t h, int d, Janet *out) {
     if (!n) return 0;
     if (is_leaf(n)) {
-        Leaf *l = get_ptr(n);
-        if (l->hash == h && !strcmp(l->key, k)) { *out = l->val; return 1; }
+        for (Leaf *l = get_ptr(n); l; l = l->next)
+            if (l->hash == h && !strcmp(l->key, k)) { *out = l->val; return 1; }
         return 0;
     }
+    if (d >= MAX_DEPTH) return 0;
     Node *node = n; uint32_t idx = h_frag(h, d);
     if (!(node->bits & (1u << idx))) return 0;
     int pos = (node->bits == 0xFFFFFFFF) ? idx : h_pop(node->bits & ((1u << idx) - 1));
@@ -102,7 +128,9 @@ static void *h_put(Arena *a, void *n, const char *k, Janet v, uint64_t h, int d,
     
     if (is_leaf(n)) {
         Leaf *ol = get_ptr(n);
-        if (ol->hash == h && !strcmp(ol->key, k)) { *added = false; return mk_leaf(a, k, v, h); }
+        if (ol->next || ol->hash == h || d >= MAX_DEPTH) {
+            return (void *)((uintptr_t)leaf_put(a, ol, k, v, h, added) | T_LEAF);
+        }
         
         *added = true;
         char *lk = ol->key; Janet lv = ol->val;
@@ -123,6 +151,9 @@ static void *h_put(Arena *a, void *n, const char *k, Janet v, uint64_t h, int d,
     }
     
     Node *node = n;
+    if (d >= MAX_DEPTH) {
+        janet_panic("hamt: unreachable node beyond MAX_DEPTH");
+    }
     uint32_t idx = h_frag(h, d), bit = 1u << idx;
     int pos = h_pop(node->bits & (bit - 1)), count = h_pop(node->bits);
     
@@ -144,10 +175,11 @@ static void *h_put(Arena *a, void *n, const char *k, Janet v, uint64_t h, int d,
 static void h_collect(void *n, JanetTable *t, JanetArray *keys) {
     if (!n) return;
     if (is_leaf(n)) {
-        Leaf *l = get_ptr(n);
-        Janet k = janet_wrap_string(janet_cstring(l->key));
-        if (t) janet_table_put(t, k, l->val);
-        if (keys) janet_array_push(keys, k);
+        for (Leaf *l = get_ptr(n); l; l = l->next) {
+            Janet k = janet_wrap_string(janet_cstring(l->key));
+            if (t) janet_table_put(t, k, l->val);
+            if (keys) janet_array_push(keys, k);
+        }
         return;
     }
     Node *node = n; int c = h_pop(node->bits);
