@@ -7,7 +7,7 @@
 
 (def suite (test/start-suite "CoreTT Identity Types"))
 
-(def rng (gen/rng)) # Fixed seed for reproducibility
+(def rng (gen/rng))
 
 # Test 1: Identity Type Formation
 # Formation rule (non-cumulative):
