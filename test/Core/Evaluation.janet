@@ -55,4 +55,15 @@
     (= (c/eval Γ1 [:var fresh]) [c/T/Neutral [:nvar fresh]])
     "Symbol variables (gensyms) evaluate to neutrals"))
 
+(let [dom (c/ty/pi (c/ty/type 0) (fn [_] (c/ty/type 0)))
+      Γ (c/ctx/add (c/ctx/empty) "f" (c/ty/pi dom (fn [_] (c/ty/type 0))))
+      sem (c/eval Γ [:app [:var "f"] [:lam (fn [x] [:var x])]])
+      ne (get sem 1)
+      arg (get ne 2)]
+  (test/assert suite
+    (and (= (get sem 0) c/T/Neutral)
+         (= (get ne 0) :napp)
+         (= (get arg 0) c/NF/Lam))
+    "Neutral applications keep the lowered argument shape"))
+
 (test/end-suite suite)

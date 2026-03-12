@@ -36,21 +36,21 @@
                     ])
     sig))
 
-(test/start-suite "Elab Signature")
+(def suite (test/start-suite "Elab Signature"))
 
-(test/assert
+(test/assert suite
   (let [names (s/sig/ctor-name-set (mk-nat-sig))]
     (and (has-key? names "zero")
          (has-key? names "succ")))
   "Constructor name set contains all constructors")
 
-(test/assert
+(test/assert suite
   (let [sig (mk-nat-sig)
         available (s/sig/available-ctors sig "Nat" @[])]
     (= (length available) 2))
   "Unindexed constructors are available")
 
-(test/assert
+(test/assert suite
   (let [sig (mk-vec-sig)
         available (s/sig/available-ctors sig
                                          "Vec"
@@ -60,7 +60,7 @@
            (= (ctor :name) "vnil"))))
   "Indexed constructor filtering uses matches")
 
-(test/assert
+(test/assert suite
   (let [sig (mk-nat-sig)]
     (do
       (s/sig/add-func sig
@@ -70,14 +70,14 @@
                       [:t-pi [:var "Nat"] (fn [_] [:var "Nat"])] )
       (let [ref (s/sig/delta-ref sig "id")]
         (and (= (ref 0) :lam)
-             (= ((ref 1) [:var "z"])
-                [:app [:var "id"] [:var "z"]])))))
+              (= ((ref 1) [:var "z"])
+                 [:app [:var "id"] [:var "z"]])))))
   "Exact-ref eta-expands bare function names")
 
-(test/assert-error
+(test/assert-error suite
   (fn []
     (let [sig (mk-nat-sig)]
       (s/sig/delta-ref sig "Nat")))
   "Exact-ref rejects non-function names")
 
-(test/end-suite)
+(test/end-suite suite)
