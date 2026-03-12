@@ -4,7 +4,7 @@
 (import ../../src/coreTT :as c)
 (import ../Utils/Generators :as gen)
 
-(test/start-suite "Property Decidability")
+(def suite (test/start-suite "Property Decidability"))
 
 (var rng (gen/rng))
 
@@ -25,7 +25,7 @@
       (set passed true)))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-check-decidable 10)
   "Property: type checking is decidable")
 
@@ -46,8 +46,8 @@
         ([err] nil))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-check-infer-consistent 30)
   "Property: check and infer are consistent")
 
-(test/end-suite)
+(test/end-suite suite)

@@ -4,7 +4,7 @@
 (import ../../src/coreTT :as c)
 (import ../Utils/Generators :as gen)
 
-(test/start-suite "Equality Eta")
+(def suite (test/start-suite "Equality Eta"))
 
 (var rng (gen/rng))
 
@@ -28,7 +28,7 @@
         ([err] nil))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-eta-functions 20)
   "Property: eta-equality for functions")
 
@@ -52,8 +52,8 @@
         ([err] nil))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-eta-pairs 20)
   "Property: eta-equality for pairs")
 
-(test/end-suite)
+(test/end-suite suite)

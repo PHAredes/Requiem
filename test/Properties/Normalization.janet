@@ -5,30 +5,30 @@
 (import ../Utils/Generators :as gen)
 (import ../Utils/Assertions :as a)
 
-(test/start-suite "Property Normalization")
+(def suite (test/start-suite "Property Normalization"))
 
 (var rng (gen/rng))
 
 # Test 12: Normalization Stability
-(test/assert
+(test/assert suite
   (a/normalization-stable
     (c/ty/type 1)
     [:type 0])
   "Normalization stability: simple type")
 
-(test/assert
+(test/assert suite
   (a/normalization-stable
     (c/ty/pi (c/ty/type 0) (fn [x] (c/ty/type 0)))
     [:lam (fn [x] [:var x])])
   "Normalization stability: identity function")
 
 # Normalization Correctness
-(test/assert
+(test/assert suite
   (= (c/nf (c/ty/type 1) [:type 0])
      (c/nf/type 0))
   "Normalization: Type₀ normalizes to [:Type 0]")
 
-(test/assert
+(test/assert suite
   (match (c/nf (c/ty/pi (c/ty/type 0) (fn [x] (c/ty/type 0)))
                [:lam (fn [x] [:var x])])
     [c/NF/Lam _] true
@@ -52,7 +52,7 @@
         ([err] nil)))) # Skip ill-typed terms
   passed)
 
-(test/assert
+(test/assert suite
   (prop-nested-normalization 3 10)
   "Property: nested terms normalize correctly")
 
@@ -81,7 +81,7 @@
         ([err] nil))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-normalization-idempotent 50)
   "Property: normalization is idempotent")
 
@@ -105,8 +105,8 @@
         ([err] nil))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-eval-deterministic 50)
   "Property: evaluation is deterministic")
 
-(test/end-suite)
+(test/end-suite suite)

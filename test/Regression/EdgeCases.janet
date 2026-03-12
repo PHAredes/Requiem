@@ -4,7 +4,7 @@
 (import ../../src/coreTT :as c)
 (import ../Utils/Assertions :as a)
 
-(test/start-suite "Regression EdgeCases")
+(def suite (test/start-suite "Regression EdgeCases"))
 
 # Edge Cases
 
@@ -26,4 +26,4 @@
       (c/check Γ [:lam (fn [y] [:var y])] [:type 0])))
   "Error: lambda cannot have non-Pi type")
 
-(test/end-suite)
+(test/end-suite suite)

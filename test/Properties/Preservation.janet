@@ -5,12 +5,12 @@
 (import ../Utils/Generators :as gen)
 (import ../Utils/Assertions :as a)
 
-(test/start-suite "Property Preservation")
+(def suite (test/start-suite "Property Preservation"))
 
 (var rng (gen/rng))
 
 # Test 5: Type Preservation (from coreTT.janet)
-(test/assert
+(test/assert suite
   (a/type-preserves
     (c/ctx/empty)
     [:type 0]
@@ -18,7 +18,7 @@
   "Type preservation: [:type 0] : [:Type 1]")
 
 (let [id-ty [:t-pi [:type 0] (fn [x] [:type 0])]]
-  (test/assert
+  (test/assert suite
     (a/type-preserves
       (c/ctx/empty)
       id-ty
@@ -45,8 +45,8 @@
           ([err] nil))))) # Skip ill-typed terms
   passed)
 
-(test/assert
+(test/assert suite
   (prop-type-preservation 50)
   "Property: type preservation for random terms")
 
-(test/end-suite)
+(test/end-suite suite)
