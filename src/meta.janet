@@ -4,29 +4,71 @@
 
 (defn make [deps]
   (let [goals @[]
-        ty/type (deps :ty/type)
+        named-goals @{}
         ctx/lookup (deps :ctx/lookup)
-        goal-ty (ty/type 100)]
+        goal-ty (deps :goal-ty)
+        goal-term (deps :goal-term)
+        print/sem (deps :print/sem)]
     (var collect? false)
+
+    (defn expected/placeholder? [expected]
+      (= expected goal-ty))
+
+    (defn expected/merge [name current next]
+      (cond
+        (nil? current) next
+        (nil? next) current
+        (and (expected/placeholder? current)
+             (not (expected/placeholder? next)))
+        next
+        (and (not (expected/placeholder? current))
+             (expected/placeholder? next))
+        current
+        (not= current next)
+        (errorf "named hole ?%v has inconsistent expected types: %s vs %s"
+                name
+                (print/sem current)
+                (print/sem next))
+        true
+        current))
 
     (defn context-vars [Γ]
       (map keyword (h/keys Γ)))
 
     (defn report [name expected Γ]
-      (let [goal {:name name
-                  :expected expected
-                  :ctx (map (fn [k] [k (ctx/lookup Γ k)]) (h/keys Γ))}]
-        (array/push goals goal)))
+      (let [ctx (map (fn [k] [k (ctx/lookup Γ k)]) (h/keys Γ))
+            expected (or expected goal-ty)]
+        (if name
+          (if-let [goal (get named-goals name)]
+            (do
+              (put goal :expected (expected/merge name (goal :expected) expected))
+              (when (> (length ctx) (length (goal :ctx)))
+                (put goal :ctx ctx))
+              goal)
+            (let [goal @{:name name
+                         :expected expected
+                         :ctx ctx}]
+              (put named-goals name goal)
+              (array/push goals goal)
+              goal))
+          (let [goal @{:name name
+                       :expected expected
+                       :ctx ctx}]
+            (array/push goals goal)
+            goal))))
 
     (defn set-collect! [enabled]
       (set collect? enabled)
+      collect?)
+
+    (defn collecting? []
       collect?)
 
     (defn error-infer [name Γ]
       (if collect?
         (do
           (report name goal-ty Γ)
-          [:type 100])
+          goal-term)
         (errorf "unsolved goal ?%v during inference\nNo expected type is available in inference mode.\nContext variables: %v"
                 name
                 (context-vars Γ))))
@@ -44,6 +86,7 @@
      :context-vars context-vars
      :report report
      :set-collect! set-collect!
+     :collect? collecting?
      :error-infer error-infer
      :error-check error-check}))
 

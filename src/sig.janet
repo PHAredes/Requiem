@@ -54,28 +54,21 @@
     @{}
     (values sig)))
 
-(defn vars [delta]
-  (map |($ :name) delta))
-
-(defn app-spine [name args]
-  (reduce (fn [acc arg] (tt/tm/app acc (tt/tm/var arg)))
-          (tt/tm/var name)
-          args))
-
-(defn build-lambda [body delta]
-  (reduce (fn [inner _]
-            (tt/tm/lam (fn [_] inner)))
-          body
-          (reverse delta)))
-
 (defn sig/exact-ref [sig name]
   (let [e (sig/entry sig name)]
     (when (not= (e :kind) :func)
       (errorf "sig/exact-ref: '%v' is not a function" name))
     (let [delta (e :params)
-          vs (vars delta)
-          spine (app-spine name vs)]
-      (build-lambda spine delta))))
+          n (length delta)]
+      (defn build [i args]
+        (if (= i n)
+          (reduce (fn [acc arg] (tt/tm/app acc arg))
+                  (tt/tm/var name)
+                  args)
+          (tt/tm/lam
+            (fn [x]
+              (build (+ i 1) [;args x])))))
+      (build 0 @[]))))
 
 (defn sig/available-ctors [sig data-name type-args]
   (let [ctors (sig/ctors sig data-name)
@@ -108,7 +101,4 @@
    :sig/exact-ref sig/exact-ref
    :sig/available-ctors sig/available-ctors
    :sig/process-decl sig/process-decl
-   :sig/build sig/build
-   :vars vars
-   :app-spine app-spine
-   :build-lambda build-lambda})
+   :sig/build sig/build})

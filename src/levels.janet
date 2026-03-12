@@ -16,7 +16,7 @@
 (defn shift [n]
   [L/Shift (check-nat n "lvl/shift")])
 
-(def id (const 0))
+(def id (shift 0))
 
 (defn const? [l]
   (and (tuple? l) (= (get l 0) L/Const)))
@@ -32,8 +32,13 @@
     (shift? l) (check-nat (get l 1) "lvl/value")
     true (errorf "invalid level expression: %v" l)))
 
+(defn normalize [l]
+  (const (value l)))
+
 (defn leq [l1 l2]
   (<= (value l1) (value l2)))
+
+(def <= leq)
 
 (defn lt [l1 l2]
   (< (value l1) (value l2)))
@@ -42,13 +47,15 @@
   (= (value l1) (value l2)))
 
 (defn succ [l]
-  (inc (value l)))
+  (const (inc (value l))))
 
 (defn max* [l1 l2]
-  (max (value l1) (value l2)))
+  (const (max (value l1) (value l2))))
+
+(def max max*)
 
 (defn apply-shift [shift-val l]
-  (+ (value shift-val) (value l)))
+  (const (+ (value shift-val) (value l))))
 
 (defn compose [s1 s2]
   (shift (+ (value s1) (value s2))))
@@ -65,11 +72,14 @@
    :const? const?
    :shift? shift?
    :value value
+    :normalize normalize
    :leq leq
+   :<= <=
    :lt lt
    :eq? eq?
    :succ succ
    :max max*
+   :max* max*
    :apply-shift apply-shift
    :compose compose
    :str str})

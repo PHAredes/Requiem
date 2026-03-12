@@ -43,16 +43,15 @@
         (and (> (length s) 0)
              (= (s 0) (chr "_")))))
 
+    (def letters "abcdefghijklmnopqrstuvwxyz")
+
     (defn alpha-name [n]
-      (let [letters "abcdefghijklmnopqrstuvwxyz"]
-        (defn recur [k]
-          (let [q (div k 26)
-                r (% k 26)
-                ch (string/slice letters r (+ r 1))]
-            (if (= q 0)
-              ch
-              (string (recur (- q 1)) ch))))
-        (recur n)))
+      (let [q (div n (length letters))
+            r (% n (length letters))
+            ch (string/slice letters r (+ r 1))]
+        (if (= q 0)
+          ch
+          (string (alpha-name (- q 1)) ch))))
 
     (defn find-name [n build]
       (let [candidate (build n)]
@@ -116,6 +115,14 @@
       (let [rendered (print/tm* tm)]
         (if (atomic-tm? tm) rendered (wrap rendered))))
 
+    (defn render-nf-binder [label A B]
+      (let [x (fresh-name)]
+        (string label "(" x " : " (print/nf* A) "). " (print/nf* (B x)))))
+
+    (defn render-tm-binder [label A B]
+      (let [x (fresh-name)]
+        (string label "(" x " : " (print/tm* A) "). " (print/tm* (B [:var x])))))
+
     (set print/ne*
          (fn [ne]
            (match ne
@@ -139,13 +146,11 @@
               [NF/Type l]
               (string "Type" (lvl/value l))
 
-             [NF/Pi A B]
-             (let [x (fresh-name)]
-               (string "Pi(" x " : " (print/nf* A) "). " (print/nf* (B x))))
+              [NF/Pi A B]
+              (render-nf-binder "Pi" A B)
 
-             [NF/Sigma A B]
-             (let [x (fresh-name)]
-               (string "Sigma(" x " : " (print/nf* A) "). " (print/nf* (B x))))
+              [NF/Sigma A B]
+              (render-nf-binder "Sigma" A B)
 
              [NF/Id A x y]
              (string "Id " (nf-arg A) " " (nf-arg x) " " (nf-arg y))
@@ -182,13 +187,11 @@
               (let [x (fresh-name)]
                 (string "λ" x "." (print/tm* (body [:var x]))))
 
-             [:t-pi A B]
-             (let [x (fresh-name)]
-               (string "Pi(" x " : " (print/tm* A) "). " (print/tm* (B [:var x]))))
+              [:t-pi A B]
+              (render-tm-binder "Pi" A B)
 
-             [:t-sigma A B]
-             (let [x (fresh-name)]
-               (string "Sigma(" x " : " (print/tm* A) "). " (print/tm* (B [:var x]))))
+              [:t-sigma A B]
+              (render-tm-binder "Sigma" A B)
 
              [:pair l r]
              (string "(" (print/tm* l) ", " (print/tm* r) ")")
@@ -220,16 +223,25 @@
              _
              (string/format "%v" tm))))
 
-    (defn with-state [f]
-      (let [saved-id state/fresh-id
-            saved-map state/name-map
-            saved-used state/used-names]
-        (state/reset!)
-        (def out (f))
+    (defn state/snapshot []
+      [state/fresh-id state/name-map state/used-names])
+
+    (defn state/restore! [snapshot]
+      (let [[saved-id saved-map saved-used] snapshot]
         (set state/fresh-id saved-id)
         (set state/name-map saved-map)
-        (set state/used-names saved-used)
-        out))
+        (set state/used-names saved-used)))
+
+    (defn with-state [f]
+      (let [snapshot (state/snapshot)]
+        (state/reset!)
+        (try
+          (let [out (f)]
+            (state/restore! snapshot)
+            out)
+          ([err]
+           (state/restore! snapshot)
+           (error err)))))
 
     (defn print/ne [ne]
       (with-state (fn [] (print/ne* ne))))

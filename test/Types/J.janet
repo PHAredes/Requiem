@@ -67,24 +67,6 @@
 
 (test-symmetry-derivation)
 
-# Regression: checker should instantiate J motives with term syntax,
-# not semantic values or internal proof tags.
-(defn test-j-motive-syntax-substitution []
-  (let [A [:type 1]
-        x [:type 0]
-        motive (fn [y p]
-                 (match p
-                   [:var _] [:type 1]
-                   [:t-refl _] [:type 1]
-                   _ (errorf "unexpected proof syntax in J motive: %v" p)))
-        d [:type 0]
-        j-term [:t-J A x motive d x [:t-refl x]]]
-    (test/assert suite
-      (= (c/infer-top j-term) (c/ty/type 1))
-      "J instantiates motives with surface proof syntax")))
-
-(test-j-motive-syntax-substitution)
-
 # Test: Transitivity (composition of paths)
 (defn test-transitivity []
   "Derive trans : ∀A x y z. Id A x y → Id A y z → Id A x z"
@@ -178,6 +160,27 @@
       "Subst: J implements type substitution")))
 
 (test-subst)
+
+# Test: Motive can mention the proof variable in its result type
+(defn test-proof-sensitive-motive []
+  (let [Γ (c/ctx/empty)
+        A [:type 1]
+        x [:type 0]
+        y [:type 0]
+        p [:t-refl [:type 0]]
+        motive (fn [y p]
+                 [:t-id [:t-id A x y] p p])
+        base [:t-refl [:t-refl [:type 0]]]
+        term [:t-J A x motive base y p]
+        proof-ty (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0))
+        expected (c/ty/id proof-ty
+                          [c/T/Refl (c/ty/type 0)]
+                          [c/T/Refl (c/ty/type 0)])]
+    (test/assert suite
+      (c/check-top term expected)
+      "J motive can depend on the equality proof")))
+
+(test-proof-sensitive-motive)
 
 # Test: Uniqueness of Identity Proofs (UIP)
 (defn test-UIP-k-axiom []

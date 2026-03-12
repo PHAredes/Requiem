@@ -17,9 +17,6 @@
 (defn env/extend [env name value]
   [;env [name value]])
 
-(defn sig/lookup [sig-env name]
-  (env/lookup sig-env name))
-
 (defn sig/from-decls [decls]
   (reduce (fn [acc decl]
             (match decl
@@ -115,6 +112,11 @@
           head
           args))
 
+(defn node/app-chain [head args]
+  (if (zero? (length args))
+    head
+    [:list (reduce (fn [acc arg] [;acc arg]) @[head] args)]))
+
 (defn elab/function-ref [name params]
   (let [n (length params)]
     (defn build [i args]
@@ -130,7 +132,7 @@
       [:type lvl]
       (if-let [hole (token/hole-name tok)]
         [:hole hole]
-        (if-let [params (sig/lookup sig-env tok)]
+        (if-let [params (env/lookup sig-env tok)]
           (if exact-ref?
             (elab/function-ref tok params)
             [:var tok])
@@ -141,30 +143,26 @@
     [:atom tok] (elab/atom env sig-env tok false)
     _ (elab/term env sig-env node)))
 
-(defn elab/pi-chain [env sig-env binders body]
+(defn elab/dependent-chain [tag env sig-env binders body]
   (if (zero? (length binders))
     (elab/term env sig-env body)
     (let [b (binders 0)
           name (b 1)
           dom (elab/term env sig-env (b 2))
           rest (slice binders 1)]
-      [:t-pi dom (fn [x] (elab/pi-chain (env/extend env name x) sig-env rest body))])))
+      [tag dom (fn [x] (elab/dependent-chain tag (env/extend env name x) sig-env rest body))])))
+
+(defn elab/pi-chain [env sig-env binders body]
+  (elab/dependent-chain :t-pi env sig-env binders body))
 
 (defn elab/sigma-chain [env sig-env binders body]
-  (if (zero? (length binders))
-    (elab/term env sig-env body)
-    (let [b (binders 0)
-          name (b 1)
-          dom (elab/term env sig-env (b 2))
-          rest (slice binders 1)]
-      [:t-sigma dom (fn [x] (elab/sigma-chain (env/extend env name x) sig-env rest body))])))
+  (elab/dependent-chain :t-sigma env sig-env binders body))
 
 (defn elab/app-list [env sig-env xs]
   (when (zero? (length xs))
     (errorf "cannot elaborate empty application"))
-  (reduce (fn [acc x] [:app acc (elab/term env sig-env x)])
-          (elab/callee env sig-env (xs 0))
-          (slice xs 1)))
+  (term/app-chain (elab/callee env sig-env (xs 0))
+                  (map |(elab/term env sig-env $) (slice xs 1))))
 
 (defn elab/lam-chain [env sig-env params body]
   (if (zero? (length params))
@@ -260,9 +258,8 @@
 (defn elab/list-pi-ann [env sig-env xs]
   (list/expect-arity "Pi" xs 3)
   (let [b (list/parse-ann-binder (xs 1))
-        name (b 1)
-        dom (elab/term env sig-env (b 2))]
-    [:t-pi dom (fn [x] (elab/term (env/extend env name x) sig-env (xs 2)))]))
+        body (xs 2)]
+    (elab/pi-chain env sig-env @[b] body)))
 
 (defn elab/list-ann [env sig-env xs]
   (list/expect-arity "Ann" xs 3)
@@ -311,26 +308,31 @@
         (elab/term env sig-env (xs 5))
         (elab/term env sig-env (xs 6))])
 
+(def list/dispatch-aliases
+  {"λ" "fn"
+   "lambda" "fn"
+   "Σ" "Sigma"
+   "exists" "Sigma"
+   "Pair" "pair"
+   "Fst" "fst"
+   "Snd" "snd"
+   "Refl" "refl"})
+
+(defn list/dispatch-key [head]
+  (or (get list/dispatch-aliases head) head))
+
 (def elab/list-dispatch
   {"fn" elab/list-lam
-   "λ" elab/list-lam
-   "lambda" elab/list-lam
    "Lam" elab/list-lam-ann
    "Pi" elab/list-pi-ann
    "Ann" elab/list-ann
    "let" elab/list-let
    "Sigma" elab/list-sigma
-   "Σ" elab/list-sigma
-   "exists" elab/list-sigma
    "pair" elab/list-pair
-   "Pair" elab/list-pair
    "fst" elab/list-fst
-   "Fst" elab/list-fst
    "snd" elab/list-snd
-    "Snd" elab/list-snd
    "Id" elab/list-id
    "refl" elab/list-refl
-   "Refl" elab/list-refl
    "J" elab/list-j})
 
 (defn elab/list [env sig-env node xs]
@@ -339,7 +341,7 @@
     (let [head (if (and (> (length xs) 0) (l/node/atom? (xs 0)))
                  (l/node/atom (xs 0))
                  nil)]
-      (if-let [handler (get elab/list-dispatch head)]
+      (if-let [handler (get elab/list-dispatch (list/dispatch-key head))]
         (handler env sig-env xs)
         (elab/app-list env sig-env xs)))))
 
@@ -535,9 +537,7 @@
              (term/pair-from-names (slice names 1 (length names)))]]))
 
 (defn term/app-head [head args]
-  (if (zero? (length args))
-    [:atom head]
-    (node/list (reduce (fn [acc a] [;acc [:atom a]]) @[[:atom head]] args))))
+  (node/app-chain [:atom head] (map |[:atom $] args)))
 
 (defn form/def-from-type+clauses [name ann clauses]
   (node/list (seq/concat @[[:atom "def"] [:atom (string name ":")] ann]
@@ -791,9 +791,7 @@
    :elab/program elab/program
    :elab/forms elab/forms
    :elab/text elab/text
-    :record->forms record->forms
-    :resolve-decls program/resolve-decls
-     :decl/elab (fn [decl] (decl/elab @[] decl))
-     :term/elab (fn [env node] (elab/term env @[] node))
-     :decl-elab (fn [decl] (decl/elab @[] decl))
-     :term-elab (fn [env node] (elab/term env @[] node))})
+   :record->forms record->forms
+   :resolve-decls program/resolve-decls
+   :decl/elab (fn [decl] (decl/elab @[] decl))
+   :term/elab (fn [env node] (elab/term env @[] node))})

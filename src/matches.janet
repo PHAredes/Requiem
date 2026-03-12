@@ -21,13 +21,19 @@
 
 (defn subst/lookup [sigma x] (get sigma x))
 
+(defn- subst/copy [sigma]
+  (let [out @{}]
+    (eachp [k v] sigma
+      (put out k v))
+    out))
+
 (defn subst/extend [sigma x u]
-  (let [s2 (table ;(kvs sigma))]
+  (let [s2 (subst/copy sigma)]
     (put s2 x u)
     s2))
 
 (defn subst/merge [left right]
-  (let [out (table ;(kvs left))]
+  (let [out (subst/copy left)]
     (var ok true)
     (eachp [k v] right
       (if-let [existing (get out k)]
@@ -66,10 +72,22 @@
 (defn pat/var? [p] (and (tuple? p) (= (p 0) :pat/var)))
 (defn pat/con? [p] (and (tuple? p) (= (p 0) :pat/con)))
 
+(defn- pat/wildcard? [p]
+  (match p
+    [:pat/var x] (= x "_")
+    [:hole name] (or (nil? name) (= name "_"))
+    _ false))
+
+(defn- pat/binding-name [p]
+  (match p
+    [:pat/var x] (if (= x "_") nil x)
+    [:hole name] (if (or (nil? name) (= name "_")) nil name)
+    _ nil))
+
 (defn pat/vars [p]
   (match p
-    [:pat/var x] (if (= x "_") @[] @[x])
-    [:hole name] (if (nil? name) @[] @[name])
+    [:pat/var _] (if-let [name (pat/binding-name p)] @[name] @[])
+    [:hole _] (if-let [name (pat/binding-name p)] @[name] @[])
     [:pat/con _ args] (reduce (fn [acc a] [;acc ;(pat/vars a)]) @[] args)
     [:pat/impossible] @[]
     _ @[]))
@@ -95,20 +113,12 @@
 (set matches
      (fn [u p ctor-name-set]
        (cond
-         (and (tuple? p) (= (p 0) :pat/var) (= (p 1) "_"))
-         (outcome/yes (subst/empty))
+          (pat/wildcard? p)
+          (outcome/yes (subst/empty))
 
-         (and (tuple? p) (= (p 0) :hole) (nil? (p 1)))
-         (outcome/yes (subst/empty))
-
-         (and (tuple? p) (= (p 0) :hole) (not (nil? (p 1))))
-         (outcome/yes (subst/extend (subst/empty) (p 1) u))
-
-         (pat/var? p)
-         (let [x (p 1)]
-           (if (= x "_")
-             (outcome/yes (subst/empty))
-             (outcome/yes (subst/extend (subst/empty) x u))))
+          (or (pat/var? p)
+              (and (tuple? p) (= (p 0) :hole)))
+          (outcome/yes (subst/extend (subst/empty) (pat/binding-name p) u))
 
          (pat/con? p)
          (let [ctor (p 1)
@@ -130,28 +140,21 @@
 
 (set matches*
      (fn [us ps ctor-name-set &opt initial-subst]
+       (defn step [i sigma]
+         (if (= i (length us))
+           (outcome/yes sigma)
+           (match (matches (us i) (ps i) ctor-name-set)
+             [:yes s2]
+             (if-let [merged (subst/merge sigma s2)]
+               (step (+ i 1) merged)
+               (outcome/no))
+             [:no]
+             (outcome/no)
+             [:stuck]
+             (outcome/stuck))))
        (if (not= (length us) (length ps))
          (outcome/no)
-         (do
-           (var status YES)
-           (var sigma (or initial-subst (subst/empty)))
-           (var i 0)
-           (while (and (< i (length us)) (= status YES))
-             (let [r (matches (us i) (ps i) ctor-name-set)]
-               (match r
-                 [:yes s2]
-                 (if-let [merged (subst/merge sigma s2)]
-                   (set sigma merged)
-                   (set status NO))
-                 [:no]
-                 (set status NO)
-                 [:stuck]
-                 (set status STUCK)))
-             (++ i))
-           (match status
-             :yes (outcome/yes sigma)
-             :no (outcome/no)
-             :stuck (outcome/stuck))))))
+         (step 0 (or initial-subst (subst/empty))))))
 
 (defn ctor/available? [type-args ctor ctor-name-set]
   (let [patterns (ctor :patterns)]
@@ -160,17 +163,16 @@
       (matches* type-args patterns ctor-name-set (subst/empty)))))
 
 (defn ctors/available [type-args ctors ctor-name-set]
-  (let [out @[]]
-    (each ctor ctors
-      (let [r (ctor/available? type-args ctor ctor-name-set)]
-        (match r
-          [:yes sigma] (array/push out {:ctor ctor :subst sigma})
-          [:no] nil
-          [:stuck]
-          (errorf "constructor %v availability is stuck on indices %v"
-                  (ctor :name)
-                  type-args))))
-    out))
+  (reduce (fn [acc ctor]
+            (match (ctor/available? type-args ctor ctor-name-set)
+              [:yes sigma] [;acc {:ctor ctor :subst sigma}]
+              [:no] acc
+              [:stuck]
+              (errorf "constructor %v availability is stuck on indices %v"
+                      (ctor :name)
+                      type-args)))
+          @[]
+          ctors))
 
 (def exports
   {:YES YES
