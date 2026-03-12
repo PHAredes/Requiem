@@ -20,80 +20,72 @@
 (defn- resolve [schema]
   (if (= (schema 0) :sc/lazy) ((schema 1)) schema))
 
-(var sc/validate nil)
-
-(defn- validate-array [item value path]
-  (if (not (or (array? value) (tuple? value)))
-    (err (string "expected array at " (path->str path) ", got " value))
-    (do
-      (var e nil)
-      (for i 0 (length value)
-        (when (nil? e)
-          (let [r (sc/validate item (value i) [;path (string "[" i "]")])]
-            (when (= (r 0) :err) (set e r)))))
-      (if e e (ok value)))))
-
-(defn- validate-union [members value path]
-  (var pass nil)
-  (var last nil)
-  (each m members
-    (when (nil? pass)
-      (let [r (sc/validate m value path)]
-        (if (= (r 0) :ok)
-          (set pass r)
-          (set last (r 1))))))
-  (if pass
-    pass
-    (err (string "no union matched at " (path->str path)
-                 (if last (string ": " last) "")))))
-
-(defn- validate-tagged [tag fields value path]
-  (if (not (tuple? value))
-    (err (string "expected tuple at " (path->str path) ", got " value))
-    (if (or (< (length value) 1) (not= (value 0) tag))
-      (err (string "expected tag " tag " at " (path->str path) ", got " value))
-      (if (not= (length value) (+ 1 (length fields)))
-        (err (string "wrong tuple arity for " tag " at " (path->str path)
-                     ": expected " (+ 1 (length fields)) " got " (length value)))
+(defn sc/validate [schema value path]
+  (let [s (resolve schema)
+        t (s 0)]
+    (match t
+      :sc/any (ok value)
+      :sc/string (if (string? value)
+                   (ok value)
+                   (err (string "expected string at " (path->str path) ", got " value)))
+      :sc/int (if (int? value)
+                (ok value)
+                (err (string "expected int at " (path->str path) ", got " value)))
+      :sc/lit (if (= value (s 1))
+                (ok value)
+                (err (string "expected literal " (s 1) " at " (path->str path)
+                             ", got " value)))
+      :sc/array 
+      (if (not (or (array? value) (tuple? value)))
+        (err (string "expected array at " (path->str path) ", got " value))
         (do
           (var e nil)
-          (for i 0 (length fields)
+          (for i 0 (length value)
             (when (nil? e)
-              (let [r (sc/validate (fields i)
-                                   (value (+ i 1))
-                                   [;path (string tag "#" (+ i 1))])]
+              (let [r (sc/validate (s 1) (value i) [;path (string "[" i "]")])]
                 (when (= (r 0) :err) (set e r)))))
-          (if e e (ok value)))))))
-
-(set sc/validate
-     (fn [schema value path]
-       (let [s (resolve schema)
-             t (s 0)]
-         (match t
-           :sc/any (ok value)
-           :sc/string (if (string? value)
-                        (ok value)
-                        (err (string "expected string at " (path->str path) ", got " value)))
-           :sc/int (if (int? value)
-                     (ok value)
-                     (err (string "expected int at " (path->str path) ", got " value)))
-           :sc/lit (if (= value (s 1))
-                     (ok value)
-                     (err (string "expected literal " (s 1) " at " (path->str path)
-                                  ", got " value)))
-           :sc/array (validate-array (s 1) value path)
-           :sc/optional (if (nil? value) (ok value) (sc/validate (s 1) value path))
-           :sc/union (validate-union (s 1) value path)
-           :sc/refine
-           (let [r (sc/validate (s 1) value path)]
-             (if (= (r 0) :err)
-               r
-               (if ((s 2) value)
-                 (ok value)
-                 (err (string "refinement failed (" (s 3) ") at " (path->str path)
-                              ", got " value)))))
-           :sc/tagged (validate-tagged (s 1) (s 2) value path)
-           _ (err (string "unknown schema tag " t " at " (path->str path)))))))
+          (if e e (ok value))))
+      :sc/optional (if (nil? value) (ok value) (sc/validate (s 1) value path))
+      :sc/union 
+      (do
+        (var pass nil)
+        (var last nil)
+        (each m (s 1)
+          (when (nil? pass)
+            (let [r (sc/validate m value path)]
+              (if (= (r 0) :ok)
+                (set pass r)
+                (set last (r 1))))))
+        (if pass
+          pass
+          (err (string "no union matched at " (path->str path)
+                       (if last (string ": " last) "")))))
+      :sc/refine
+      (let [r (sc/validate (s 1) value path)]
+        (if (= (r 0) :err)
+          r
+          (if ((s 2) value)
+            (ok value)
+            (err (string "refinement failed (" (s 3) ") at " (path->str path)
+                         ", got " value)))))
+      :sc/tagged
+      (if (not (tuple? value))
+        (err (string "expected tuple at " (path->str path) ", got " value))
+        (if (or (< (length value) 1) (not= (value 0) (s 1)))
+          (err (string "expected tag " (s 1) " at " (path->str path) ", got " value))
+          (if (not= (length value) (+ 1 (length (s 2))))
+            (err (string "wrong tuple arity for " (s 1) " at " (path->str path)
+                         ": expected " (+ 1 (length (s 2))) " got " (length value)))
+            (do
+              (var e nil)
+              (for i 0 (length (s 2))
+                (when (nil? e)
+                  (let [r (sc/validate ((s 2) i)
+                                       (value (+ i 1))
+                                       [;path (string (s 1) "#" (+ i 1))])]
+                    (when (= (r 0) :err) (set e r)))))
+              (if e e (ok value))))))
+      _ (err (string "unknown schema tag " t " at " (path->str path))))))
 
 (defn sc/check [schema value]
   (sc/validate schema value @[]))
@@ -168,7 +160,7 @@
        (sc/tagged :decl/prec @[(sc/lit :infixr) nonneg-int (sc/string) schema/span])
        (sc/tagged :decl/prec @[(sc/lit :prefix) nonneg-int (sc/string) schema/span])
        (sc/tagged :decl/prec @[(sc/lit :postfix) nonneg-int (sc/string) schema/span])
-       (sc/tagged :decl/data @[(sc/string) (sc/array schema/param) schema/type (sc/array schema/ctor) schema/span])
+       (sc/tagged :decl/data @[(sc/string) (sc/array schema/param) (sc/array schema/ctor) schema/span])
        (sc/tagged :decl/func @[(sc/string) (sc/lazy (fn [] schema/type)) (sc/array schema/clause) schema/span])]))
 
 (def schema/program

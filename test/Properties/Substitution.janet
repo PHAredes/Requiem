@@ -4,7 +4,7 @@
 (import ../../src/coreTT :as c)
 (import ../Utils/Generators :as gen)
 
-(test/start-suite "Property Substitution")
+(def suite (test/start-suite "Property Substitution"))
 
 (var rng (gen/rng))
 
@@ -26,8 +26,8 @@
         ([err] nil))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-substitution 30)
   "Property: substitution via beta reduction")
 
-(test/end-suite)
+(test/end-suite suite)

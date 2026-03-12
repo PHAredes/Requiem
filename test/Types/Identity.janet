@@ -5,7 +5,7 @@
 (import ../Utils/Generators :as gen)
 (import ../Utils/Assertions :as a)
 
-(test/start-suite "CoreTT Identity Types")
+(def suite (test/start-suite "CoreTT Identity Types"))
 
 (def rng (gen/rng)) # Fixed seed for reproducibility
 
@@ -36,12 +36,12 @@
           (printf "Id formation error for level %d: %v" l err)))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-id-type-formation 50)
   "Property: Id type formation preserves universe levels")
 
 # Sanity check with concrete example
-(test/assert
+(test/assert suite
   (= (c/infer-top [:t-id [:type 1] [:type 0] [:type 0]])
      (c/ty/type 2))
   "Id formation: Id Type₁ Type₀ Type₀ : Type₂")
@@ -71,17 +71,17 @@
           (printf "Reflexivity error for Type_%d: %v" l err)))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-reflexivity-typing 50)
   "Property: reflexivity is well-typed for all terms")
 
 # Sanity checks with concrete examples
-(test/assert
+(test/assert suite
   (= (c/infer-top [:t-refl [:type 0]])
      (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0)))
   "Reflexivity: refl Type₀ : Id Type₁ Type₀ Type₀")
 
-(test/assert
+(test/assert suite
   (= (c/infer-top [:t-refl [:type 5]])
      (c/ty/id (c/ty/type 6) (c/ty/type 5) (c/ty/type 5)))
   "Reflexivity: refl Type₅ : Id Type₆ Type₅ Type₅")
@@ -94,7 +94,7 @@
       y [:type 0]
       p [:t-refl [:type 0]]
       J-term [:t-J A x P d y p]]
-  (test/assert
+  (test/assert suite
     (= (c/infer-top J-term) (c/ty/type 1))
     "J eliminator: simple application"))
 
@@ -105,7 +105,7 @@
       P (fn [y p] [:type 1])
       d [:type 0]
       J-refl [:t-J A x P d x [:t-refl x]]]
-  (test/assert
+  (test/assert suite
     (c/term-eq Γ (c/ty/type 1) J-refl d)
     "J computation: J A x P d x (refl x) ≡ d"))
 
@@ -117,25 +117,25 @@
       xv (c/eval Γ x)
       Av (c/eval Γ A)
       id-ty (c/ty/id Av xv xv)]
-  (test/assert
+  (test/assert suite
     (c/check-top refl-x id-ty)
     "Every element has reflexive equality: refl x : Id A x x"))
 
 # Test 6: Identity Type Semantic Equality
-(test/assert
+(test/assert suite
   (c/sem-eq (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0))
             [c/T/Refl (c/ty/type 0)]
             [c/T/Refl (c/ty/type 0)])
   "Semantic equality: refl x ≡ refl x")
 
-(test/assert
+(test/assert suite
   (not (c/sem-eq (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 1))
                  [c/T/Refl (c/ty/type 0)]
                  [c/T/Refl (c/ty/type 1)]))
   "Semantic inequality: different reflexivity proofs are not equal")
 
 # Test 7: Normalization of Identity Types
-(test/assert
+(test/assert suite
   (= (c/nf (c/ty/type 2) [:t-id [:type 1] [:type 0] [:type 0]])
      (c/nf/id (c/nf/type 1) (c/nf/type 0) (c/nf/type 0)))
   "Normalization: identity type normalizes")
@@ -149,7 +149,7 @@
       id-ty (c/ty/id Av xv xv)
       refl-term [:t-refl x]
       nf-result (c/nf id-ty refl-term)]
-  (test/assert
+  (test/assert suite
     (and (tuple? nf-result)
          (= (first nf-result) c/NF/Refl))
     "Normalization: refl normalizes"))
@@ -203,7 +203,7 @@
           (printf "J symmetry error at level %d: %v" l err)))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-j-symmetry 20)
   "Property: J derives symmetry for identity types")
 
@@ -227,7 +227,7 @@
       d [:t-refl x]
       symm [:t-J A x P d y p]]
 
-  (test/assert
+  (test/assert suite
     (let [res (c/infer Γxyp symm)]
       (and (= (get res 0) c/T/Id)
            (= (get res 1) (c/ty/type 2))))
@@ -255,17 +255,17 @@
           (printf "Universe preservation error at level %d: %v" l err)))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-id-preserves-universes 30)
   "Property: Identity types preserve universe levels")
 
 # Sanity checks with concrete examples
-(test/assert
+(test/assert suite
   (= (c/infer-top [:t-id [:type 3] [:type 2] [:type 2]])
      (c/ty/type 4))
   "Identity preserves universe: Id Type₃ Type₂ Type₂ : Type₄")
 
-(test/assert
+(test/assert suite
   (= (c/infer-top [:t-id [:type 10] [:type 9] [:type 9]])
      (c/ty/type 11))
   "Identity preserves universe: larger universes")
@@ -281,7 +281,7 @@
 (let [Γ (c/ctx/empty)
       id-ty (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0))
       Γp (c/ctx/add Γ "p" id-ty)]
-  (test/assert
+  (test/assert suite
     (= (c/ctx/lookup Γp "p") id-ty)
     "Context can store identity types"))
 
@@ -299,7 +299,7 @@
       g [:var "g"]
       dep-id [:t-id id-ty f g]]
 
-  (test/assert
+  (test/assert suite
     (= (c/infer Γfg dep-id) (c/ty/type 1))
     "Dependent identity: Id (∀A. A → A) f g"))
 
@@ -336,7 +336,7 @@
           (printf "Id of Pi type error at level %d: %v" l err)))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-id-of-pi-types 20)
   "Property: identity types work for function types")
 
@@ -346,7 +346,7 @@
       f [:lam (fn [x] [:var x])]
       g [:lam (fn [y] [:var y])]
       fn-ty (c/ty/pi (c/ty/type 0) (fn [x] (c/ty/type 0)))]
-  (test/assert
+  (test/assert suite
     (c/sem-eq fn-ty (c/eval Γ f) (c/eval Γ g))
     "Eta-equal functions are semantically equal"))
 
@@ -362,7 +362,7 @@
       J1 [:t-J A x P1 [:t-refl x] y p]
       P2 (fn [z q] [:t-id A [:type 0] z])
       J2 [:t-J A y P2 J1 z q]]
-  (test/assert
+  (test/assert suite
     (c/term-eq Γ (c/ty/id (c/ty/type 1) (c/ty/type 0) (c/ty/type 0))
                J2
                [:t-refl [:type 0]])
@@ -387,7 +387,7 @@
           nil))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-reflexivity 20)
   "Property: reflexivity works for all terms")
 
@@ -410,7 +410,7 @@
           ([err] nil)))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-J-computation 20)
   "Property: J computation rule always holds")
 
@@ -421,12 +421,12 @@
       d [:type 0]
       J-refl [:t-J A x P d x [:t-refl x]]
       result (c/eval (c/ctx/empty) J-refl)]
-  (test/assert
+  (test/assert suite
     (= result (c/ty/type 0))
     "J normalizes when proof is refl"))
 
 # Test 18: Type Preservation for Identity
-(test/assert
+(test/assert suite
   (a/type-preserves
     (c/ctx/empty)
     [:t-refl [:type 0]]
@@ -442,7 +442,7 @@
       d2 [:type 0]
       J1 [:t-J A x P d1 x [:t-refl x]]
       J2 [:t-J A x P d2 x [:t-refl x]]]
-  (test/assert
+  (test/assert suite
     (c/term-eq Γ (c/ty/type 1) J1 J2)
     "J respects semantic equality of base case"))
 
@@ -468,17 +468,17 @@
           (printf "High universe Id error at level %d: %v" l err)))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-id-higher-universes 20)
   "Property: identity types work at high universe levels")
 
 # Sanity checks
-(test/assert
+(test/assert suite
   (= (c/infer-top [:t-id [:type 5] [:type 4] [:type 4]])
      (c/ty/type 6))
   "Identity works on higher universes")
 
-(test/assert
+(test/assert suite
   (= (c/infer-top [:t-id [:type 10] [:type 9] [:type 9]])
      (c/ty/type 11))
   "Identity preserves high universe levels")
@@ -491,7 +491,7 @@
       d [:type 0]
       J-term [:t-J A x P d x [:t-refl x]]]
   # The key is that J should compute to d
-  (test/assert
+  (test/assert suite
     (= (c/eval Γ J-term) (c/ty/type 0))
     "J works with Pi types"))
 
@@ -502,7 +502,7 @@
       P (fn [y p] [:type 1])
       d [:type 0]
       J-term [:t-J A x P d x [:t-refl x]]]
-  (test/assert
+  (test/assert suite
     (c/term-eq Γ (c/ty/type 1) J-term d)
     "J works with Sigma types"))
 
@@ -517,14 +517,14 @@
       yv (c/eval Γ y)
       id-xy (c/ty/id Av xv yv)
       # Verify it has the right type
-      _ (test/assert (= id-xy (c/ty/id (c/ty/type 2) (c/ty/type 1) (c/ty/type 1)))
+      _ (test/assert suite (= id-xy (c/ty/id (c/ty/type 2) (c/ty/type 1) (c/ty/type 1)))
                      "Inner Id construction correct")
       # Now create proofs
       p [:refl [:Type 1]]
       q [:refl [:Type 1]]
       # Create outer identity type on the proofs
       id-id (c/ty/id id-xy p q)]
-  (test/assert
+  (test/assert suite
     (= id-id (c/ty/id (c/ty/id (c/ty/type 2) (c/ty/type 1) (c/ty/type 1))
                       [:refl [:Type 1]]
                       [:refl [:Type 1]]))
@@ -541,7 +541,7 @@
 
       ty-before (c/infer Γ refl-x)
       ty-after (c/infer Γp refl-x)]
-  (test/assert
+  (test/assert suite
     (c/sem-eq (c/ty/type 100) ty-before ty-after)
     "Weakening preserves identity types"))
 
@@ -554,11 +554,11 @@
       fv (c/eval Γ f)
       gv (c/eval Γ g)
       id-fg (c/ty/id fn-ty-sem fv gv)]
-  (test/assert
+  (test/assert suite
     (and (tuple? id-fg)
          (= (first id-fg) c/T/Id)
          (tuple? (get id-fg 1))
          (= (first (get id-fg 1)) c/T/Pi))
     "Well-typed identity between functions"))
 
-(test/end-suite)
+(test/end-suite suite)

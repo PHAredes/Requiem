@@ -4,7 +4,7 @@
 (import ../../src/coreTT :as c)
 (import ../Utils/Generators :as gen)
 
-(test/start-suite "Property Weakening")
+(def suite (test/start-suite "Property Weakening"))
 
 (var rng (gen/rng))
 
@@ -31,7 +31,7 @@
         ([err] nil)))) # Skip ill-typed terms
   passed)
 
-(test/assert
+(test/assert suite
   (prop-weakening 20)
   "Property: weakening preserves types")
 
@@ -54,8 +54,8 @@
         ([err] nil))))
   passed)
 
-(test/assert
+(test/assert suite
   (prop-context-extension 30)
   "Property: context extension preserves closed term types")
 
-(test/end-suite)
+(test/end-suite suite)

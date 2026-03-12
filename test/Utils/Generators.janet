@@ -1,5 +1,5 @@
-(defn rng []
-  (math/rng 42))
+(defn rng [&opt seed]
+  (math/rng (or seed 42)))
 
 (defn gen-univ [rng]
   [:type (math/rng-int rng 4)])
