@@ -10,6 +10,13 @@
       (strip-parens (string/slice t 1 (- (length t) 1)))
       t)))
 
+(defn- digits-only? [text]
+  (and (> (length text) 0)
+       (reduce (fn [ok i]
+                 (and ok (lx/is-digit-byte? (text i))))
+               true
+               (range (length text)))))
+
 (defn- parse/pat-atom [text]
   (let [t (strip-parens text)
         sp (a/span/none)]
@@ -17,13 +24,7 @@
       (= t "_") (a/pat/wild sp)
       (= t "?") (a/pat/hole nil sp)
       (and (> (length t) 1) (= (t 0) (chr "?"))) (a/pat/hole (string/slice t 1) sp)
-      (and (> (length t) 0)
-           (do
-             (var ok true)
-             (for i 0 (length t)
-               (when (not (lx/is-digit-byte? (t i)))
-                 (set ok false)))
-             ok)) (a/pat/nat (scan-number t) sp)
+      (digits-only? t) (a/pat/nat (scan-number t) sp)
       true (a/pat/var t sp))))
 
 (defn parse/pat-text [text]

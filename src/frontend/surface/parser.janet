@@ -19,19 +19,26 @@
 (def node/pat? a/node/pat?)
 (def node/decl? a/node/decl?)
 
-(defn parse/type-text [text &opt prec sx]
+(defn- syntax/with-prec [prec sx]
   (let [syn (or sx (x/syntax/default))]
     (when prec
       (eachp [op spec] prec
         (x/syntax/add-operator! syn op (spec :fixity) (spec :level))))
-    (pr/parse/type-text text syn)))
+    syn))
+
+(defn- parse-or-validate [xv pred parse-text label expected prec sx]
+  (if (string? xv)
+    (parse-text xv nil (syntax/with-prec prec sx))
+    (do
+      (when (and (a/ast/debug-checks?) (not (pred xv)))
+        (errorf "%s expected %s node, got: %v" label expected xv))
+      xv)))
+
+(defn parse/type-text [text &opt prec sx]
+  (pr/parse/type-text text (syntax/with-prec prec sx)))
 
 (defn parse/expr-text [text &opt prec sx]
-  (let [syn (or sx (x/syntax/default))]
-    (when prec
-      (eachp [op spec] prec
-        (x/syntax/add-operator! syn op (spec :fixity) (spec :level))))
-    (pr/parse/expr-text text syn)))
+  (pr/parse/expr-text text (syntax/with-prec prec sx)))
 
 (def parse/pat-text pat/parse/pat-text)
 (def parse/fields d/parse/fields)
@@ -49,28 +56,10 @@
 (def lower/program lo/lower/program)
 
 (defn parse/type [xv &opt prec sx]
-  (if (string? xv)
-    (let [syn (or sx (x/syntax/default))]
-      (when prec
-        (eachp [op spec] prec
-          (x/syntax/add-operator! syn op (spec :fixity) (spec :level))))
-      (parse/type-text xv nil syn))
-    (do
-      (when (and (a/ast/debug-checks?) (not (a/node/type? xv)))
-        (errorf "parse/type expected type node, got: %v" xv))
-      xv)))
+  (parse-or-validate xv a/node/type? parse/type-text "parse/type" "type" prec sx))
 
 (defn parse/expr [xv &opt prec sx]
-  (if (string? xv)
-    (let [syn (or sx (x/syntax/default))]
-      (when prec
-        (eachp [op spec] prec
-          (x/syntax/add-operator! syn op (spec :fixity) (spec :level))))
-      (parse/expr-text xv nil syn))
-    (do
-      (when (and (a/ast/debug-checks?) (not (a/node/term? xv)))
-        (errorf "parse/expr expected term node, got: %v" xv))
-      xv)))
+  (parse-or-validate xv a/node/term? parse/expr-text "parse/expr" "term" prec sx))
 
 (defn parse/pat [xv]
   (if (string? xv)

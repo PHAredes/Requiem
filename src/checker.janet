@@ -4,9 +4,11 @@
   (let [T/Type (deps :T/Type)
         T/Pi (deps :T/Pi)
         T/Sigma (deps :T/Sigma)
+        T/Refl (deps :T/Refl)
         T/Pair (deps :T/Pair)
         T/Neutral (deps :T/Neutral)
         ty/type (deps :ty/type)
+        eq-type (deps :eq-type)
         ty/id (deps :ty/id)
         lvl/<= (deps :lvl/<=)
         lvl/max (deps :lvl/max)
@@ -26,26 +28,39 @@
     (var check nil)
     (var subtype nil)
 
+    (defn with-fresh-sem [A k]
+      (let [fresh (gensym)
+            arg-sem (raise A (ne/var fresh))]
+        (k fresh arg-sem)))
+
+    (defn with-bound [Γ A k]
+      (with-fresh-sem A
+        (fn [fresh arg-sem]
+          (k fresh arg-sem (ctx/add Γ fresh A)))))
+
     (defn subtype/pi [A1 B1 A2 B2]
       (and (subtype A2 A1)
-           (let [fresh (gensym)
-                 arg-sem (raise A2 (ne/var fresh))]
-             (subtype (B1 arg-sem) (B2 arg-sem)))))
+           (with-fresh-sem A2
+             (fn [_ arg-sem]
+               (subtype (B1 arg-sem) (B2 arg-sem))))))
 
     (defn subtype/sigma [A1 B1 A2 B2]
       (and (subtype A1 A2)
-           (let [fresh (gensym)
-                 arg-sem (raise A1 (ne/var fresh))]
-             (subtype (B1 arg-sem) (B2 arg-sem)))))
+           (with-fresh-sem A1
+             (fn [_ arg-sem]
+               (subtype (B1 arg-sem) (B2 arg-sem))))))
 
     (defn tag-of [x]
       (if (tuple? x) (get x 0) 0))
+
+    (defn sem/neutral [ne]
+      [T/Neutral ne])
 
     (defn fst-sem [p-sem]
       (let [tag (tag-of p-sem)]
         (cond
           (= tag T/Pair) (get p-sem 1)
-          (= tag T/Neutral) [T/Neutral (ne/fst (get p-sem 1))]
+          (= tag T/Neutral) (sem/neutral (ne/fst (get p-sem 1)))
           true (errorf "fst expected pair semantics, got: %s" (print/sem p-sem)))))
 
     (set subtype
@@ -67,8 +82,8 @@
                      [_ A2 B2] B]
                  (subtype/sigma A1 B1 A2 B2))
 
-               true
-               (sem-eq (ty/type 100) A B)))))
+                true
+                (sem-eq eq-type A B)))))
 
     (defn check-univ [Γ A]
       "Check that A is a universe and return its level"
@@ -81,10 +96,10 @@
 
     (defn infer-binder [Γ A B]
       (let [lvlA (check-univ Γ A)
-            fresh (gensym)
             A-sem (eval Γ A)
-            Γ2 (ctx/add Γ fresh A-sem)
-            lvlB (check-univ Γ2 (B [:var fresh]))]
+            lvlB (with-bound Γ A-sem
+                   (fn [fresh _ Γ2]
+                     (check-univ Γ2 (B [:var fresh]))))]
         (ty/type (lvl/max lvlA lvlB))))
 
     (set infer
@@ -159,24 +174,26 @@
                    xv (eval Γ x)]
                (ty/id A xv xv))
 
-             [:t-J A x P d y p]
-             (let [lvlA (check-univ Γ A)
-                   A-sem (eval Γ A)]
-               (check Γ x A-sem)
-               (let [fresh-y (gensym)
-                     fresh-p (gensym)
-                     xv (eval Γ x)
-                     Γ-y (ctx/add Γ fresh-y A-sem)
-                     id-ty (ty/id A-sem xv [:var fresh-y])
-                     Γ-yp (ctx/add Γ-y fresh-p id-ty)]
-                 (check-univ Γ-yp (P [:var fresh-y] [:var fresh-p]))
-                 (let [P-refl (eval Γ (P xv [:refl xv]))]
-                   (check Γ d P-refl))
-                 (check Γ y A-sem)
-                 (let [yv (eval Γ y)]
-                   (check Γ p (ty/id A-sem xv yv))
-                   (let [pv (eval Γ p)]
-                     (eval Γ (P yv pv))))))
+              [:t-J A x P d y p]
+              (let [A-sem (eval Γ A)
+                    P-sem (eval Γ P)]
+                (check-univ Γ A)
+                (check Γ x A-sem)
+                (let [fresh-y (gensym)
+                      fresh-p (gensym)
+                      xv (eval Γ x)
+                      yv-sem (raise A-sem (ne/var fresh-y))
+                      Γ-y (ctx/add Γ fresh-y A-sem)
+                      id-ty (ty/id A-sem xv yv-sem)
+                      Γ-yp (ctx/add Γ-y fresh-p id-ty)]
+                  (check-univ Γ-yp (P [:var fresh-y] [:var fresh-p]))
+                  (let [P-refl (eval Γ (P-sem xv [T/Refl xv]))]
+                    (check Γ d P-refl))
+                  (check Γ y A-sem)
+                  (let [yv (eval Γ y)]
+                    (check Γ p (ty/id A-sem xv yv))
+                    (let [pv (eval Γ p)]
+                      (eval Γ (P-sem yv pv))))))
 
              _
              (errorf "infer: unknown term %s\nThis term is not recognized by the type checker.\nSupported forms: var, type, lambda, application, pi, sigma, pair, fst, snd, id, refl, J"
@@ -191,14 +208,14 @@
               [:lam body]
               (let [tag (tag-of A)]
                 (if (= tag T/Pi)
-                  (let [[_ dom cod] A
-                        fresh (gensym)
-                       arg-sem (raise dom (ne/var fresh))]
-                   (check (ctx/add Γ fresh dom)
-                          (body [:var fresh])
-                          (cod arg-sem)))
-                 (errorf "lambda checking failed - expected a Pi type (Πx:A. B), but got: %s\nLambda expressions can only be checked against function types."
-                         (print/sem A))))
+                  (let [[_ dom cod] A]
+                    (with-bound Γ dom
+                      (fn [fresh arg-sem Γ2]
+                        (check Γ2
+                               (body [:var fresh])
+                               (cod arg-sem)))))
+                  (errorf "lambda checking failed - expected a Pi type (Πx:A. B), but got: %s\nLambda expressions can only be checked against function types."
+                          (print/sem A))))
 
               [:pair l r]
               (let [tag (tag-of A)]

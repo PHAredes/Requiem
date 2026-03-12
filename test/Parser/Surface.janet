@@ -86,6 +86,16 @@ id: ∀(A: U0). A -> A
   "Adjacent parenthesized constructor fields parse separately")
 
 (test/assert suite
+  (let [prog (s/parse/program "Vec(A: Type, n: Nat):\n  A, (succ n) = vcons\t(x: A)\t(xs: Vec A n)\n")
+        decls (prog 1)
+        vec (decls 0)
+        ctor ((vec 4) 0)]
+    (and (= (ctor 0) :ctor/indexed)
+         (= (ctor 2) "vcons")
+         (= (length (ctor 3)) 2)))
+  "Constructor heads still split correctly across top-level whitespace")
+
+(test/assert suite
   (let [prog (s/parse/program "Nat:\n  zero\n  succ Nat\n\nclassify: Nat -> Nat\n  zero = zero\n  succ zero = succ zero\n  succ succ n = succ succ n\n")
         decls (prog 1)
         classify (decls 1)

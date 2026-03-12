@@ -6,6 +6,7 @@
 (import ./src/elab :as e)
 (import ./src/coreTT :as tt)
 (import /build/hamt :as h)
+(import /build/timer :as timer)
 (import ./src/levels :as lvl)
 (import ./src/pretty :as pp)
 (import ./src/matches :as mt)
@@ -201,9 +202,42 @@
     (++ goal-print/next-id)
     name))
 
+(defn- goal-print/snapshot []
+  [goal-print/names goal-print/next-id])
+
+(defn- goal-print/restore! [snapshot]
+  (let [[saved-names saved-next] snapshot]
+    (set goal-print/names saved-names)
+    (set goal-print/next-id saved-next)))
+
 (var print/goal-ne nil)
 (var print/goal-nf nil)
 (var print/goal-sem nil)
+
+(defn- goal-print/with-state [names next-id f]
+  (let [snapshot (goal-print/snapshot)]
+    (set goal-print/names names)
+    (set goal-print/next-id next-id)
+    (try
+      (let [out (f)]
+        (goal-print/restore! snapshot)
+        out)
+      ([err]
+       (goal-print/restore! snapshot)
+       (error err)))))
+
+(defn- goal-print/nf-binder [label A B]
+  (let [actual (gensym)
+        shown (goal-print/fresh!)]
+    (put goal-print/names actual shown)
+    (string label "(" shown ": " (print/goal-nf A) "). " (print/goal-nf (B actual)))))
+
+(defn- goal-print/sem-binder [label A B]
+  (let [actual (gensym)
+        shown (goal-print/fresh!)]
+    (put goal-print/names actual shown)
+    (let [arg (tt/raise A (tt/ne/var actual))]
+      (string label "(" shown ": " (print/goal-sem A) "). " (print/goal-sem (B arg))))))
 
 (set print/goal-ne
      (fn [ne]
@@ -218,18 +252,12 @@
 (set print/goal-nf
      (fn [nf]
        (let [tag (if (tuple? nf) (nf 0) nil)]
-         (cond
-         (= tag tt/NF/Type) (string "Type" (nf 1))
-         (= tag tt/NF/Pi)
-         (let [actual (gensym)
-               shown (goal-print/fresh!)]
-           (put goal-print/names actual shown)
-           (string "Pi(" shown ": " (print/goal-nf (nf 1)) "). " (print/goal-nf ((nf 2) actual))))
-         (= tag tt/NF/Sigma)
-         (let [actual (gensym)
-               shown (goal-print/fresh!)]
-           (put goal-print/names actual shown)
-           (string "Sigma(" shown ": " (print/goal-nf (nf 1)) "). " (print/goal-nf ((nf 2) actual))))
+          (cond
+          (= tag tt/NF/Type) (string "Type" (nf 1))
+          (= tag tt/NF/Pi)
+          (goal-print/nf-binder "Pi" (nf 1) (nf 2))
+          (= tag tt/NF/Sigma)
+          (goal-print/nf-binder "Sigma" (nf 1) (nf 2))
          (= tag tt/NF/Id)
          (string "Id " (print/goal-nf (nf 1)) " " (print/goal-nf (nf 2)) " " (print/goal-nf (nf 3)))
          (= tag tt/NF/Refl) (string "refl " (print/goal-nf (nf 1)))
@@ -247,23 +275,11 @@
                    (if (or (int? l) (lvl/const? l) (lvl/shift? l))
                      (lvl/value l)
                      (string/format "%v" l))))
-         (= tag tt/T/Neutral) (print/goal-ne (sem 1))
-         (= tag tt/T/Pi)
-         (let [actual (gensym)
-               shown (goal-print/fresh!)]
-           (put goal-print/names actual shown)
-           (let [A (sem 1)
-                 B (sem 2)
-                 arg (tt/raise A (tt/ne/var actual))]
-             (string "Pi(" shown ": " (print/goal-sem A) "). " (print/goal-sem (B arg)))))
-         (= tag tt/T/Sigma)
-         (let [actual (gensym)
-               shown (goal-print/fresh!)]
-           (put goal-print/names actual shown)
-           (let [A (sem 1)
-                 B (sem 2)
-                 arg (tt/raise A (tt/ne/var actual))]
-             (string "Sigma(" shown ": " (print/goal-sem A) "). " (print/goal-sem (B arg)))))
+          (= tag tt/T/Neutral) (print/goal-ne (sem 1))
+          (= tag tt/T/Pi)
+          (goal-print/sem-binder "Pi" (sem 1) (sem 2))
+          (= tag tt/T/Sigma)
+          (goal-print/sem-binder "Sigma" (sem 1) (sem 2))
          (= tag tt/T/Id)
          (let [A (sem 1)
                x (sem 2)
@@ -276,37 +292,24 @@
          true (string/format "%v" sem)))))
 
 (defn- print/goal-type [sem names]
-  (let [saved-names goal-print/names
-        saved-next goal-print/next-id
-        start-next (reduce (fn [n _] (+ n 1)) 0 names)]
-    (set goal-print/names (table/clone names))
-    (set goal-print/next-id start-next)
-    (def out (print/goal-sem sem))
-    (set goal-print/names saved-names)
-    (set goal-print/next-id saved-next)
-    out))
+  (let [start-next (reduce (fn [n _] (+ n 1)) 0 names)]
+    (goal-print/with-state (table/clone names)
+                           start-next
+                           (fn [] (print/goal-sem sem)))))
 
-(defn- filter/goal-ctx [ctx hidden-names]
-  (reduce (fn [acc entry]
+(defn- tt/goals/restore! [saved-goals saved-collect]
+  (array/clear tt/goals)
+  (each g saved-goals
+    (array/push tt/goals g))
+  (tt/goals/set-collect! saved-collect))
+
+(defn- partition/goal-ctx [ctx hidden-names]
+  (reduce (fn [[local global] entry]
             (if (get hidden-names (entry 0))
-              acc
-              [;acc entry]))
-          @[]
+              [local [;global entry]]
+              [[;local entry] global]))
+          [@[] @[]]
           ctx))
-
-(defn- only/goal-ctx [ctx hidden-names]
-  (reduce (fn [acc entry]
-            (if (get hidden-names (entry 0))
-              [;acc entry]
-              acc))
-          @[]
-          ctx))
-
-(defn- goal/local-name-map [local-ctx]
-  (let [out @{}]
-    (eachp [i entry] local-ctx
-      (put out (entry 0) (goal-print/base-name i)))
-    out))
 
 (defn- bind-spec/name [node]
   (match node
@@ -361,8 +364,7 @@
 
 (defn- print/goal-block [g hidden-names preferred-names &opt indent]
   (let [indent (or indent "  ")
-        local-ctx (filter/goal-ctx (g :ctx) hidden-names)
-        global-ctx (only/goal-ctx (g :ctx) hidden-names)
+        [local-ctx global-ctx] (partition/goal-ctx (g :ctx) hidden-names)
         local-names (let [out @{}]
                       (eachp [i entry] local-ctx
                         (put out
@@ -452,14 +454,16 @@
     (array/push out {:name (or name "_") :expected "Type?" :ctx ctx})
 
     [:ty/pi binder body _]
-    (do
-      (collect/type-holes (binder 2) ctx out)
-      (collect/type-holes body [;ctx [(binder 1) (binder 2)]] out))
+    (let [binder-ty (binder 2)
+          next-ctx [;ctx [(binder 1) binder-ty]]]
+      (collect/type-holes binder-ty ctx out)
+      (collect/type-holes body next-ctx out))
 
     [:ty/sigma binder body _]
-    (do
-      (collect/type-holes (binder 2) ctx out)
-      (collect/type-holes body [;ctx [(binder 1) (binder 2)]] out))
+    (let [binder-ty (binder 2)
+          next-ctx [;ctx [(binder 1) binder-ty]]]
+      (collect/type-holes binder-ty ctx out)
+      (collect/type-holes body next-ctx out))
 
     [:ty/arrow dom cod _]
     (do
@@ -476,6 +480,24 @@
 
     _ nil))
 
+(defn- collect/field-type-holes [field ctx out]
+  (match field
+    [:field/named _ ty _] (collect/type-holes ty ctx out)
+    [:field/anon ty _] (collect/type-holes ty ctx out)
+    _ nil))
+
+(defn- collect/ctor-type-holes [ctor ctx out]
+  (match ctor
+    [:ctor/plain _ fields _]
+    (each field fields
+      (collect/field-type-holes field ctx out))
+
+    [:ctor/indexed _ _ fields _]
+    (each field fields
+      (collect/field-type-holes field ctx out))
+
+    _ nil))
+
 (defn- collect/decl-type-holes [decl out]
   (match decl
     [:decl/data _ params sort ctors _]
@@ -486,20 +508,7 @@
         (array/push ctx [(p 1) (or (p 2) [:ty/hole nil nil])]))
       (collect/type-holes sort ctx out)
       (each ctor ctors
-        (match ctor
-          [:ctor/plain _ fields _]
-          (each f fields
-            (match f
-              [:field/named _ ty _] (collect/type-holes ty ctx out)
-              [:field/anon ty _] (collect/type-holes ty ctx out)
-              _ nil))
-          [:ctor/indexed _ _ fields _]
-          (each f fields
-            (match f
-              [:field/named _ ty _] (collect/type-holes ty ctx out)
-              [:field/anon ty _] (collect/type-holes ty ctx out)
-              _ nil))
-          _ nil)))
+        (collect/ctor-type-holes ctor ctx out)))
 
     [:decl/func _ ty _ _]
     (collect/type-holes ty @[] out)
@@ -513,8 +522,7 @@
   (when (> (length goals) 0)
     (print "Type holes:")
     (each g goals
-      (let [ctx (filter/goal-ctx (g :ctx) hidden-names)
-            globals (only/goal-ctx (g :ctx) hidden-names)]
+      (let [[ctx globals] (partition/goal-ctx (g :ctx) hidden-names)]
         (print "  Local context:")
         (if (zero? (length ctx))
           (print "    <empty>")
@@ -719,7 +727,7 @@
               (tt/check Γ tm expected-sem))))))))
 
 (defn run/file-surface [path mode]
-  (def start (os/clock))
+  (def start-ms (timer/ms))
   (def src (with-default-prelude (string (slurp path))))
   (print "Parsing " path "...")
   (def prog (sp/parse/program src))
@@ -743,51 +751,58 @@
   (def ctor-env (build-ctor-env core))
   (var check-goal-index 0)
   (def goal-name-hints @[])
-  (array/clear tt/goals) # Reset goals
-  (tt/goals/set-collect! true)
-  (each decl core
-    (match decl
-      [:core/func name params result ty clauses]
-      nil
-
-      [:core/compute tm]
-      (when (mode/runs-computes? mode)
-        (printf "\nCompute: %s" (pp/print/tm tm))
-        (let [res (tt/nf (tt/ty/type 100) tm)]
-          (printf "  => %s" (pp/print/nf res))))
-
-      [:core/check tm ty]
+  (let [saved-goals (slice tt/goals 0)
+        saved-collect (tt/goals/collect?)]
+    (tt/goals/set-collect! true)
+    (array/clear tt/goals)
+    (try
       (do
-        (def preferred-names (if (< check-goal-index (length lowered-check-names))
-                               (lowered-check-names check-goal-index)
-                               @[]))
-        (++ check-goal-index)
-        (def goal-count-before (length tt/goals))
-        (printf "\nCheck: %s : %s" (pp/print/tm tm) (pp/print/tm ty))
-        (check/with-ctors global-ctx tm ty ctor-env)
-        (print "  => OK")
-        (let [goal-count-after (length tt/goals)]
-          (when (> goal-count-after goal-count-before)
-            (for _ goal-count-before goal-count-after
-              (array/push goal-name-hints preferred-names))
-            (print "  Current goal:")
-            (print/goals (slice tt/goals goal-count-before goal-count-after)
-                         global-name-set
-                         (slice goal-name-hints goal-count-before goal-count-after)
-                         nil
-                         "    "))))
-       _ nil))
-  (tt/goals/set-collect! false)
-  
-  (let [pending tt/goals]
-    (print/goals pending global-name-set goal-name-hints "\nUnsolved goals:" "  "))
+        (each decl core
+          (match decl
+            [:core/func name params result ty clauses]
+            nil
 
-  (print "")
-  (def elapsed (- (os/clock) start))
-  (printf "Done. %d declaration(s) in %.3fs" (length lowered) elapsed))
+            [:core/compute tm]
+            (when (mode/runs-computes? mode)
+              (printf "\nCompute: %s" (pp/print/tm tm))
+              (let [res (tt/nf (tt/ty/type 100) tm)]
+                (printf "  => %s" (pp/print/nf res))))
+
+            [:core/check tm ty]
+            (do
+              (def preferred-names (if (< check-goal-index (length lowered-check-names))
+                                     (lowered-check-names check-goal-index)
+                                     @[]))
+              (++ check-goal-index)
+              (def goal-count-before (length tt/goals))
+              (printf "\nCheck: %s : %s" (pp/print/tm tm) (pp/print/tm ty))
+              (check/with-ctors global-ctx tm ty ctor-env)
+              (print "  => OK")
+              (let [goal-count-after (length tt/goals)]
+                (when (> goal-count-after goal-count-before)
+                  (for _ goal-count-before goal-count-after
+                    (array/push goal-name-hints preferred-names))
+                  (print "  Current goal:")
+                  (print/goals (slice tt/goals goal-count-before goal-count-after)
+                               global-name-set
+                               (slice goal-name-hints goal-count-before goal-count-after)
+                               nil
+                               "    "))))
+             _ nil))
+
+        (let [pending tt/goals]
+          (print/goals pending global-name-set goal-name-hints "\nUnsolved goals:" "  "))
+
+        (print "")
+        (def elapsed-ms (- (timer/ms) start-ms))
+        (printf "Done. %d declaration(s) in %.3fs" (length lowered) (/ elapsed-ms 1000.0))
+        (tt/goals/restore! saved-goals saved-collect))
+      ([err]
+       (tt/goals/restore! saved-goals saved-collect)
+       (error err)))))
 
 (defn run/file-sexpr [path mode]
-  (def start (os/clock))
+  (def start-ms (timer/ms))
   (def src (slurp path))
   (print "Parsing " path "...")
   (def forms (p/parse/text src))
@@ -795,8 +810,8 @@
   (def lowered (l/lower/program forms))
   (print/decls lowered)
   (def core (e/elab/program lowered))
-  (def elapsed (- (os/clock) start))
-  (printf "Done. %d interaction(s) in %.3fs" interactions elapsed))
+  (def elapsed-ms (- (timer/ms) start-ms))
+  (printf "Done. %d interaction(s) in %.3fs" interactions (/ elapsed-ms 1000.0)))
 
 (defn run/file [path mode]
   (let [resolved (resolve-path path)]
