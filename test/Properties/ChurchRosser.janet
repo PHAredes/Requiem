@@ -9,36 +9,60 @@
 
 (var rng (gen/rng))
 
-# Property: Church-Rosser
-(defn prop-church-rosser [n]
-  "Property: If t ≡ u definitionally, then nf(t) = nf(u)"
+(defn prop-convertible-terms-share-normal-form [n]
+  "Property: each witnessed one-step contraction lands in the same normal form"
   (var passed true)
-  (repeat n
-    (let [t (gen/gen-univ rng)
-          Γ (c/ctx/empty)
-          # Create eta-equivalent term: (λf. f) t ≡ t
-          u [:app [:lam (fn [f] [:var f])] t]]
-      (try
-        (let [ty [:type 1]
-              nf-t (c/nf ty t)
-              nf-u (c/nf ty u)]
-          (unless (a/nf-eq? nf-t nf-u)
-            (set passed false)
-            (print "Church-Rosser failed:")
-            (print "  t =" t)
-            (print "  u =" u)
-            (print "  nf(t) =" nf-t)
-            (print "  nf(u) =" nf-u)))
-        ([err] nil))))
+  (let [Γ (c/ctx/empty)]
+    (repeat n
+      (let [sample (gen/gen-convertible-pair rng)
+          tm (sample :term)
+          u (sample :contractum)
+          ty (c/eval Γ (sample :type))
+          nf-t (c/nf ty tm)
+          nf-u (c/nf ty u)]
+      (unless (a/nf-eq? nf-t nf-u)
+        (set passed false)
+        (print "Church-Rosser failed:")
+        (print "  seed =" (gen/seed/current))
+        (print "  kind =" (sample :kind))
+        (print "  t =" tm)
+        (print "  u =" u)
+        (print "  nf(t) =" nf-t)
+        (print "  nf(u) =" nf-u)))))
   passed)
 
 (test/assert suite
-  (prop-church-rosser 30)
-  "Property: Church-Rosser - convertible terms normalize equally")
+  (prop-convertible-terms-share-normal-form (test/property-count 50))
+  "Property: one-step convertible terms normalize equally")
 
-# Property: Raise-Lower Roundtrip
+(defn prop-convertible-terms-are-definitionally-equal [n]
+  "Property: witnessed contractions preserve definitional equality at their declared type"
+  (var passed true)
+  (let [Γ (c/ctx/empty)]
+    (repeat n
+        (let [sample (gen/gen-convertible-pair rng)
+            tm (sample :term)
+            u (sample :contractum)
+            ty (sample :type)
+            ty-sem (c/eval Γ ty)]
+        (unless (c/term-eq Γ ty tm u)
+          (set passed false)
+          (print "Definitional equality failed:")
+          (print "  seed =" (gen/seed/current))
+          (print "  kind =" (sample :kind))
+          (print "  type =" ty)
+          (print "  t =" tm)
+          (print "  u =" u)
+          (print "  nf(t) =" (c/nf ty-sem tm))
+          (print "  nf(u) =" (c/nf ty-sem u))))))
+  passed)
+
+(test/assert suite
+  (prop-convertible-terms-are-definitionally-equal (test/property-count 50))
+  "Property: witnessed contractions are definitionally equal")
+
 (defn prop-raise-lower-roundtrip [n]
-  "Property: lower(ty, raise(ty, ne)) = ne for neutral terms"
+  "Property: lower(ty, raise(ty, ne)) preserves neutrals up to eta"
   (var passed true)
   (repeat n
     (let [x (gensym)
@@ -46,27 +70,31 @@
                0 (c/ty/type (math/rng-int rng 3))
                1 (c/ty/pi (c/ty/type 0) (fn [_] (c/ty/type 0)))
                2 (c/ty/sigma (c/ty/type 0) (fn [_] (c/ty/type 0))))
-          ne (c/ne/var x)]
-      (try
-        (let [raised (c/raise ty ne)
-              lowered (c/lower ty raised)
-              ltag (if (tuple? lowered) (get lowered 0) 0)]
-          (cond
-            (= ltag c/NF/Neut)
-            (let [ne2 (get lowered 1)]
-              (test/assert suite (= ne ne2)
-                           (string/format "Raise-lower roundtrip preserves neutrals: ty=%v, %v ≡ %v" ty ne ne2)))
+          ne (c/ne/var x)
+          raised (c/raise ty ne)
+          lowered (c/lower ty raised)
+          ltag (if (tuple? lowered) (get lowered 0) 0)]
+      (cond
+        (= ltag c/NF/Neut)
+        (unless (= ne (get lowered 1))
+          (set passed false)
+          (print "Raise/lower neutral mismatch:")
+          (print "  ty =" ty)
+          (print "  expected =" ne)
+          (print "  got =" lowered))
 
-            (= ltag c/NF/Lam) true # Eta-expansion
-            (= ltag c/NF/Pair) true # Eta-expansion
-            (test/assert suite false (string/format "Unexpected lowered form: tag=%v, val=%v" ltag lowered))))
-        ([err]
-          (printf "Error in raise-lower: %v" err)
-          (set passed false)))))
+        (or (= ltag c/NF/Lam) (= ltag c/NF/Pair)) true
+
+        true
+        (do
+          (set passed false)
+          (print "Unexpected lowered form:")
+          (print "  ty =" ty)
+          (print "  lowered =" lowered)))))
   passed)
 
 (test/assert suite
-  (prop-raise-lower-roundtrip 30)
-  "Property: raise-lower roundtrip preserves neutrals (modulo eta)")
+  (prop-raise-lower-roundtrip (test/property-count 30))
+  "Property: raise/lower preserves neutrals modulo eta")
 
 (test/end-suite suite)

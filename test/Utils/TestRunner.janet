@@ -1,7 +1,17 @@
 (var current-suite nil)
 
+(defn env/int [name fallback]
+  (let [raw (os/getenv name)]
+    (if raw (scan-number raw) fallback)))
+
 (defn start-suite [name]
   (printf "Running suite: %s" name)
+  (let [seed (os/getenv "TEST_SEED")
+        trials (os/getenv "TEST_TRIALS")]
+    (when seed
+      (print "  seed:" seed))
+    (when trials
+      (print "  trials override:" trials)))
   (set current-suite @{:name name :passed 0 :failed 0})
   current-suite)
 
@@ -19,6 +29,19 @@
         (update suite :failed inc)
         (print "  FAIL: " msg)))
     cond))
+
+(defn assertf [suite cond msg details]
+  (if cond
+    (update suite :passed inc)
+    (do
+      (update suite :failed inc)
+      (print "  FAIL: " msg)
+      (when details
+        (print "    " details))))
+  cond)
+
+(defn property-count [fallback]
+  (env/int "TEST_TRIALS" fallback))
 
 (defn assert-error [& args]
   (let [[suite f msg expected-msg]

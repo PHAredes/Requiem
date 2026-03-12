@@ -8,46 +8,51 @@
 
 (var rng (gen/rng))
 
-# Property Tests: Type Checking is Decidable
-(defn prop-check-decidable [n]
-  "Property: type checking always terminates (doesn't loop)"
+(defn prop-check-infer-consistent [n]
+  "Property: inferred types are accepted by checking on generated inferable judgments"
   (var passed true)
   (repeat n
-    (let [ty (case (math/rng-int rng 3)
-               0 (gen/gen-univ rng)
-               1 [:t-pi (gen/gen-univ rng) (fn [x] (gen/gen-univ rng))]
-               2 [:t-sigma (gen/gen-univ rng) (fn [x] (gen/gen-univ rng))])
-          tm [:lam (fn [x] [:var x])]]
-      (try
-        # Should either succeed or fail, but not loop
-        (c/check-top tm (c/eval (c/ctx/empty) ty))
-        ([err] nil)) # Error is fine, just shouldn't hang
-      (set passed true)))
+    (let [sample (gen/gen-inferable-judgment rng)
+          Γ (sample :ctx)
+          tm (sample :term)]
+        (try
+          (let [inferred (c/infer Γ tm)]
+            (c/check Γ tm inferred))
+          ([err]
+            (set passed false)
+            (print "Check/infer inconsistency:")
+            (print "  seed =" (gen/seed/current))
+            (print "  kind =" (sample :kind))
+            (print "  ctx =" Γ)
+            (print "  term =" tm)
+            (print "  err =" err)))))
   passed)
 
 (test/assert suite
-  (prop-check-decidable 10)
-  "Property: type checking is decidable")
+  (prop-check-infer-consistent (test/property-count 50))
+  "Property: generated closed witnesses satisfy check/infer consistency")
 
-# Property: Check-Infer Consistency
-(defn prop-check-infer-consistent [n]
-  "Property: If check succeeds, infer should return same type"
+(defn prop-negative-examples-reject [n]
+  "Property: known ill-typed forms are rejected"
   (var passed true)
   (repeat n
-    (let [tm [:type (math/rng-int rng 3)]
-          Γ (c/ctx/empty)]
+    (let [bad (case (math/rng-int rng 4)
+                0 [:app [:type 0] [:type 0]]
+                1 [:fst [:type 0]]
+                2 [:snd [:type 0]]
+                3 [:t-refl [:lam (fn [x] [:var x])]])]
       (try
-        (let [inferred-ty (c/infer Γ tm)
-              # Now check against the inferred type
-              check-result (c/check Γ tm inferred-ty)]
-          (unless check-result
-            (set passed false)
-            (print "Check-infer inconsistent for:" tm)))
+        (do
+          (c/infer-top bad)
+          (set passed false)
+          (print "Ill-typed term unexpectedly inferred:")
+          (print "  seed =" (gen/seed/current))
+          (print "  term =" bad))
         ([err] nil))))
   passed)
 
 (test/assert suite
-  (prop-check-infer-consistent 30)
-  "Property: check and infer are consistent")
+  (prop-negative-examples-reject (test/property-count 30))
+  "Property: representative ill-typed forms are rejected")
 
 (test/end-suite suite)

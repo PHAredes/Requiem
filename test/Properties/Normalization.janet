@@ -9,7 +9,6 @@
 
 (var rng (gen/rng))
 
-# Test 12: Normalization Stability
 (test/assert suite
   (a/normalization-stable
     (c/ty/type 1)
@@ -18,95 +17,89 @@
 
 (test/assert suite
   (a/normalization-stable
-    (c/ty/pi (c/ty/type 0) (fn [x] (c/ty/type 0)))
-    [:lam (fn [x] [:var x])])
+    (c/ty/pi (c/ty/type 0) (fn [_] (c/ty/type 0)))
+    [:lam (fn [x] x)])
   "Normalization stability: identity function")
 
-# Normalization Correctness
-(test/assert suite
-  (= (c/nf (c/ty/type 1) [:type 0])
-     (c/nf/type 0))
-  "Normalization: Type₀ normalizes to [:Type 0]")
-
-(test/assert suite
-  (match (c/nf (c/ty/pi (c/ty/type 0) (fn [x] (c/ty/type 0)))
-               [:lam (fn [x] [:var x])])
-    [c/NF/Lam _] true
-    _ false)
-  "Normalization: λx. x normalizes to [:nlam ...]")
-
-# Property Tests: Nested Terms
-
-(defn prop-nested-normalization [depth max-terms]
-  "Property: Normalization of nested terms terminates"
+(defn prop-values-normalize-to-canonical-forms [n]
+  "Property: generated closed values normalize to the expected canonical shape"
   (var passed true)
-  (repeat max-terms
-    (let [tm (gen/gen-nested-term rng depth)]
-      (try
-        (let [ty (c/infer-top tm)
-              nf1 (c/nf ty tm)]
-          # Just check that normalization terminates
-          (unless nf1
-            (set passed false)
-            (print "Nested normalization failed for:" tm)))
-        ([err] nil)))) # Skip ill-typed terms
+  (let [Γ (c/ctx/empty)]
+    (repeat n
+      (let [sample (gen/gen-canonical-sample rng)
+            nf (c/nf (c/eval Γ (sample :type-tm)) (sample :term))
+            ok? (case (sample :kind)
+                  :universe (match nf [c/NF/Type _] true _ false)
+                  :identity (match nf [c/NF/Lam _] true _ false)
+                  :constant (match nf [c/NF/Lam _] true _ false)
+                  :pair (match nf [c/NF/Pair _ _] true _ false)
+                  :refl (match nf [c/NF/Refl _] true _ false)
+                  :pi-type (match nf [c/NF/Pi _ _] true _ false)
+                  :sigma-type (match nf [c/NF/Sigma _ _] true _ false)
+                  false)]
+        (unless ok?
+          (set passed false)
+          (print "Unexpected canonical form:")
+          (print "  seed =" (gen/seed/current))
+          (print "  kind =" (sample :kind))
+          (print "  term =" (sample :term))
+          (print "  nf =" nf)))))
   passed)
 
 (test/assert suite
-  (prop-nested-normalization 3 10)
-  "Property: nested terms normalize correctly")
+  (prop-values-normalize-to-canonical-forms (test/property-count 50))
+  "Property: generated closed values normalize canonically")
 
-# Property: Normalization Idempotence
-(defn prop-normalization-idempotent [n]
-  "Property: nf(nf(t)) = nf(t) - normalization is idempotent"
+(defn prop-reduction-normalizes-to-contractum [n]
+  "Property: reducible witnesses normalize to the same form as their contractum"
   (var passed true)
-  (repeat n
-    (let [tm (case (math/rng-int rng 4)
-               0 (gen/gen-univ rng)
-               1 [:lam (fn [x] [:var x])]
-               2 [:pair (gen/gen-univ rng) (gen/gen-univ rng)]
-               3 [:app [:lam (fn [x] [:var x])] (gen/gen-univ rng)])
-          Γ (c/ctx/empty)]
-      (try
-        (let [ty (c/infer Γ tm)
-              nf1 (c/nf ty tm)
-              # Evaluate the normal form and normalize again
-              sem1 (c/eval Γ nf1)
-              nf2 (c/lower ty sem1)]
-          (unless (= nf1 nf2)
-            (set passed false)
-            (print "Idempotence failed for:" tm)
-            (print "  nf1:" nf1)
-            (print "  nf2:" nf2)))
-        ([err] nil))))
+  (let [Γ (c/ctx/empty)]
+    (repeat n
+      (let [sample (gen/gen-reducible-sample rng)
+          ty (c/eval Γ (sample :type-tm))
+          tm (sample :term)
+          contractum (sample :contractum)
+          nf-tm (c/nf ty tm)
+          nf-contractum (c/nf ty contractum)]
+      (unless (a/nf-eq? nf-tm nf-contractum)
+        (set passed false)
+        (print "Reduction normalization failed:")
+        (print "  seed =" (gen/seed/current))
+        (print "  kind =" (sample :kind))
+        (print "  term =" tm)
+        (print "  contractum =" contractum)
+        (print "  nf(term) =" nf-tm)
+        (print "  nf(contractum) =" nf-contractum)))))
   passed)
 
 (test/assert suite
-  (prop-normalization-idempotent 50)
-  "Property: normalization is idempotent")
+  (prop-reduction-normalizes-to-contractum (test/property-count 50))
+  "Property: reducible witnesses normalize like their contracta")
 
-# Property: Evaluation Determinism
 (defn prop-eval-deterministic [n]
-  "Property: Evaluation is deterministic"
+  "Property: repeated evaluation lowers to the same normal form"
   (var passed true)
-  (repeat n
-    (let [tm (case (math/rng-int rng 4)
-               0 (gen/gen-univ rng)
-               1 [:app [:lam (fn [x] [:var x])] (gen/gen-univ rng)]
-               2 [:fst [:pair (gen/gen-univ rng) (gen/gen-univ rng)]]
-               3 [:snd [:pair (gen/gen-univ rng) (gen/gen-univ rng)]])
-          Γ (c/ctx/empty)]
-      (try
-        (let [v1 (c/eval Γ tm)
-              v2 (c/eval Γ tm)]
-          (unless (= v1 v2)
-            (set passed false)
-            (print "Evaluation non-deterministic for:" tm)))
-        ([err] nil))))
+  (let [Γ (c/ctx/empty)]
+    (repeat n
+      (let [sample (gen/gen-fragment-sample rng)
+            tm (sample :term)
+            ty (c/eval Γ (sample :type-tm))
+            v1 (c/eval Γ tm)
+            v2 (c/eval Γ tm)
+            nf1 (c/lower ty v1)
+            nf2 (c/lower ty v2)]
+        (unless (a/nf-eq? nf1 nf2)
+          (set passed false)
+          (print "Evaluation/lowering mismatch:")
+          (print "  seed =" (gen/seed/current))
+          (print "  kind =" (sample :kind))
+          (print "  term =" tm)
+          (print "  nf1 =" nf1)
+          (print "  nf2 =" nf2)))))
   passed)
 
 (test/assert suite
-  (prop-eval-deterministic 50)
+  (prop-eval-deterministic (test/property-count 50))
   "Property: evaluation is deterministic")
 
 (test/end-suite suite)
