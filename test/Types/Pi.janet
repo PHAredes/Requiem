@@ -29,4 +29,10 @@
     (= (c/infer-top dep-fn-type) expected)
     "Dependent function: ∀(A : Type₀). A → A"))
 
+(let [id-ty (c/ty/pi (c/ty/type 0) (fn [A] (c/ty/pi A (fn [_] A))))
+      id-fn [:lam (fn [_] [:lam (fn [x] x)])]]
+  (test/assert suite
+    (c/check-top id-fn id-ty)
+    "Lambda checks against dependent Pi via shared binder helper"))
+
 (test/end-suite suite)

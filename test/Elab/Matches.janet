@@ -43,6 +43,12 @@
   "Variable pattern binds selector")
 
 (test/assert suite
+  (let [result (m/matches [:var "zero"] [:hole "_"] ctor-set)]
+    (and (= (result 0) :yes)
+         (= (length (kvs (result 1))) 0)))
+  "Underscore holes behave like wildcards")
+
+(test/assert suite
   (let [result (m/matches* @[[:var "zero"] [:var "zero"]]
                            @[[:pat/var "x"] [:pat/var "x"]]
                            ctor-set)]
@@ -56,6 +62,27 @@
                  ctor-set)
      [:no])
   "Repeated variable with conflicting values fails")
+
+(test/assert suite
+  (let [sigma (m/subst/extend (m/subst/extend (m/subst/empty)
+                                              "x"
+                                              [:var "zero"])
+                              "y"
+                              [:var "succ"])]
+    (and (= (m/subst/lookup sigma "x") [:var "zero"])
+         (= (m/subst/lookup sigma "y") [:var "succ"])))
+  "Substitution extension preserves earlier bindings")
+
+(test/assert suite
+  (let [initial (m/subst/extend (m/subst/empty) "seed" [:var "zero"])
+        result (m/matches* @[[:var "succ"]]
+                           @[[:pat/var "x"]]
+                           ctor-set
+                           initial)]
+    (and (= (result 0) :yes)
+         (= (get (result 1) "seed") [:var "zero"])
+         (= (get (result 1) "x") [:var "succ"])))
+  "Pattern matching preserves incoming substitutions")
 
 (test/assert suite
   (= (m/pat/to-term [:pat/con "succ" @[[:pat/con "zero" @[]]]])

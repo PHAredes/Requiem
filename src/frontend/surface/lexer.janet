@@ -27,6 +27,13 @@
 (defn- token/new [k v line col]
   {:k k :v v :line line :col col})
 
+(defn- scan-while [text start pred]
+  (let [n (length text)]
+    (var i start)
+    (while (and (< i n) (pred (text i)))
+      (++ i))
+    i))
+
 (defn lex [text sx]
   (let [tokens @[]
          n (length text)]
@@ -57,46 +64,46 @@
 
               (= c (chr "?"))
               (let [start i
-                    start-col col]
-                (++ i)
-                (++ col)
-                (while (and (< i n) (is-ident-byte? (text i))) (++ i))
-                (set col (+ start-col (- i start)))
-                (let [raw (string/slice text start i)]
-                  (if (= (length raw) 1)
-                    (array/push tokens (token/new :hole nil line start-col))
-                    (array/push tokens (token/new :hole (string/slice raw 1) line start-col)))))
+                     start-col col]
+                 (++ i)
+                 (++ col)
+                 (set i (scan-while text i is-ident-byte?))
+                 (set col (+ start-col (- i start)))
+                 (let [raw (string/slice text start i)]
+                   (if (= (length raw) 1)
+                     (array/push tokens (token/new :hole nil line start-col))
+                     (array/push tokens (token/new :hole (string/slice raw 1) line start-col)))))
 
               (is-digit-byte? c)
               (let [start i
-                    start-col col]
-                (++ i)
-                (++ col)
-                (while (and (< i n) (is-digit-byte? (text i))) (++ i))
-                (set col (+ start-col (- i start)))
-                (array/push tokens (token/new :nat (scan-number (string/slice text start i)) line start-col)))
+                     start-col col]
+                 (++ i)
+                 (++ col)
+                 (set i (scan-while text i is-digit-byte?))
+                 (set col (+ start-col (- i start)))
+                 (array/push tokens (token/new :nat (scan-number (string/slice text start i)) line start-col)))
 
               (is-ident-start-byte? c)
               (let [start i
-                    start-col col]
-                (++ i)
-                (++ col)
-                (while (and (< i n) (is-ident-byte? (text i))) (++ i))
-                (set col (+ start-col (- i start)))
-                (let [name (string/slice text start i)]
-                  (cond
+                     start-col col]
+                 (++ i)
+                 (++ col)
+                 (set i (scan-while text i is-ident-byte?))
+                 (set col (+ start-col (- i start)))
+                 (let [name (string/slice text start i)]
+                   (cond
                     (= name "let") (array/push tokens (token/new :kw/let name line start-col))
                     (= name "in") (array/push tokens (token/new :kw/in name line start-col))
                     true (array/push tokens (token/new :ident name line start-col)))))
 
               (is-op-byte? c)
               (let [start i
-                    start-col col]
-                (++ i)
-                (++ col)
-                (while (and (< i n) (is-op-byte? (text i))) (++ i))
-                (set col (+ start-col (- i start)))
-                (array/push tokens (token/new :op (string/slice text start i) line start-col)))
+                     start-col col]
+                 (++ i)
+                 (++ col)
+                 (set i (scan-while text i is-op-byte?))
+                 (set col (+ start-col (- i start)))
+                 (array/push tokens (token/new :op (string/slice text start i) line start-col)))
 
               true
               (errorf "lex error at %d:%d: unexpected byte %q" line col c))))))

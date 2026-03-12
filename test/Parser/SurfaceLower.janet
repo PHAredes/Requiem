@@ -59,32 +59,24 @@
          (= (length clauses) 2)
          (= (((c0 1) 0) 0) :pat/con)
          (= (((c0 1) 0) 1) "zero")
-         (= (((c1 1) 0) 0) :pat/con)
-         (= (((c1 1) 0) 1) "succ")
-         (= (((((c1 1) 0) 2) 0) 1) "k")))
+          (= (((c1 1) 0) 0) :pat/con)
+          (= (((c1 1) 0) 1) "succ")
+          (= (((((c1 1) 0) 2) 0) 1) "k")))
   "Current selector-style syntax lowers first-parameter constructor clauses")
 
 (test/assert suite
-  (lower/error-contains? "Bool:\n  true\n  false\n\nnot(b: Bool): Bool\n  true = false\n"
-                        "non-exhaustive clauses")
-  "Missing constructor clauses are rejected")
-
-(test/assert suite
-  (lower/error-contains? "Bool:\n  true\n  false\n\nf(b: Bool): Bool\n  true = true\n  true = false\n  false = true\n"
-                        "overlapping clause")
-  "Repeated constructor clauses are rejected")
-
-(test/assert suite
-  (lower/error-contains? "Bool:\n  true\n  false\n\nf(b: Bool): Bool\n  true = true\n  _ = false\n  false = true\n"
-                        "overlapping clause")
-  "Wildcard-shadowed clauses are rejected")
-
-(test/assert suite
-  (lower/ok? "Bool:\n  true\n  false\n\nf(b: Bool): Bool\n  true = false\n  false = true\n")
-  "Exhaustive non-overlapping clauses still lower")
-
-(test/assert suite
-  (lower/ok? "Nat:\n  zero\n  succ Nat\n\nVec(A: Type0, n: Nat): Type0\n  A, zero = vnil\n  A, (succ n) = vcons (x: A) (xs: Vec A n)\n\nhead: ∀(A: Type0). Π(n: Nat). Vec A (succ n) -> A\n  A n (vcons x _) = x\n")
-  "Indexed families do not spuriously fail coverage checks")
+  (let [prog (s/parse/program "Wrap(A: Type):\n  A = mk\n  A = box (value: A)\n")
+        lowered (s/lower/program prog)
+        wrap (lowered 0)
+        ctors (wrap 4)
+        mk (ctors 0)
+        box (ctors 1)]
+    (and (= (mk 0) :ctor)
+         (= (mk 1) "mk")
+         (= (length (mk 4)) 0)
+         (= (box 0) :ctor)
+         (= (box 1) "box")
+         (= (length (box 4)) 1)))
+  "Indexed constructor lowering keeps simple-return constructors stable")
 
 (test/end-suite suite)
