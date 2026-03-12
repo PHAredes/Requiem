@@ -33,9 +33,30 @@
                 b1 (get v1 1)
                 b2 (get v2 1)]
             (nf-eq? (b1 fresh) (b2 fresh)))
+          (= t1 c/NF/Pi)
+          (let [fresh (gensym)
+                a1 (get v1 1)
+                a2 (get v2 1)
+                b1 (get v1 2)
+                b2 (get v2 2)]
+            (and (nf-eq? a1 a2)
+                 (nf-eq? (b1 fresh) (b2 fresh))))
+          (= t1 c/NF/Sigma)
+          (let [fresh (gensym)
+                a1 (get v1 1)
+                a2 (get v2 1)
+                b1 (get v1 2)
+                b2 (get v2 2)]
+            (and (nf-eq? a1 a2)
+                 (nf-eq? (b1 fresh) (b2 fresh))))
           true (if (= (length v1) (length v2))
                  (all |(nf-eq? (get v1 $) (get v2 $)) (range 1 (length v1)))
                  false))))))
+
+(defn nf-eq-details [v1 v2]
+  (if (nf-eq? v1 v2)
+    nil
+    (string/format "expected %v, got %v" v1 v2)))
 
 (defn normalization-stable [ty tm]
   "Check that normalizing twice gives same result as normalizing once"

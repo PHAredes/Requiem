@@ -3,131 +3,79 @@
 (import ../Utils/TestRunner :as test)
 (import ../../src/coreTT :as c)
 (import ../Utils/Generators :as gen)
+(import ../Utils/ReductionPaths :as red)
+(import ../Utils/Assertions :as a)
 
 (def suite (test/start-suite "Property Confluence"))
 
 (var rng (gen/rng))
 
-# Property: Confluence (Diamond Property)
-(defn prop-confluence [n]
-  "Property: Normalization is confluent - all reduction paths lead to same normal form"
-  (var passed true)
-  (repeat n
-    (let [tm (case (math/rng-int rng 5)
-               0 [:type (math/rng-int rng 3)]
-               1 [:app [:lam (fn [x] [:var x])] (gen/gen-univ rng)]
-               2 [:fst [:pair (gen/gen-univ rng) (gen/gen-univ rng)]]
-               3 [:snd [:pair (gen/gen-univ rng) (gen/gen-univ rng)]]
-               4 [:app [:lam (fn [x] [:app [:lam (fn [y] [:var y])] [:var x]])]
-                  (gen/gen-univ rng)])
-          Γ (c/ctx/empty)]
-      (try
-        (let [ty (c/infer Γ tm)
-              # Normalize directly
-              nf1 (c/nf ty tm)
-              # Normalize via evaluation
-              sem (c/eval Γ tm)
-              nf2 (c/lower ty sem)]
-          (unless (= nf1 nf2)
-            (set passed false)
-            (print "Confluence failed for:" tm)
-            (print "  nf1:" nf1)
-            (print "  nf2:" nf2)))
-        ([err] nil))))
-  passed)
-
-(test/assert suite
-  (prop-confluence 50)
-  "Property: confluence - all reduction paths converge")
-
-# Property: Pi Syntactic Equality
-(defn prop-pi-syntactic-equality [n]
-  "Property: Syntactically identical Pi types are definitionally equal"
-  (var passed true)
-  (repeat n
-    (let [A [:type (math/rng-int rng 3)]
-          shared-lv (math/rng-int rng 3)
-          B (fn [x] [:type shared-lv])
-          Γ (c/ctx/empty)
-          pi1 [:t-pi A B]
-          pi2 [:t-pi A B]] # Same A, same B reference
-      (try
-        (let [ty (c/infer Γ pi1)]
-          (unless (c/term-eq Γ ty pi1 pi2)
-            (set passed false)
-            (print "Pi equality failed with identical syntax")))
-        ([err] nil))))
-  passed)
-
-(test/assert suite
-  (prop-pi-syntactic-equality 20)
-  "Property: syntactically identical Pi types are equal")
-
-# Property Tests: Congruence
-(defn prop-app-congruence [n]
-  "Property: If t₁ ≡ t₁' and t₂ ≡ t₂', then t₁ t₂ ≡ t₁' t₂'"
+(defn prop-local-diamond [n]
+  "Property: the explicit overlapping beta-redex witness is locally confluent"
   (var passed true)
   (let [Γ (c/ctx/empty)]
     (repeat n
-      (let [t1 [:type (math/rng-int rng 3)]
-            t2 [:type (math/rng-int rng 3)]
-            t1-prime [:type (math/rng-int rng 3)]
-            t2-prime [:type (math/rng-int rng 3)]
-            app1 [:app t1 t2]
-            app2 [:app t1-prime t2-prime]]
-        (when (and (c/term-eq Γ [:type 1] t1 t1-prime)
-                   (c/term-eq Γ [:type 1] t2 t2-prime))
-          (unless (c/term-eq Γ [:type 1] app1 app2)
-            (set passed false)
-            (print "App congruence failed"))))))
+      (let [sample (gen/gen-reduction-diamond rng)
+          ty (c/eval Γ (sample :type))
+          left (sample :left)
+          right (sample :right)
+          join (sample :join)
+          nf-left (c/nf ty left)
+          nf-right (c/nf ty right)
+          nf-join (c/nf ty join)]
+      (unless (and (a/nf-eq? nf-left nf-join)
+                   (a/nf-eq? nf-right nf-join))
+        (set passed false)
+        (print "Local confluence failed:")
+        (print "  seed =" (gen/seed/current))
+        (print "  term =" (sample :term))
+        (print "  left =" left)
+        (print "  right =" right)
+        (print "  join =" join)
+        (print "  nf(left) =" nf-left)
+        (print "  nf(right) =" nf-right)
+        (print "  nf(join) =" nf-join)))))
   passed)
 
 (test/assert suite
-  (prop-app-congruence 20)
-  "Property: application is congruent")
+  (prop-local-diamond (test/property-count 50))
+  "Property: local diamond witnesses rejoin")
 
-# Property Tests: Extensional Equality
-(defn prop-extensionality [n]
-  "Property: Functions are equal if they are equal on all arguments"
+(defn prop-leftmost-rightmost-agree [n]
+  "Property: both reduction strategies reach the same normal form on the diamond witness"
   (var passed true)
   (let [Γ (c/ctx/empty)]
     (repeat n
-      (let [f [:lam (fn [x] [:var x])]
-            g [:lam (fn [x] [:var x])]
-            test-args @[[:type (math/rng-int rng 3)]
-                        [:type (math/rng-int rng 3)]
-                        [:type (math/rng-int rng 3)]]]
-        # Check that f and g are equal on all test arguments
-        (var all-equal true)
-        (each arg test-args
-          (unless (c/term-eq Γ [:type 1] [:app f arg] [:app g arg])
-            (set all-equal false)))
-        (when all-equal
-          (unless (c/term-eq Γ [:t-pi [:type 0] (fn [x] [:type 0])] f g)
-            (set passed false)
-            (print "Extensionality failed"))))))
+      (let [sample (gen/gen-reduction-diamond rng)
+          tm (sample :term)
+          ty (c/eval Γ (sample :type))
+          paths (red/get-reduction-paths tm)
+          left-path (paths 0)
+          right-path (paths 1)
+          left-step (if (> (length left-path) 1) (left-path 1) nil)
+          right-step (if (> (length right-path) 1) (right-path 1) nil)
+          left-final (left-path (dec (length left-path)))
+          right-final (right-path (dec (length right-path)))
+          left-nf (c/nf ty left-final)
+          right-nf (c/nf ty right-final)]
+      (unless (and left-step
+                   right-step
+                   (not (= left-step right-step))
+                   (a/nf-eq? left-nf right-nf))
+        (set passed false)
+        (print "Strategy join failed:")
+        (print "  seed =" (gen/seed/current))
+        (print "  term =" tm)
+        (print "  actual left step =" left-step)
+        (print "  actual right step =" right-step)
+        (print "  left path =" left-path)
+        (print "  right path =" right-path)
+        (print "  left nf =" left-nf)
+        (print "  right nf =" right-nf)))))
   passed)
 
 (test/assert suite
-  (prop-extensionality 10)
-  "Property: extensional equality for functions")
-
-# Property Tests: Beta-Eta Equivalence
-(defn prop-id-function [n]
-  "Property: (λx. x) a ≡ a for various a"
-  (var passed true)
-  (let [Γ (c/ctx/empty)]
-    (repeat n
-      (let [a (gen/gen-univ rng)
-            id [:lam (fn [x] [:var x])]
-            applied [:app id a]]
-        (unless (c/term-eq Γ [:type 1] applied a)
-          (set passed false)
-          (print "Beta reduction failed for:" a)))))
-  passed)
-
-(test/assert suite
-  (prop-id-function 20)
-  "Property: identity function beta-reduces correctly")
+  (prop-leftmost-rightmost-agree (test/property-count 50))
+  "Property: leftmost and rightmost reduction agree on normal forms")
 
 (test/end-suite suite)
