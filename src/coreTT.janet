@@ -38,6 +38,7 @@
 
 (def T/Type0 [T/Type 0])
 (def T/Type100 (ty/type 100))
+(def T/TypeOmega T/Type100)
 
 # Term constructors
 (defn tm/var [x] [:var x])
@@ -91,9 +92,22 @@
 (var raise nil)
 (var lower nil)
 (var infer nil)
+(var eval nil)
+(var sem-eq nil)
 
 (defn- tag-of [x]
   (if (tuple? x) (get x 0) 0))
+
+(defn- sem/value? [x]
+  (let [tag (tag-of x)]
+    (or (function? x)
+        (= tag T/Type)
+        (= tag T/Pi)
+        (= tag T/Sigma)
+        (= tag T/Id)
+        (= tag T/Refl)
+        (= tag T/Neutral)
+        (= tag T/Pair))))
 
 (defn- sem/neutral [ne]
   [T/Neutral ne])
@@ -105,6 +119,70 @@
   (let [fresh (gensym)
         arg-sem (named-neutral A fresh)]
     (f fresh arg-sem)))
+
+(defn- sem/apply [f-ty f-sem arg-sem]
+  (let [tag (tag-of f-ty)]
+    (if (= tag T/Pi)
+      (let [[_ A B] f-ty
+            stag (tag-of f-sem)]
+        (cond
+          (= stag T/Neutral) (raise (B arg-sem) (ne/app (get f-sem 1) (lower A arg-sem)))
+          (function? f-sem) (f-sem arg-sem)
+          true (errorf "expected function semantics, got: %v" f-sem)))
+      (errorf "expected Pi type for semantic application, got: %v" f-ty))))
+
+(defn- j-motive-type [A x]
+  (ty/pi A (fn [y] (ty/pi (ty/id A x y) (fn [_] T/Type100)))))
+
+(defn- sem/normalize [x]
+  (if (sem/value? x) x (eval (ctx/empty) x)))
+
+(defn- j-motive-store [P]
+  (if (function? P)
+    [:motive/hoas P]
+    [:motive/sem P]))
+
+(defn- j-motive-result-raw [A x P y p]
+  (match P
+    [:motive/hoas f] (f y p)
+    [:motive/sem f]
+    (let [P-ty (j-motive-type A x)
+          Py-ty ((get P-ty 2) y)
+          Py (sem/apply P-ty f y)
+          result (sem/apply Py-ty Py p)]
+      result)
+    _ (errorf "unknown stored J motive: %v" P)))
+
+(defn- j-motive-result [A x P y p]
+  (sem/normalize (j-motive-result-raw A x P y p)))
+
+(defn- j-motive-result-eq [A x P1 P2 y p]
+  (sem-eq T/TypeOmega
+          (j-motive-result A x P1 y p)
+          (j-motive-result A x P2 y p)))
+
+(defn- j-motive-eq [A x P1 P2]
+  (with-fresh-neutral A
+    (fn [_ y-sem]
+      (let [id-ty (ty/id A x y-sem)]
+        (with-fresh-neutral id-ty
+          (fn [_ p-sem]
+            (j-motive-result-eq A x P1 P2 y-sem p-sem)))))))
+
+(defn- ne-eq/J [ne1 ne2]
+  (let [[_ A1 x1 P1 d1 y1 p1] ne1
+        [_ A2 x2 P2 d2 y2 p2] ne2
+        refl1 [T/Refl x1]
+        refl2 [T/Refl x2]
+        dA1 (j-motive-result A1 x1 P1 x1 refl1)
+        dA2 (j-motive-result A2 x2 P2 x2 refl2)]
+    (and (sem-eq T/TypeOmega A1 A2)
+         (sem-eq A1 x1 x2)
+         (j-motive-eq A1 x1 P1 P2)
+         (sem-eq T/TypeOmega dA1 dA2)
+         (sem-eq dA1 d1 d2)
+         (sem-eq A1 y1 y2)
+         (sem-eq (ty/id A1 x1 y1) p1 p2))))
 
 (defn- raise/pi [A B ne]
   (fn [x]
@@ -218,8 +296,67 @@
 (def print/nf (pp :print/nf))
 (def print/tm (pp :print/tm))
 
+# Structural equality for NbE artifacts
+(var nf-eq nil)
+(var ne-eq nil)
+
+(set nf-eq
+     (fn [v1 v2]
+       (cond
+         (= v1 v2) true
+         (not (and (tuple? v1) (tuple? v2))) (= v1 v2)
+         (not= (get v1 0) (get v2 0)) false
+         (= (get v1 0) NF/Neut) (ne-eq (get v1 1) (get v2 1))
+         (= (get v1 0) NF/Type) (= (get v1 1) (get v2 1))
+         (= (get v1 0) NF/Lam)
+         (let [fresh (gensym)
+               b1 (get v1 1)
+               b2 (get v2 1)]
+           (nf-eq (b1 fresh) (b2 fresh)))
+         (= (get v1 0) NF/Pi)
+         (let [fresh (gensym)
+               a1 (get v1 1)
+               a2 (get v2 1)
+               b1 (get v1 2)
+               b2 (get v2 2)]
+           (and (nf-eq a1 a2)
+                (nf-eq (b1 fresh) (b2 fresh))))
+         (= (get v1 0) NF/Sigma)
+         (let [fresh (gensym)
+               a1 (get v1 1)
+               a2 (get v2 1)
+               b1 (get v1 2)
+               b2 (get v2 2)]
+           (and (nf-eq a1 a2)
+                (nf-eq (b1 fresh) (b2 fresh))))
+         (= (get v1 0) NF/Pair)
+         (and (nf-eq (get v1 1) (get v2 1))
+              (nf-eq (get v1 2) (get v2 2)))
+         (= (get v1 0) NF/Id)
+         (and (nf-eq (get v1 1) (get v2 1))
+              (nf-eq (get v1 2) (get v2 2))
+              (nf-eq (get v1 3) (get v2 3)))
+         (= (get v1 0) NF/Refl)
+         (nf-eq (get v1 1) (get v2 1))
+         true false)))
+
+(set ne-eq
+     (fn [ne1 ne2]
+       (cond
+         (= ne1 ne2) true
+         (not (and (tuple? ne1) (tuple? ne2))) (= ne1 ne2)
+         (not= (get ne1 0) (get ne2 0)) false
+         (= (get ne1 0) :nvar) (= (get ne1 1) (get ne2 1))
+         (= (get ne1 0) :napp)
+         (and (ne-eq (get ne1 1) (get ne2 1))
+              (nf-eq (get ne1 2) (get ne2 2)))
+         (or (= (get ne1 0) :nfst) (= (get ne1 0) :nsnd))
+         (ne-eq (get ne1 1) (get ne2 1))
+         (= (get ne1 0) :nJ)
+         (ne-eq/J ne1 ne2)
+         true (= ne1 ne2))))
+
 # Definitional equality
-(var sem-eq nil)
 
 (defn- sem-eq/type [ty v1 v2]
   (let [t1 (tag-of v1)
@@ -246,6 +383,9 @@
       (let [[_ A1 x1 y1] v1 [_ A2 x2 y2] v2]
         (and (sem-eq ty A1 A2) (sem-eq A1 x1 x2) (sem-eq A1 y1 y2)))
 
+      (and (= t1 T/Neutral) (= t2 T/Neutral))
+      (ne-eq (get v1 1) (get v2 1))
+
       true (= v1 v2))))
 
 (defn- sem-eq/pi [A B v1 v2]
@@ -253,7 +393,11 @@
         t2 (tag-of v2)]
     (cond
       (and (= t1 T/Neutral) (= t2 T/Neutral))
-      (= (get v1 1) (get v2 1))
+      (with-fresh-neutral A
+        (fn [_ arg-sem]
+          (sem-eq (B arg-sem)
+                  (raise (B arg-sem) (ne/app (get v1 1) (lower A arg-sem)))
+                  (raise (B arg-sem) (ne/app (get v2 1) (lower A arg-sem))))))
 
       (= t1 T/Neutral)
       (with-fresh-neutral A
@@ -279,13 +423,20 @@
         t2 (tag-of v2)]
     (cond
       (and (= t1 T/Neutral) (= t2 T/Neutral))
-      (= (get v1 1) (get v2 1))
+      (let [ne1 (get v1 1)
+            ne2 (get v2 1)
+            p1-fst (sem/neutral (ne/fst ne1))
+            p2-fst (sem/neutral (ne/fst ne2))
+            p1-snd (sem/neutral (ne/snd ne1))
+            p2-snd (sem/neutral (ne/snd ne2))]
+        (and (sem-eq A p1-fst p2-fst)
+             (sem-eq (B p1-fst) p1-snd p2-snd)))
 
       (= t1 T/Neutral)
       (let [[_ l2 r2] v2
-            ne1 (get v1 1)
-            p1-fst (sem/neutral (ne/fst ne1))
-            p1-snd (sem/neutral (ne/snd ne1))]
+             ne1 (get v1 1)
+             p1-fst (sem/neutral (ne/fst ne1))
+             p1-snd (sem/neutral (ne/snd ne1))]
         (and (sem-eq A p1-fst l2)
              (sem-eq (B p1-fst) p1-snd r2)))
 
@@ -310,7 +461,7 @@
       (sem-eq A (get v1 1) (get v2 1))
 
       (and (= t1 T/Neutral) (= t2 T/Neutral))
-      (= (get v1 1) (get v2 1))
+      (ne-eq (get v1 1) (get v2 1))
 
       true false)))
 
@@ -326,9 +477,6 @@
              (= tag T/Sigma) (let [[_ A B] ty] (sem-eq/sigma A B v1 v2))
              (= tag T/Id) (let [[_ A _ _] ty] (sem-eq/id A v1 v2))
              true false)))))
-
-# Evaluator
-(var eval nil)
 
 (defn- eval/var [Γ x]
   (if (or (string? x) (symbol? x))
@@ -389,7 +537,7 @@
   (let [pv (eval Γ p)
         Av (eval Γ A)
         xv (eval Γ x)
-        Pv (eval Γ P)
+        Pv (j-motive-store (eval Γ P))
         dv (eval Γ d)
         yv (eval Γ y)
         tag (tag-of pv)]
@@ -407,27 +555,23 @@
 
 (set eval
      (fn [Γ tm]
-       "Evaluate a term in context Γ to a semantic value"
-       (match tm
-         [:Type l] [T/Type l]
-         [:Pi A B] [T/Pi A B]
-         [:Sigma A B] [T/Sigma A B]
-         [:Id A x y] [T/Id A x y]
-         [:refl x] [T/Refl x]
-         [:neutral ne] [T/Neutral ne]
-         [:var x] (eval/var Γ x)
-         [:lam body] (eval/lam Γ body)
-         [:app f x] (eval/app Γ f x)
-         [:type l] (ty/type l)
-         [:t-pi A B] (eval/t-pi Γ A B)
-         [:t-sigma A B] (eval/t-sigma Γ A B)
-         [:pair a b] (eval/pair Γ a b)
-         [:fst p] (eval/fst Γ p)
-         [:snd p] (eval/snd Γ p)
-         [:t-id A x y] (eval/t-id Γ A x y)
-         [:t-refl x] (eval/t-refl Γ x)
-         [:t-J A x P d y p] (eval/t-J Γ A x P d y p)
-         _ (if (function? tm) tm tm))))
+        "Evaluate a term in context Γ to a semantic value"
+        (if (sem/value? tm)
+          tm
+          (match tm
+            [:var x] (eval/var Γ x)
+            [:lam body] (eval/lam Γ body)
+            [:app f x] (eval/app Γ f x)
+            [:type l] (ty/type l)
+            [:t-pi A B] (eval/t-pi Γ A B)
+            [:t-sigma A B] (eval/t-sigma Γ A B)
+            [:pair a b] (eval/pair Γ a b)
+            [:fst p] (eval/fst Γ p)
+            [:snd p] (eval/snd Γ p)
+            [:t-id A x y] (eval/t-id Γ A x y)
+            [:t-refl x] (eval/t-refl Γ x)
+            [:t-J A x P d y p] (eval/t-J Γ A x P d y p)
+            _ tm))))
 
 (defn eval/session [f]
   "Run a computation in a fresh evaluation session with deep stack"

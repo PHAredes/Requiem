@@ -40,4 +40,23 @@
     (c/sem-eq ty f1 f2)
     "Semantic equality: extensional function equality"))
 
+(let [id-ty (c/ty/pi (c/ty/type 0) (fn [_] (c/ty/type 0)))
+      fn-ctx-ty (c/ty/pi id-ty (fn [_] id-ty))
+      Γ (c/ctx/add (c/ctx/empty) "f" fn-ctx-ty)
+      t1 [:app [:var "f"] [:lam (fn [x] [:var x])]]
+      t2 [:app [:var "f"] [:lam (fn [y] [:var y])]]]
+  (test/assert suite
+    (c/term-eq Γ id-ty t1 t2)
+    "Semantic equality: neutral functions compare eta-extensionally"))
+
+(let [id-ty (c/ty/pi (c/ty/type 0) (fn [_] (c/ty/type 0)))
+      sigma-ty (c/ty/sigma id-ty (fn [_] id-ty))
+      pair-ctx-ty (c/ty/pi id-ty (fn [_] sigma-ty))
+      Γ (c/ctx/add (c/ctx/empty) "p" pair-ctx-ty)
+      t1 [:app [:var "p"] [:lam (fn [x] [:var x])]]
+      t2 [:app [:var "p"] [:lam (fn [y] [:var y])]]]
+  (test/assert suite
+    (c/term-eq Γ sigma-ty t1 t2)
+    "Semantic equality: neutral pairs compare by projections"))
+
 (test/end-suite suite)

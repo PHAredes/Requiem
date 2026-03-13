@@ -32,6 +32,67 @@
 
 (test-transport)
 
+# Test: Neutral J equality with HOAS motives
+(let [Γ (c/ctx/empty)
+      A [:type 1]
+      x [:type 0]
+      A-sem (c/eval Γ A)
+      x-sem (c/eval Γ x)
+      Γy (c/ctx/add Γ "y" A-sem)
+      y [:var "y"]
+      y-sem (c/eval Γy y)
+      id-xy (c/ty/id A-sem x-sem y-sem)
+      Γyp (c/ctx/add Γy "p" id-xy)
+      p [:var "p"]
+      motive1 (fn [z _p] [:t-id A z x])
+      motive2 (fn [w _p] [:t-id A w x])
+      base [:t-refl x]
+      j1 [:t-J A x motive1 base y p]
+      j2 [:t-J A x motive2 base y p]]
+  (test/assert suite
+    (c/term-eq Γyp (c/ty/id A-sem y-sem x-sem) j1 j2)
+    "Neutral J equality compares HOAS motives extensionally"))
+
+(let [Γ (c/ctx/empty)
+      A [:type 1]
+      x [:type 0]
+      A-sem (c/eval Γ A)
+      x-sem (c/eval Γ x)
+      Γy (c/ctx/add Γ "y" A-sem)
+      y [:var "y"]
+      y-sem (c/eval Γy y)
+      id-xy (c/ty/id A-sem x-sem y-sem)
+      Γyp (c/ctx/add Γy "p" id-xy)
+      p [:var "p"]
+      motive1 (fn [_ _p] [:t-pi [:type 0] (fn [_] [:type 0])])
+      motive2 (fn [_ _p] [:t-pi [:type 0] (fn [_] [:type 0])])
+      base1 [:lam (fn [a] [:var a])]
+      base2 [:lam (fn [b] [:var b])]
+      j1 [:t-J A x motive1 base1 y p]
+      j2 [:t-J A x motive2 base2 y p]]
+  (test/assert suite
+    (c/term-eq Γyp (c/ty/pi (c/ty/type 0) (fn [_] (c/ty/type 0))) j1 j2)
+    "Neutral J equality compares HOAS base cases extensionally"))
+
+(let [Γ (c/ctx/empty)
+      A [:type 1]
+      x [:type 0]
+      A-sem (c/eval Γ A)
+      x-sem (c/eval Γ x)
+      Γy (c/ctx/add Γ "y" A-sem)
+      y [:var "y"]
+      y-sem (c/eval Γy y)
+      id-xy (c/ty/id A-sem x-sem y-sem)
+      Γyp (c/ctx/add Γy "p" id-xy)
+      p [:var "p"]
+      motive1 (fn [_ _p] [:type 1])
+      motive2 (fn [_ _p] [:type 2])
+      j1 [:t-J A x motive1 [:type 0] y p]
+      j2 [:t-J A x motive2 [:type 1] y p]]
+  (test/assert suite
+    (not (c/sem-eq (c/ty/type 100) (c/eval Γyp j1) (c/eval Γyp j2)))
+    "Neutral J equality rejects distinct motives"))
+
 # Test: Symmetry (full derivation)
 (defn test-symmetry-derivation []
   "Derive sym : ∀A x y. Id A x y → Id A y x using J"

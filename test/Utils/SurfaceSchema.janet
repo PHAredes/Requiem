@@ -14,6 +14,11 @@
 (defn- ok [v] [:ok v])
 (defn- err [m] [:err m])
 
+(var schema/type nil)
+(var schema/term nil)
+(var schema/pat nil)
+(var schema/decl nil)
+
 (defn- path->str [path]
   (if (zero? (length path)) "<root>" (string/join path ".")))
 
@@ -105,11 +110,6 @@
 (def hole-name
   (sc/optional (sc/string)))
 
-(var schema/type nil)
-(var schema/term nil)
-(var schema/pat nil)
-(var schema/decl nil)
-
 (def schema/pos (sc/tagged :pos @[pos-int pos-int nonneg-int]))
 (def schema/span (sc/tagged :span @[schema/pos schema/pos]))
 (def schema/binder (sc/tagged :binder @[(sc/string) (sc/lazy (fn [] schema/type)) schema/span]))
@@ -153,14 +153,13 @@
   (sc/union @[(sc/tagged :ctor/plain @[(sc/string) (sc/array schema/field) schema/span])
               (sc/tagged :ctor/indexed @[(sc/array (sc/lazy (fn [] schema/pat))) (sc/string) (sc/array schema/field) schema/span])]))
 (def schema/clause (sc/tagged :clause @[(sc/array (sc/lazy (fn [] schema/pat))) (sc/lazy (fn [] schema/term)) schema/span]))
-
 (set schema/decl
      (sc/union @[
        (sc/tagged :decl/prec @[(sc/lit :infixl) nonneg-int (sc/string) schema/span])
        (sc/tagged :decl/prec @[(sc/lit :infixr) nonneg-int (sc/string) schema/span])
        (sc/tagged :decl/prec @[(sc/lit :prefix) nonneg-int (sc/string) schema/span])
        (sc/tagged :decl/prec @[(sc/lit :postfix) nonneg-int (sc/string) schema/span])
-       (sc/tagged :decl/data @[(sc/string) (sc/array schema/param) (sc/array schema/ctor) schema/span])
+       (sc/tagged :decl/data @[(sc/string) (sc/array schema/param) (sc/lazy (fn [] schema/type)) (sc/array schema/ctor) schema/span])
        (sc/tagged :decl/func @[(sc/string) (sc/lazy (fn [] schema/type)) (sc/array schema/clause) schema/span])]))
 
 (def schema/program
