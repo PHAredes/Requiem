@@ -30,7 +30,7 @@
 # ---------------------
 # Type constructors
 # ---------------------
-(defn ty/type [lvl*] [T/Type (lvl/value lvl*)])
+(defn ty/type [lvl*] [T/Type (lvl/closed lvl*)])
 (defn ty/pi [A B] [T/Pi A B])
 (defn ty/sigma [A B] [T/Sigma A B])
 (defn ty/id [A x y] [T/Id A x y])
@@ -289,7 +289,7 @@
                  :NF/Refl NF/Refl
                  :ty/type ty/type
                  :lower lower
-                 :lvl/value lvl/value}))
+                 :lvl/str lvl/str}))
 
 (def print/sem (pp :print/sem))
 (def print/ne (pp :print/ne))
@@ -307,7 +307,7 @@
          (not (and (tuple? v1) (tuple? v2))) (= v1 v2)
          (not= (get v1 0) (get v2 0)) false
          (= (get v1 0) NF/Neut) (ne-eq (get v1 1) (get v2 1))
-         (= (get v1 0) NF/Type) (= (get v1 1) (get v2 1))
+         (= (get v1 0) NF/Type) (lvl/eq? (get v1 1) (get v2 1))
          (= (get v1 0) NF/Lam)
          (let [fresh (gensym)
                b1 (get v1 1)
