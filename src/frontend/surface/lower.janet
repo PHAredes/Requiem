@@ -6,6 +6,7 @@
 # into the internal representation consumed by elab.janet.
 
 (import ./ast :as a)
+(import ../../levels :as lvl)
 
 # ---------------------------------------------------------------
 # Helpers
@@ -21,6 +22,12 @@
 
 (defn- lower/name [name]
   (atom name))
+
+(defn- universe/token [level]
+  (let [norm (lvl/normalize level)]
+    (if (lvl/const? norm)
+      (string "Type" (lvl/value norm))
+      (string "Type(" (lvl/str norm) ")"))))
 
 (defn- lower/op [op args lower-node]
   (lst (tuple/join @[(atom op)] (map lower-node args))))
@@ -269,8 +276,8 @@
          [:ty/hole name _sp]
          (if name (atom (string "?" name)) (atom "?"))
 
-         [:ty/universe level _sp]
-          (atom (string "Type" level))
+          [:ty/universe level _sp]
+           (atom (universe/token level))
 
           [:ty/name name _sp]
           (lower/name name)

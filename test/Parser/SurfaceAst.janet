@@ -2,6 +2,7 @@
 
 (import ../Utils/TestRunner :as test)
 (import ../../src/frontend/surface/ast :as a)
+(import ../../src/levels :as lvl)
 
 (def suite (test/start-suite "Surface AST"))
 
@@ -38,6 +39,13 @@
     (a/tm/nat -1 sp))
   "Debug checks reject invalid naturals"
   "tm/nat.value >= 0")
+
+(test/assert suite
+  (do
+    (a/ast/set-debug-checks! true)
+    (= (a/ty/universe (lvl/uvar 'u) sp)
+       [:ty/universe (lvl/uvar 'u) sp]))
+  "Debug checks accept symbolic universe levels")
 
 (a/ast/set-debug-checks! false)
 

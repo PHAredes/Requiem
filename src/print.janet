@@ -18,7 +18,7 @@
         NF/Refl (deps :NF/Refl)
         ty/type (deps :ty/type)
         lower (deps :lower)
-        lvl/value (deps :lvl/value)]
+        lvl/str (deps :lvl/str)]
     (var state/name-map nil)
     (var state/used-names nil)
     (var state/fresh-id 0)
@@ -143,7 +143,7 @@
          (fn [nf]
             (match nf
               [NF/Type l]
-              (string "Type" (lvl/value l))
+              (string "Type" (lvl/str l))
 
               [NF/Pi A B]
               (render-nf-binder "Pi" A B)
@@ -179,8 +179,8 @@
              [:app f x]
              (string (tm-arg f) " " (tm-arg x))
 
-             [:type l]
-             (string "Type" l)
+              [:type l]
+              (string "Type" (lvl/str l))
 
               [:lam body]
               (let [x (fresh-name)]
