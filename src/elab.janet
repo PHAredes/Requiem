@@ -2,6 +2,7 @@
 
 (import ./frontend/sexpr/parser :as p)
 (import ./frontend/sexpr/lower :as l)
+(import ./frontend/surface/parser :as sp)
 (import ./sig :as s)
 (import ./coreTT :as tt)
 
@@ -41,6 +42,23 @@
          (= (string/slice tok 0 4) "Type")
          (token/digits? (string/slice tok 4)))
     (scan-number (string/slice tok 4))
+
+    (and (> (length tok) 6)
+         (= (string/slice tok 0 5) "Type(")
+         (= (string/slice tok (- (length tok) 1) (length tok)) ")"))
+    (let [parsed (sp/parse/type-text tok)]
+      (match parsed
+        [:ty/universe lvl _] lvl
+        _ nil))
+
+    (and (> (length tok) 3)
+         (= (string/slice tok 0 2) "U(")
+         (= (string/slice tok (- (length tok) 1) (length tok)) ")"))
+    (let [parsed (sp/parse/type-text tok)]
+      (match parsed
+        [:ty/universe lvl _] lvl
+        _ nil))
+
     true nil))
 
 (defn token/hole-name [tok]
@@ -613,10 +631,7 @@
 (defn atom/type-token? [node]
   (and (tuple? node)
        (= (node 0) :atom)
-       (let [tok (node 1)]
-         (or (= tok "Type")
-             (and (> (length tok) 4)
-                  (= (string/slice tok 0 4) "Type"))))))
+       (not (nil? (token/type-level (node 1))))))
 
 (defn params/index-positions [params]
   (reduce (fn [acc i]

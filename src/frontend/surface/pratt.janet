@@ -3,6 +3,7 @@
 (import ./ast :as a)
 (import ./syntax :as x)
 (import ./lexer :as lx)
+(import ../../levels :as lvl)
 
 (defn- trim [s] (string/trim s))
 
@@ -41,6 +42,69 @@
 (defn- op-lbp [level] (+ 10 level))
 
 (var parse/expr nil)
+(var parse/level-expr nil)
+
+(defn- parse/level-list [st]
+  (let [items @[]]
+    (when (= ((pstate/peek st) :k) :rparen)
+      (errorf "parse error at %s: level list cannot be empty" (tok/at (pstate/peek st))))
+    (while true
+      (array/push items (parse/level-expr st))
+      (let [next (pstate/peek st)]
+        (cond
+          (= (next :k) :comma) (do (pstate/next st) nil)
+          (= (next :k) :rparen) (break)
+          true (errorf "parse error at %s: expected ',' or ')', got %s"
+                        (tok/at next)
+                        (tok/render next)))))
+    items))
+
+(defn- parse/level-atom [st]
+  (let [tok (pstate/next st)]
+    (match (tok :k)
+      :nat (lvl/const (tok :v))
+      :ident
+      (let [name (tok :v)]
+        (if (and (= name "max") (= ((pstate/peek st) :k) :lparen))
+          (do
+            (pstate/next st)
+            (let [items (parse/level-list st)]
+              (pstate/expect st :rparen)
+              (reduce (fn [acc item] (lvl/max acc item))
+                      (items 0)
+                      (slice items 1))))
+          (lvl/uvar name)))
+      :lparen
+      (let [inner (parse/level-expr st)]
+        (pstate/expect st :rparen)
+        inner)
+      _ (errorf "parse error at %s: unexpected level token %s" (tok/at tok) (tok/render tok)))))
+
+(set parse/level-expr
+     (fn [st]
+       (var out (parse/level-atom st))
+       (while (and (= ((pstate/peek st) :k) :op)
+                   (= ((pstate/peek st) :v) "+"))
+         (let [op-tok (pstate/next st)
+               rhs (parse/level-atom st)
+               amount (try
+                        (lvl/value rhs)
+                        ([err]
+                         (errorf "parse error at %s: the right-hand side of universe + must be a closed natural level, got %v"
+                                 (tok/at op-tok)
+                                 rhs)))]
+           (set out (lvl/apply-shift (lvl/shift amount) out))))
+       out))
+
+(defn- parse/type-universe-explicit [st head]
+  (let [level (if (= ((pstate/peek st) :k) :lparen)
+                (do
+                  (pstate/next st)
+                  (let [parsed (parse/level-expr st)]
+                    (pstate/expect st :rparen)
+                    parsed))
+                0)]
+    (a/ty/universe level (a/span/none))))
 
 (defn- parse-binder [st]
   (pstate/expect st :lparen)
@@ -87,7 +151,10 @@
   (match (tok :k)
     :hole (a/ty/hole (tok :v) (a/span/none))
     :nat (a/ty/universe (tok :v) (a/span/none))
-    :ident (resolve-type-ident st (tok :v))
+    :ident (let [name (tok :v)]
+             (if (or (= name "Type") (= name "U"))
+               (parse/type-universe-explicit st name)
+               (resolve-type-ident st name)))
     :lparen (parse-grouped st)
     :quant
     (let [q (tok :v)
