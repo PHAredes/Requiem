@@ -2,6 +2,10 @@
 
 (import ../Utils/TestRunner :as test)
 (import ../../src/frontend/surface/parser :as s)
+(import ../../src/elab :as e)
+(import ../../src/coreTT :as tt)
+(import ../../src/core_printer :as pp)
+(import ../../src/levels :as lvl)
 
 (defn lower/ok? [src]
   (try
@@ -38,6 +42,18 @@
         lowered (s/lower/type ty)]
     (deep= lowered [:list @[[:atom "F"] [:atom "a"] [:atom "b"] [:atom "c"]]]))
   "Type applications are flattened during lowering")
+
+(test/assert suite
+  (let [ty (s/parse/type-text "Type(u + 1 + 2)")
+        lowered (s/lower/type ty)
+        term ((e/exports :term/elab) @[] lowered)
+        inferred (tt/infer-top term)]
+    (and (= lowered [:atom "Type(u + 3)"])
+         (= (pp/print/tm term) "Typeu + 3")
+         (= (pp/print/sem inferred) "Typeu + 4")
+         (lvl/eq? (get inferred 1)
+                  (lvl/apply-shift (lvl/shift 4) (lvl/uvar "u")))))
+  "Symbolic universes survive lowering elaboration and printing")
 
 (test/assert suite
   (let [prog (s/parse/program "Bool:\n  true\n  false\nnot(b: Bool): Bool\n  true = false\n  false = true\n")
