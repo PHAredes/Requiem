@@ -115,13 +115,19 @@ id: ∀(A: U0). A -> A
 
 (test/assert suite
   (let [prog (s/parse/program "Nat: Type3\n  zero\n")
-        decls (prog 1)
-        nat (decls 0)
-        sort (nat 3)]
+         decls (prog 1)
+         nat (decls 0)
+         sort (nat 3)]
     (and (= (nat 0) :decl/data)
          (= (s/node/tag sort) :ty/universe)
          (= (sort 1) 3)))
   "Data headers accept explicit universe levels")
+
+(test/assert suite
+  (let [prog (s/parse/program "Nat: Type3\n  zero\n")
+        checked (schema/check/program prog)]
+    (= (checked 0) :ok))
+  "Surface schema accepts data declarations with explicit sort")
 
 (test/assert-error suite
   (fn []

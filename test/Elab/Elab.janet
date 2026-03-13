@@ -136,4 +136,13 @@
          (= (get inferred 0) tt/T/Id)))
   "Elaborated J motives typecheck end-to-end")
 
+(test/assert suite
+  (let [node [:tm/lam @["x"] [:tm/var "x" nil] nil]
+        term ((e/exports :term/elab) @[] node)
+        body (get term 1)
+        fresh "fresh-x"]
+    (and (= (term 0) :lam)
+         (= (body fresh) fresh)))
+  "Direct surface lambdas accept string params")
+
 (test/end-suite suite)
