@@ -453,8 +453,7 @@
 
 (defn data/lower [nodes]
   (let [[name params sort consumed] (data/parse-head nodes)
-        tail-raw (slice nodes consumed (length nodes))
-        tail (if (tuple? tail-raw) (array ;tail-raw) tail-raw)]
+        tail (array ;(slice nodes consumed (length nodes)))]
     (if (zero? (length tail))
       [:decl/data name params sort @[]]
       (if (clause/pipe? (tail 0))
