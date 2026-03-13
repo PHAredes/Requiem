@@ -3,6 +3,7 @@
 (import ../Utils/TestRunner :as test)
 (import ../Utils/SurfaceSchema :as schema)
 (import ../../src/frontend/surface/parser :as s)
+(import ../../src/levels :as lvl)
 
 (def suite (test/start-suite "Surface Parser"))
 
@@ -124,6 +125,53 @@ id: ∀(A: U0). A -> A
   "Data headers accept explicit universe levels")
 
 (test/assert suite
+  (let [ty (s/parse/type-text "Type(u + 2)")]
+    (and (= (s/node/tag ty) :ty/universe)
+         (lvl/eq? (ty 1)
+                  (lvl/apply-shift (lvl/shift 2) (lvl/uvar "u")))))
+  "Surface parser accepts symbolic shifted universe levels")
+
+(test/assert suite
+  (let [ty (s/parse/type-text "Type(u + 1 + 2)")]
+    (and (= (s/node/tag ty) :ty/universe)
+         (lvl/eq? (ty 1)
+                  (lvl/apply-shift (lvl/shift 3) (lvl/uvar "u")))))
+  "Surface parser folds chained closed offsets")
+
+(test/assert suite
+  (let [ty (s/parse/type-text "Type(max(1, u) + 2)")]
+    (and (= (s/node/tag ty) :ty/universe)
+         (lvl/eq? (ty 1)
+                  (lvl/apply-shift (lvl/shift 2)
+                                   (lvl/max (lvl/const 1) (lvl/uvar "u"))))))
+  "Surface parser shifts symbolic maxima")
+
+(test/assert suite
+  (let [ty (s/parse/type-text "Type(max(1, u + 2, v))")]
+    (and (= (s/node/tag ty) :ty/universe)
+         (lvl/eq? (ty 1)
+                  (lvl/max (lvl/const 1)
+                           (lvl/max (lvl/apply-shift (lvl/shift 2) (lvl/uvar "u"))
+                                    (lvl/uvar "v"))))))
+  "Surface parser accepts symbolic max universe levels")
+
+(test/assert suite
+  (let [prog (s/parse/program "Vec(A: Type(u + 1), n: Nat): Type(max(0, u + 2))\n  zero = vnil\n")
+        decls (prog 1)
+        vec (decls 0)
+        sort (vec 3)
+        params (vec 2)
+        A-ty ((params 0) 2)]
+    (and (= (s/node/tag sort) :ty/universe)
+         (= (s/node/tag A-ty) :ty/universe)
+         (lvl/eq? (sort 1)
+                  (lvl/max (lvl/const 0)
+                           (lvl/apply-shift (lvl/shift 2) (lvl/uvar "u"))))
+         (lvl/eq? (A-ty 1)
+                  (lvl/apply-shift (lvl/shift 1) (lvl/uvar "u")))))
+  "Surface program parser preserves symbolic universe levels in declarations")
+
+(test/assert suite
   (let [prog (s/parse/program "Nat: Type3\n  zero\n")
         checked (schema/check/program prog)]
     (= (checked 0) :ok))
@@ -133,5 +181,17 @@ id: ∀(A: U0). A -> A
   (fn []
     (s/parse/type-text "Forall(A: U0). A"))
   "Unknown quantifier alias fails without syntax extension")
+
+(test/assert-error suite
+  (fn []
+    (s/parse/type-text "Type(u + v)"))
+  "Open shift amounts are rejected"
+  "right-hand side of universe + must be a closed natural level")
+
+(test/assert-error suite
+  (fn []
+    (s/parse/type-text "Type(max(u, v + 1) + w)"))
+  "Nested open shift amounts are rejected"
+  "right-hand side of universe + must be a closed natural level")
 
 (test/end-suite suite)
