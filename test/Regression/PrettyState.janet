@@ -1,6 +1,7 @@
 #!/usr/bin/env janet
 
 (import ../Utils/TestRunner :as test)
+(import ../../src/levels :as lvl)
 (import ../../src/print :as printer)
 
 (def suite (test/start-suite "Printer State"))
@@ -23,7 +24,7 @@
                  :NF/Refl 0x8000
                  :ty/type (fn [l] [:type l])
                  :lower (fn [_ sem] sem)
-                 :lvl/value identity}))
+                 :lvl/str lvl/str}))
 
 (def print/tm (pp :print/tm))
 
@@ -57,5 +58,10 @@
   (= "a"
      (print/tm [:var "_x"]))
   "Printer restores state after failed render")
+
+(test/assert suite
+  (= "Typeu + 2"
+     (print/tm [:type (lvl/apply-shift (lvl/shift 2) (lvl/uvar 'u))]))
+  "Printer renders symbolic universe levels")
 
 (test/end-suite suite)
