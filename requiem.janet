@@ -253,7 +253,7 @@
      (fn [nf]
        (let [tag (if (tuple? nf) (nf 0) nil)]
           (cond
-          (= tag tt/NF/Type) (string "Type" (nf 1))
+          (= tag tt/NF/Type) (string "Type" (lvl/str (nf 1)))
           (= tag tt/NF/Pi)
           (goal-print/nf-binder "Pi" (nf 1) (nf 2))
           (= tag tt/NF/Sigma)
@@ -270,11 +270,7 @@
        (let [tag (if (tuple? sem) (sem 0) nil)]
          (cond
          (= tag tt/T/Type)
-         (string "Type"
-                 (let [l (sem 1)]
-                   (if (or (int? l) (lvl/const? l) (lvl/shift? l))
-                     (lvl/value l)
-                     (string/format "%v" l))))
+         (string "Type" (lvl/str (sem 1)))
           (= tag tt/T/Neutral) (print/goal-ne (sem 1))
           (= tag tt/T/Pi)
           (goal-print/sem-binder "Pi" (sem 1) (sem 2))

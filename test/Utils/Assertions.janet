@@ -1,5 +1,6 @@
 (import ./TestRunner :as test)
 (import ../../src/coreTT :as c)
+(import ../../src/levels :as lvl)
 
 (def MAX_UNIVERSE_LEVEL 100)
 
@@ -49,6 +50,8 @@
                 b2 (get v2 2)]
             (and (nf-eq? a1 a2)
                  (nf-eq? (b1 fresh) (b2 fresh))))
+          (= t1 c/NF/Type)
+          (lvl/eq? (get v1 1) (get v2 1))
           true (if (= (length v1) (length v2))
                  (all |(nf-eq? (get v1 $) (get v2 $)) (range 1 (length v1)))
                  false))))))

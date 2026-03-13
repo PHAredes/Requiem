@@ -24,7 +24,7 @@
    :NF/Refl tt/NF/Refl
    :ty/type tt/ty/type
    :lower tt/lower
-   :lvl/value lvl/value})
+   :lvl/str lvl/str})
 
 (def pp (printer/make deps))
 

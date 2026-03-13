@@ -1,5 +1,7 @@
 #!/usr/bin/env janet
 
+(import ../../levels :as lvl)
+
 (var ast/*debug-checks* false)
 
 (defn ast/debug-checks? [] ast/*debug-checks*)
@@ -15,6 +17,15 @@
   (when ast/*debug-checks*
     (when (or (not (int? n)) (< n lo))
       (errorf "%s: %v" message n))))
+
+(defn- ensure-level [level message]
+  (when ast/*debug-checks*
+    (try
+      (do
+        (lvl/normalize level)
+        nil)
+      ([err]
+       (errorf "%s: %v" message level)))))
 
 (defn pos [line col offset]
   (ensure-int>= line 1 "pos.line >= 1")
@@ -33,7 +44,7 @@
 
 (defn ty/hole [name sp] [:ty/hole name sp])
 (defn ty/universe [level sp]
-  (ensure-int>= level 0 "ty/universe.level >= 0")
+  (ensure-level level "ty/universe.level invalid")
   [:ty/universe level sp])
 (defn ty/name [name sp] [:ty/name name sp])
 (defn ty/var [name sp] [:ty/var name sp])

@@ -4,6 +4,7 @@
 (import ../../src/sig :as s)
 (import ../../src/elab :as e)
 (import ../../src/coreTT :as tt)
+(import ../../src/levels :as lvl)
 (import ../../src/frontend/sexpr/parser :as p)
 
 (defn mk-sig []
@@ -144,5 +145,15 @@
     (and (= (term 0) :lam)
          (= (body fresh) fresh)))
   "Direct surface lambdas accept string params")
+
+(test/assert suite
+  (let [node [:ty/universe (lvl/uvar 'u) nil]
+        term ((e/exports :term/elab) @[] node)
+        inferred (tt/infer-top term)]
+    (and (= term [:type (lvl/uvar 'u)])
+         (= (get inferred 0) tt/T/Type)
+         (lvl/eq? (get inferred 1)
+                  (lvl/apply-shift (lvl/shift 1) (lvl/uvar 'u)))))
+  "Elaboration preserves symbolic universe levels in direct AST input")
 
 (test/end-suite suite)
