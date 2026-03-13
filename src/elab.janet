@@ -168,11 +168,16 @@
   (term/app-chain (elab/callee env sig-env (xs 0))
                   (map |(elab/term env sig-env $) (slice xs 1))))
 
+(defn param/name [param]
+  (if (string? param)
+    param
+    (param 1)))
+
 (defn elab/lam-chain [env sig-env params body]
   (if (zero? (length params))
     (elab/term env sig-env body)
     (let [b (params 0)
-          name (b 1)
+          name (param/name b)
           rest (slice params 1)]
       [:lam (fn [x] (elab/lam-chain (env/extend env name x) sig-env rest body))])))
 

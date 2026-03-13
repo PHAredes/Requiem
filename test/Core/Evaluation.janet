@@ -10,6 +10,11 @@
   (= (c/eval (c/ctx/empty) [:type 0]) (c/ty/type 0))
   "eval returns semantic universe [:Type 0], not [:nType 0]")
 
+(let [sem (c/ty/pair (c/ty/type 0) (c/ty/type 1))]
+  (test/assert suite
+    (= (c/eval (c/ctx/empty) sem) sem)
+    "eval preserves semantic values without dead keyword arms"))
+
 (test/assert suite
   (function? (c/eval (c/ctx/empty) [:lam (fn [x] [:var x])]))
   "eval returns Janet function for lambda")
