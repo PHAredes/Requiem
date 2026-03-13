@@ -2,6 +2,7 @@
 
 (import ../Utils/TestRunner :as test)
 (import ../../src/coreTT :as c)
+(import ../../src/levels :as lvl)
 (import ../Utils/Generators :as gen)
 
 (def suite (test/start-suite "Core Universe"))
@@ -33,6 +34,19 @@
 (test/assert suite
   (not (c/subtype (c/ty/type 4) (c/ty/type 0)))
   "Subtype: Type₄ is not a subtype of Type₀")
+
+(test/assert suite
+  (let [u (lvl/uvar 'u)
+        ty (c/infer-top [:type u])]
+    (and (= (get ty 0) c/T/Type)
+         (lvl/eq? (get ty 1) (lvl/apply-shift (lvl/shift 1) u))))
+  "Universe hierarchy lifts symbolic levels")
+
+(test/assert suite
+  (let [u (lvl/uvar 'u)]
+    (c/subtype (c/ty/type u)
+               (c/ty/type (lvl/apply-shift (lvl/shift 1) u))))
+  "Subtype handles symbolic universe levels")
 
 # Property Tests: Universe Hierarchy
 (defn prop-universe-hierarchy [n]
