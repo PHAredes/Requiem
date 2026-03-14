@@ -1,8 +1,8 @@
-# Migrating from the legacy s-expression frontend
+# Migrating from the removed s-expression frontend
 
-`src/frontend/sexpr/` is deprecated.
+The old s-expression frontend has been removed.
 
-For source programs, prefer the main surface frontend used by `.requiem` files. The old s-expression parser and lowering code remain only for compatibility with a small amount of internal tooling.
+Source programs should use the main surface frontend used by `.requiem` files.
 
 ## What changes
 
@@ -87,23 +87,21 @@ Pi(A: Type). A -> A
 
 ## API migration
 
-- Replace `src/frontend/sexpr/parser.janet` with `src/frontend/surface/parser.janet`
+- Replace the removed `src/frontend/sexpr/parser.janet` with `src/frontend/surface/parser.janet`
 - Replace `parse/text` with `parse/program` for source files
 - Replace legacy single-form parsing with `parse/expr-text` or `parse/type-text` as appropriate
-- Replace `src/frontend/sexpr/lower.janet` with `src/frontend/surface/lower.janet`
-- Prefer `elab/program` on lowered surface declarations over the deprecated bridge in `src/elab_legacy.janet`
+- Replace the removed `src/frontend/sexpr/lower.janet` with `src/frontend/surface/lower.janet`
+- Use `elab/program` on lowered surface declarations; `src/elab_legacy.janet` has also been removed
 
-## What is still legacy-only
+## Removal status
 
-- `src/elab_legacy.janet`
-- `src/frontend/sexpr/parser.janet`
-- `src/frontend/sexpr/lower.janet`
-
-Those paths should be treated as transitional.
+- The CLI is surface-only
+- `src/elab.janet` is surface/lowered-input only
+- The old sexpr parser, lowering layer, and legacy elaboration bridge are gone
 
 ## CLI status
 
-The `requiem` CLI no longer falls back to the legacy s-expression frontend for non-`.requiem` files.
+The `requiem` CLI accepts `.requiem` files only.
 
 - Use `.requiem` source files with `janet requiem.janet path/to/file.requiem`
-- Legacy s-expression inputs must go through `src/elab_legacy.janet` or other internal compatibility code only while migration is still in progress
+- Legacy s-expression inputs must be migrated before they can be used in this repository
