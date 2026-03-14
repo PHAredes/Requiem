@@ -6,7 +6,6 @@
 # `src/elab_legacy.janet`, not import this file directly.
 
 (import ./deprecated :as dep)
-(import ./parser :as p)
 (import ../../lowered_syntax :as ls)
 
 (def node/atom? ls/node/atom?)
@@ -810,7 +809,7 @@
         [:decl/func name params result clauses]))))
 
 (defn decl/lower [form data-env]
-  (let [norm (p/norm/layout form)]
+  (let [norm (ls/norm/layout form)]
     (if (node/list? norm)
       (let [xs (node/list-items norm)]
         (when (zero? (length xs))

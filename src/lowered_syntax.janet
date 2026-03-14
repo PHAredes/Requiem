@@ -19,6 +19,13 @@
 (defn node/atom= [node tok]
   (and (node/atom? node) (= (node 1) tok)))
 
+(defn norm/layout [node]
+  (match node
+    [:atom _] node
+    [:list xs] [:list (map norm/layout xs)]
+    [:brackets xs] [:list (map norm/layout xs)]
+    _ node))
+
 (defn token/colon? [tok]
   (let [n (length tok)]
     (and (> n 0)
@@ -132,6 +139,7 @@
    :node/atom node/atom
    :node/list-items node/list-items
    :node/atom= node/atom=
+   :norm/layout norm/layout
    :token/colon? token/colon?
    :token/strip-colon token/strip-colon
    :bind/single-spec? bind/single-spec?

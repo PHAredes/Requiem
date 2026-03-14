@@ -268,14 +268,5 @@
           _ (errorf "parse failed"))
         (errorf "parse failed")))))
 
-(defn norm/layout [node]
-  "Legacy helper: normalize [] and () into :list nodes."
-  (match node
-    [:atom _] node
-    [:list xs] [:list (map norm/layout xs)]
-    [:brackets xs] [:list (map norm/layout xs)]
-    _ node))
-
 (def exports
-  {:parse/text parse/text
-   :norm/layout norm/layout})
+  {:parse/text parse/text})
