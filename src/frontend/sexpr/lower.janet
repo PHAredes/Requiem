@@ -42,13 +42,6 @@
 (def bind/single-spec? ls/bind/single-spec?)
 (def bind/from-node ls/bind/from-node)
 (def binders/from-spec ls/binders/from-spec)
-(def term/forall? ls/term/forall?)
-(def term/arrow? ls/term/arrow?)
-(defn term/unpack-arrow [node]
-  (let [xs (node/list-items node)]
-    [(xs 0) (xs 2)]))
-(defn term/unpack-forall [node]
-  (ls/term/unpack-forall node))
 
 (defn assoc/get [pairs key]
   (defn scan [i]
