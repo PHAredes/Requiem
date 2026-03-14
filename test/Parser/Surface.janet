@@ -77,6 +77,25 @@ id: ∀(A: U0). A -> A
   "Grouped function parameters expand to separate Pi binders")
 
 (test/assert suite
+  (let [prog (s/parse/program "Foo: Nat -> Nat\n  x = x\n")
+        decls (prog 1)
+        foo (decls 0)]
+    (and (= (foo 0) :decl/func)
+         (= (foo 1) "Foo")
+         (= (s/node/tag (foo 2)) :ty/arrow)))
+  "Uppercase names no longer force data declarations")
+
+(test/assert suite
+  (let [prog (s/parse/program "Foo: Nat\n")
+        decls (prog 1)
+        foo (decls 0)]
+    (and (= (foo 0) :decl/func)
+         (= (foo 1) "Foo")
+         (= (s/node/tag (foo 2)) :ty/name)
+         (= (length (foo 3)) 0)))
+  "Head-only non-universe declarations parse as functions without clauses")
+
+(test/assert suite
   (let [prog (s/parse/program "Vec(A: Type, n: Nat):\n  A, (succ n) = vcons (x: A) (xs: Vec A n)\n")
         decls (prog 1)
         vec (decls 0)

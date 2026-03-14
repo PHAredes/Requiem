@@ -54,9 +54,6 @@
       :rhs (capture (thru -1))
       :main (* :ws* :lhs "=" :rhs)}))
 
-(defn- is-upper-byte? [c]
-  (and (>= c (chr "A")) (<= c (chr "Z"))))
-
 (defn- extract-name-and-params [lhs]
   (let [trimmed (string/trim lhs)]
     (if-let [lp (string/find "(" trimmed)]
@@ -335,140 +332,130 @@
       check-match
       [:top/check (check-match 0) (check-match 1)]
 
-      true
-      (if-let [colon-idx (ly/find-top-level-char text (chr ":"))]
-        (let [lhs (string/trim (string/slice text 0 colon-idx))
-              rhs (string/trim (string/slice text (+ colon-idx 1)))
-              [name params-text] (extract-name-and-params lhs)]
-          (if (and (> (length name) 0) (is-upper-byte? (name 0)))
-            [:top/type-head name params-text rhs]
-            [:top/term-head name params-text rhs]))
-        (diag/error ln (string "unknown top-level line (no colon found): " text))))))
+       true
+       (if-let [colon-idx (ly/find-top-level-char text (chr ":"))]
+         (let [lhs (string/trim (string/slice text 0 colon-idx))
+               rhs (string/trim (string/slice text (+ colon-idx 1)))
+               [name params-text] (extract-name-and-params lhs)]
+           [:top/head name params-text rhs])
+         (diag/error ln (string "unknown top-level line (no colon found): " text))))))
+
+(defn- body/has-eq-line? [body-lines]
+  (not (nil? (find-index |(peg/match peg/split-eq-line ($ :text)) body-lines))))
+
+(defn- body/has-plain-line? [body-lines]
+  (not (nil? (find-index |(nil? (peg/match peg/split-eq-line ($ :text))) body-lines))))
+
+(defn- head/classify [rhs body-lines syn]
+  (let [rhs-text (if rhs (string/trim rhs) "")
+        rhs-empty? (= rhs-text "")]
+    (cond
+      (body/has-plain-line? body-lines) :data
+      rhs-empty? :data
+      (= (a/node/tag (pr/parse/type-text rhs-text syn)) :ty/universe) :data
+      true :func)))
+
+(defn- parse/data-block [name params-text sort-text body-lines syn ctor-env decls]
+  (let [params (parse/type-params params-text syn)
+        sort (if (= (string/trim (or sort-text "")) "")
+               (a/ty/universe 0 (a/span/none))
+               (pr/parse/type-text sort-text syn))
+        ctors @[]]
+    (each bl body-lines
+      (let [new-ctors (parse/data-body-line bl syn)]
+        (each c new-ctors (array/push ctors c))))
+    (let [decl (a/decl/data name params sort ctors (a/span/none))]
+      (array/push decls decl)
+      (each ctor ctors
+        (ctor-env/add! ctor-env ctor)))))
+
+(defn- parse/func-block [name params-text type-text body-lines syn ctor-env decls]
+  (let [params (parse/type-params params-text syn)
+        type-parts @[]
+        clause-lines @[]]
+    (var found-clause false)
+    (each bl body-lines
+      (if found-clause
+        (array/push clause-lines bl)
+        (if (peg/match peg/split-eq-line (bl :text))
+          (do
+            (set found-clause true)
+            (array/push clause-lines bl))
+          (array/push type-parts bl))))
+    (let [head-type (or type-text "")
+          full-type-text (if (or (zero? (length type-parts))
+                                 (= (string/trim (string/join (map |($ :text) type-parts) "")) ""))
+                           (if (not= (string/trim head-type) "")
+                             head-type
+                             "?")
+                           (string head-type " " (string/join (map |($ :text) type-parts) " ")))
+          ty (wrap-type-params (pr/parse/type-text full-type-text syn) params)
+          arity (type/arity ty)
+          clauses @[]]
+      (each cl clause-lines
+        (array/push clauses (parse/term-body-line cl syn arity ctor-env)))
+      (array/push decls (a/decl/func name ty clauses (a/span/none))))))
 
 (var parse/source nil)
 
 (set parse/source
      (fn [src &opt syntax]
-       (let [syn (or syntax (sx/syntax/default))
-              lines (ly/indent/tokenize src)
+        (let [syn (or syntax (sx/syntax/default))
+              blocks (ly/indent/blockize src)
               decls @[]
-              ctor-env @{}]
-          (var current nil)
+               ctor-env @{}]
+          (each block blocks
+            (let [ln (block :head)
+                  top (classify-top ln)
+                  body-lines (block :body)]
+              (match (top 0)
+                :top/comment nil
 
-         (defn flush-current []
-           (when current
-             (match (current :kind)
-               :data-head
-                 (let [params (parse/type-params (current :params-text) syn)
-                       sort-text (current :sort-text)
-                       body-lines (current :body)
-                       ctors @[]
-                       source-for-ctors (if (and (nil? (next body-lines)) (not (= sort-text "")))
-                                          (let [dummy-line {:text (string (current :name) ": " sort-text) :line 0 :col 0}]
-                                            @[dummy-line])
-                                          body-lines)]
-                    (each bl source-for-ctors
-                      (let [new-ctors (parse/data-body-line bl syn)]
-                        (each c new-ctors (array/push ctors c))))
-                    (let [sort (if (= (string/trim sort-text) "")
-                                 (a/ty/universe 0 (a/span/none))
-                                 (pr/parse/type-text sort-text syn))
-                          decl (a/decl/data (current :name) params sort ctors (a/span/none))]
-                      (array/push decls decl)
-                      (each ctor ctors
-                        (ctor-env/add! ctor-env ctor))))
+                :top/prec
+                (let [fx (match (top 1)
+                           "infixl" :infixl
+                           "infixr" :infixr
+                           "prefix" :prefix
+                           "postfix" :postfix
+                           (diag/error ln (string "unknown fixity " (top 1))))]
+                  (sx/syntax/add-operator! syn (top 3) fx (top 2)))
 
-                :term-head
-                (let [body-lines (current :body)
-                      params (parse/type-params (current :params-text) syn)
-                      type-parts @[]
-                      clause-lines @[]
-                      _ (do
-                           (var found-clause false)
-                           (each bl body-lines
-                            (if found-clause
-                              (array/push clause-lines bl)
-                              (if (peg/match peg/split-eq-line (bl :text))
-                                 (do (set found-clause true)
-                                     (array/push clause-lines bl))
-                                 (array/push type-parts bl)))))
-                       head-type (or (current :type-text) "")
-                       full-type-text (if (or (zero? (length type-parts)) (= (string/trim (string/join (map |($ :text) type-parts) "")) ""))
-                                       (if (and head-type (not= (string/trim head-type) "")) head-type "?")
-                                       (string head-type " " (string/join (map |($ :text) type-parts) " ")))
-                       ty (wrap-type-params (pr/parse/type-text full-type-text syn) params)
-                       arity (type/arity ty)
-                       clauses @[]]
-                   (each cl clause-lines
-                     (array/push clauses (parse/term-body-line cl syn arity ctor-env)))
-                  (array/push decls (a/decl/func (current :name) ty clauses (a/span/none)))))
-             (set current nil)))
+                :top/alias
+                (sx/syntax/add-alias! syn (top 1) (top 2))
 
-          (each ln lines
-            (if (= (ln :col) 0)
-              (do
-                (let [top (classify-top ln)]
-                  (match (top 0)
-                    :top/comment nil
-                    _ (do
-                       (flush-current)
-                       (match (top 0)
-                         :top/prec
-                          (let [fx (match (top 1)
-                                     "infixl" :infixl
-                                     "infixr" :infixr
-                                     "prefix" :prefix
-                                     "postfix" :postfix
-                                     (diag/error ln (string "unknown fixity " (top 1))))]
-                            (sx/syntax/add-operator! syn (top 3) fx (top 2)))
+                :top/import
+                (let [path (top 1)
+                      q "\""
+                      path (if (and (string/has-prefix? q path) (string/has-suffix? q path))
+                             (string/slice path 1 (- (length path) 1))
+                             path)
+                      path (resolve-import-path path)
+                      ext (if (string/has-suffix? ".requiem" path) "" ".requiem")
+                      full-path (string path ext)
+                      content (if (os/stat full-path) (slurp full-path) nil)]
+                  (if content
+                    (let [prog (parse/source (string content) syn)
+                          ds (prog 1)]
+                      (each d ds (array/push decls d)))
+                    (diag/error ln (string "could not import file: " full-path))))
 
-                         :top/alias
-                         (sx/syntax/add-alias! syn (top 1) (top 2))
+                :top/compute
+                (array/push decls (a/decl/compute (pr/parse/expr-text (top 1) syn) (a/span/none)))
 
-                          :top/import
-                          (let [path (top 1)
-                                q "\""
-                                path (if (and (string/has-prefix? q path) (string/has-suffix? q path))
-                                       (string/slice path 1 (- (length path) 1))
-                                       path)
-                                path (resolve-import-path path)
-                                ext (if (string/has-suffix? ".requiem" path) "" ".requiem")
-                                full-path (string path ext)
-                                content (if (os/stat full-path) (slurp full-path) nil)]
-                            (if content
-                              (let [prog (parse/source (string content) syn)
-                                    ds (prog 1)]
-                                (each d ds (array/push decls d)))
-                              (diag/error ln (string "could not import file: " full-path))))
+                :top/check
+                (array/push decls (a/decl/check (pr/parse/expr-text (top 1) syn)
+                                                (pr/parse/type-text (top 2) syn)
+                                                (a/span/none)))
 
-                          :top/compute
-                          (array/push decls (a/decl/compute (pr/parse/expr-text (top 1) syn) (a/span/none)))
-
-                          :top/check
-                          (array/push decls (a/decl/check (pr/parse/expr-text (top 1) syn)
-                                                          (pr/parse/type-text (top 2) syn)
-                                                          (a/span/none)))
-
-                         :top/type-head
-                         (set current {:kind :data-head
-                                       :name (top 1)
-                                       :params-text (top 2)
-                                       :sort-text (top 3)
-                                       :body @[]})
-
-                         :top/term-head
-                         (set current {:kind :term-head
-                                       :name (top 1)
-                                       :params-text (top 2)
-                                       :type-text (top 3)
-                                       :body @[]}))))))
-             (if current
-                (array/push (current :body) ln)
-                (when (not (string/has-prefix? "#" (string/trim (ln :text))))
-                  (diag/error ln (string "indented line without declaration: " (ln :text)))))))
-
-         (flush-current)
-         (a/program decls (a/span/none)))))
+                :top/head
+                (let [name (top 1)
+                      params-text (top 2)
+                      rhs (top 3)]
+                  (match (head/classify rhs body-lines syn)
+                    :data (parse/data-block name params-text rhs body-lines syn ctor-env decls)
+                    :func (parse/func-block name params-text rhs body-lines syn ctor-env decls)
+                    _ (diag/error ln (string "could not classify declaration head: " (ln :text))))))))
+          (a/program decls (a/span/none)))))
 
 (def exports
   {:parse/source parse/source})
