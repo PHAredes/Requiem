@@ -1,7 +1,5 @@
 #!/usr/bin/env janet
 
-(import ./src/frontend/sexpr/parser :as p)
-(import ./src/frontend/sexpr/lower :as l)
 (import ./src/frontend/surface/parser :as sp)
 (import ./src/elab :as e)
 (import ./src/coreTT :as tt)
@@ -397,19 +395,20 @@
           @{}
           (h/keys Γ)))
 
-(defn- surface-file? [path]
-  (string/has-suffix? ".requiem" path))
-
 (defn- resolve-path [path]
   (let [resolved (if (string/has-prefix? "@examples/" path)
                    (string "examples/" (string/slice path (length "@examples/")))
                    path)]
     (if (os/stat resolved)
-      resolved
+      (if (string/has-suffix? ".requiem" resolved)
+        resolved
+        (errorf "CLI now only accepts `.requiem` source files, got: %q" resolved))
       (if (and (not (string/has-suffix? ".requiem" resolved))
                (os/stat (string resolved ".requiem")))
         (string resolved ".requiem")
-        resolved))))
+        (if (string/has-suffix? ".requiem" resolved)
+          resolved
+          (errorf "CLI now only accepts `.requiem` source files, got: %q" resolved))))))
 
 (defn- mode/runs-computes? [mode]
   (or (= mode :run) (= mode :compile)))
@@ -424,13 +423,16 @@
   (string "import \"" (default-prelude-import) "\"\n\n" src))
 
 (defn- print/help []
-  (print "Usage: requiem [mode] <file.requiem>")
+  (print "Usage: requiem [mode] <file>")
   (print "")
   (print "Modes:")
   (print "  run      parse, elaborate, and execute compute blocks")
   (print "  check    parse and elaborate without running compute blocks")
   (print "  compile  alias of run")
   (print "  help     show this help")
+  (print "")
+  (print "Input:")
+  (print "  the CLI accepts `.requiem` source files only")
   (print "")
   (print "Examples:")
   (print "  requiem examples/test.requiem")
@@ -807,23 +809,8 @@
        (tt/goals/restore! saved-goals saved-collect)
        (error err)))))
 
-(defn run/file-sexpr [path mode]
-  (def start-ms (timer/ms))
-  (def src (slurp path))
-  (print "Parsing " path "...")
-  (def forms (p/parse/text src))
-  (def interactions (length forms))
-  (def lowered (l/lower/program forms))
-  (print/decls lowered)
-  (def core (e/elab/program lowered))
-  (def elapsed-ms (- (timer/ms) start-ms))
-  (printf "Done. %d interaction(s) in %.3fs" interactions (/ elapsed-ms 1000.0)))
-
 (defn run/file [path mode]
-  (let [resolved (resolve-path path)]
-    (if (surface-file? resolved)
-      (run/file-surface resolved mode)
-      (run/file-sexpr resolved mode))))
+  (run/file-surface (resolve-path path) mode))
 
 (defn- parse/cli [args]
   (let [args (if (and (> (length args) 0)

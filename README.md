@@ -13,6 +13,8 @@ Requiem implements:
 - **Pi, Sigma, Id** as core type formers
 - **Frontend pipeline** — PEG parser -> lowering -> core elaboration
 
+The `surface/` frontend is the main source language. `src/frontend/sexpr/` remains only as a deprecated compatibility path for a few internal helpers and tests.
+
 The core is ~500 lines of Janet. Zero dependencies beyond Janet itself.
 
 ## Build & Run
@@ -30,10 +32,11 @@ src/
   coreTT.janet                  # NbE kernel, bidirectional checker, J eliminator
   levels.janet                  # Universe level algebra
   elab.janet                    # Elaboration from lowered terms to core terms
+  elab_legacy.janet             # Deprecated s-expression elaboration bridge
   frontend/
     sexpr/
-      parser.janet              # PEG-based s-expression parser
-      lower.janet               # Lowering (pattern matching, indexed constructors)
+      parser.janet              # Deprecated PEG-based compatibility parser
+      lower.janet               # Deprecated compatibility lowering
     surface/
       parser.janet              # Surface parser entrypoint
       ast.janet                 # Canonical surface AST constructors
@@ -48,6 +51,10 @@ native/
   timer.c           # High-resolution timer (C extension)
 test/               # Property-based, unit, and regression tests
 ```
+
+See `MIGRATING_FROM_SEXPR.md` for the legacy s-expression to `.requiem` migration guide.
+
+The `requiem` CLI now accepts `.requiem` source files only.
 
 ## Not Yet Planned
 

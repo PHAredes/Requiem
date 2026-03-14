@@ -1,25 +1,19 @@
 #!/usr/bin/env janet
 
+# Deprecated compatibility lowering.
+#
+# Keep this module minimal: external callers should go through
+# `src/elab_legacy.janet`, not import this file directly.
+
+(import ./deprecated :as dep)
 (import ./parser :as p)
+(import ../../lowered_syntax :as ls)
 
-(defn node/atom? [node]
-  (and (tuple? node) (= (node 0) :atom)))
-
-(defn node/list? [node]
-  (and (tuple? node) (= (node 0) :list)))
-
-(defn node/atom [node]
-  (if (node/atom? node)
-    (node 1)
-    (errorf "expected atom node, but got %v\nExpected format: [:atom value]\nThis is an internal lowering error" node)))
-
-(defn node/list-items [node]
-  (if (node/list? node)
-    (node 1)
-    (errorf "expected list node, but got %v\nExpected format: [:list items...]\nThis is an internal lowering error" node)))
-
-(defn node/atom= [node tok]
-  (and (node/atom? node) (= (node 1) tok)))
+(def node/atom? ls/node/atom?)
+(def node/list? ls/node/list?)
+(def node/atom ls/node/atom)
+(def node/list-items ls/node/list-items)
+(def node/atom= ls/node/atom=)
 
 (defn record/entry/lower [node]
   (when (not (node/list? node))
@@ -44,88 +38,18 @@
         entries (map record/entry/lower (slice nodes 1 (length nodes)))]
     [:decl/record header entries]))
 
-(defn token/colon? [tok]
-  (let [n (length tok)]
-    (and (> n 0)
-         (= ":" (string/slice tok (- n 1) n)))))
-
-(defn token/strip-colon [tok]
-  (let [n (length tok)]
-    (if (token/colon? tok)
-      (string/slice tok 0 (- n 1))
-      tok)))
-
-(defn bind/single-spec? [node]
-  (and (node/list? node)
-       (let [xs (node/list-items node)]
-         (or
-           (and (= (length xs) 2)
-                (node/atom? (xs 0))
-                (token/colon? (node/atom (xs 0))))
-           (and (= (length xs) 3)
-                (node/atom= (xs 0) ":")
-                (node/atom? (xs 1)))))))
-
-(defn bind/from-node [node]
-  (let [xs (node/list-items node)]
-    (cond
-      (and (= (length xs) 2)
-           (node/atom? (xs 0))
-           (token/colon? (node/atom (xs 0))))
-      [:bind (token/strip-colon (node/atom (xs 0))) (xs 1)]
-
-      (and (= (length xs) 3)
-           (node/atom= (xs 0) ":")
-           (node/atom? (xs 1)))
-      [:bind (node/atom (xs 1)) (xs 2)]
-
-      true
-      (errorf "invalid binder syntax: %v\nSupported formats:\n  (x: Type) or (x: Type annotation)\n  (: x Type) - alternative syntax\nVariable must have a type annotation" node))))
-
-(defn binders/from-spec [spec]
-  (if (bind/single-spec? spec)
-    @[(bind/from-node spec)]
-    (if (node/list? spec)
-      (map bind/from-node (node/list-items spec))
-      (errorf "invalid forall binder specification: %v\nSupported formats:\n  (x: Type) - single binder\n  (x: Type, y: Type) - multiple binders in a list\n  ((x: Type) (y: Type)) - multiple binders as separate specs" spec))))
-
-(defn term/forall? [node]
-  (and (node/list? node)
-       (let [xs (node/list-items node)]
-         (and (> (length xs) 0)
-              (node/atom? (xs 0))
-              (let [head (node/atom (xs 0))]
-                (or (= head "forall") (= head "∀")))))))
-
-(defn term/arrow? [node]
-  (and (node/list? node)
-       (let [xs (node/list-items node)]
-         (and (= (length xs) 3)
-              (node/atom? (xs 1))
-              (let [mid (node/atom (xs 1))]
-                (or (= mid "->") (= mid "→")))))))
-
+(def token/colon? ls/token/colon?)
+(def token/strip-colon ls/token/strip-colon)
+(def bind/single-spec? ls/bind/single-spec?)
+(def bind/from-node ls/bind/from-node)
+(def binders/from-spec ls/binders/from-spec)
+(def term/forall? ls/term/forall?)
+(def term/arrow? ls/term/arrow?)
 (defn term/unpack-arrow [node]
   (let [xs (node/list-items node)]
     [(xs 0) (xs 2)]))
-
 (defn term/unpack-forall [node]
-  (let [xs (node/list-items node)
-        n (length xs)]
-    (when (< n 3)
-      (errorf "forall form is too short: %v\nMinimum format: (forall (x: A) . B) or (forall (x: A) B)\nYou need at least variable and type annotations" node))
-    (let [binder-spec (xs 1)
-          dot-index (find-index |(node/atom= $ ".") (slice xs 2 n))]
-      (let [body
-            (if dot-index
-              (let [actual-index (+ dot-index 2)]
-                (if (= actual-index (- n 2))
-                  (xs (- n 1))
-                  [:list (slice xs (+ actual-index 1) n)]))
-              (if (= n 3)
-                (xs 2)
-                [:list (slice xs 2 n)]))]
-        [(binders/from-spec binder-spec) body]))))
+  (ls/term/unpack-forall node))
 
 (defn assoc/get [pairs key]
   (defn scan [i]
@@ -143,21 +67,7 @@
 (defn data/env-extend [data-env name ctors]
   [;data-env [name ctors]])
 
-(defn term/split-pi [node]
-  (defn split-loop [cur index binders]
-    (cond
-      (term/forall? cur)
-      (let [[bs body] (term/unpack-forall cur)]
-        (split-loop body index (tuple/join binders bs)))
-
-      (term/arrow? cur)
-      (let [[dom cod] (term/unpack-arrow cur)
-            name (string "_arg" index)]
-        (split-loop cod (+ index 1) [;binders [:bind name dom]]))
-
-      true
-      [binders cur]))
-  (split-loop node 0 @[]))
+(def term/split-pi ls/term/split-pi)
 
 (defn term/as-head-app [node]
   (cond
@@ -227,13 +137,7 @@
     [:atom name]
     [:list (tuple/join @[[:atom name]] args)]))
 
-(defn term/build-forall [binders body]
-  (defn fold-binders [acc binder]
-    (let [name (if (>= (length binder) 2) (binder 1) "_")
-          ty (if (>= (length binder) 3) (binder 2) [:atom "Type"])
-          binder-node [:list @[[ :atom (string name ":") ] ty]]]
-      [:list @[[ :atom "forall" ] binder-node [ :atom "." ] acc]]))
-  (reduce fold-binders body (reverse binders)))
+(def term/build-forall ls/term/build-forall)
 
 (defn decl/parse-name-and-ann [nodes]
   (when (zero? (length nodes))
@@ -923,6 +827,8 @@
       (errorf "top-level form must be a list (s-expression): %v\nAll top-level forms must be properly parenthesized" norm))))
 
 (defn lower/program [forms]
+  (dep/warn! :sexpr-lower
+             "s-expression lowering is deprecated; prefer `src/frontend/surface/lower` or `src/elab_legacy.janet` only for compatibility")
   (let [[decls _]
         (reduce (fn [[acc data-env] form]
                   (let [decl (decl/lower form data-env)
@@ -935,15 +841,4 @@
     decls))
 
 (def exports
-  {:lower/program lower/program
-   :decl/lower decl/lower
-   :record/lower record/lower
-   :bind/single-spec? bind/single-spec?
-   :bind/from-node bind/from-node
-   :binders/from-spec binders/from-spec
-   :term/split-pi term/split-pi
-   :term/as-head-app term/as-head-app
-   :term/build-forall term/build-forall
-   :term/build-data-app term/build-data-app
-   :term/forall? term/forall?
-   :term/arrow? term/arrow?})
+  {:lower/program lower/program})

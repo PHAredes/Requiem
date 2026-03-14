@@ -1,7 +1,8 @@
 #!/usr/bin/env janet
 
-(import ./frontend/sexpr/parser :as p)
-(import ./frontend/sexpr/lower :as l)
+(import ./lowered_syntax :as l)
+(import ./frontend/surface/ast :as a)
+(import ./frontend/surface/layout :as ly)
 (import ./frontend/surface/parser :as sp)
 (import ./sig :as s)
 (import ./coreTT :as tt)
@@ -431,268 +432,180 @@
     _
     (errorf "invalid clause: %v" clause)))
 
-(defn node/atom/new [tok]
-  [:atom tok])
-
-(defn binder/to-node [b]
-  [:list @[(node/atom/new (string (b 1) ":")) (b 2)]])
-
-(defn line/items [line]
-  (let [wrapped (string "(" (string/trim (string line)) ")")
-        parsed (p/parse/one wrapped)]
-    (if (and (tuple? parsed) (= (parsed 0) :list))
-      (parsed 1)
-      (errorf "cannot parse line: %v" line))))
-
-(defn node/arrow-token? [node]
-  (and (tuple? node)
-       (= (node 0) :atom)
-       (or (= (node 1) "->")
-           (= (node 1) "→"))))
-
-(defn node/forall-token? [node]
-  (and (tuple? node)
-       (= (node 0) :atom)
-       (or (= (node 1) "forall")
-           (= (node 1) "∀"))))
-
-(defn items/to-term [items]
-  (let [arrow-idx (find-index node/arrow-token? items)
-         forall-idx (find-index node/forall-token? items)]
-    (cond
-      (and forall-idx
-           (tuple? (items (+ forall-idx 1)))
-           (= ((items (+ forall-idx 1)) 0) :list)
-           (tuple? (items (+ forall-idx 2)))
-           (= ((items (+ forall-idx 2)) 0) :atom)
-           (= ((items (+ forall-idx 2)) 1) "."))
-      [:list @[(items forall-idx)
-               (items (+ forall-idx 1))
-               (items (+ forall-idx 2))
-               (items/to-term (slice items (+ forall-idx 3) (length items)))]]
-      
-      arrow-idx
-      (let [lhs-items (slice items 0 arrow-idx)
-            rhs-items (slice items (+ arrow-idx 1) (length items))
-            lhs (if (= (length lhs-items) 1)
-                  (lhs-items 0)
-                  [:list lhs-items])
-            rhs (items/to-term rhs-items)]
-        [:list @[lhs [:atom "->"] rhs]])
-      
-      (= (length items) 1)
-      (items 0)
-      
-      true
-      [:list items])))
-
-(defn line/term [line]
-  (items/to-term (line/items line)))
-
-(defn atom/strip-trailing-colon [item]
-  (if (and (tuple? item)
-           (= (item 0) :atom)
-           (> (length (item 1)) 1)
-           (= (string/slice (item 1) -1) ":"))
-    [:atom (string/slice (item 1) 0 -1)]
-    item))
-
 (defn header/split-colon [header]
-  (let [s (string/trim (string header))
-        parsed (p/parse/one (string "(" s ")"))]
-    (if (not (and (tuple? parsed) (= (parsed 0) :list)))
-      [s nil]
-      (let [items (parsed 1)
-            colon-idx (find-index (fn [item]
-                                    (and (tuple? item)
-                                         (= (item 0) :atom)
-                                         (or (= (item 1) ":")
-                                             (and (> (length (item 1)) 1)
-                                                  (= (string/slice (item 1) -1) ":")))))
-                                  items)]
-        (if (nil? colon-idx)
-          [s nil]
-          (let [colon-item (items colon-idx)
-                lhs-items (if (= (colon-item 1) ":")
-                            (slice items 0 colon-idx)
-                            (array/concat (slice items 0 colon-idx)
-                                          @[(atom/strip-trailing-colon colon-item)]))
-                rhs-items (slice items (+ colon-idx 1) (length items))
-                lhs (if (zero? (length lhs-items))
-                      ""
-                      (string (string/join (map (fn [n]
-                                                  (if (tuple? n)
-                                                    (string "(" (n 1) ")")
-                                                    (string n)))
-                                            lhs-items) " ")))
-                rhs (if (zero? (length rhs-items))
-                      nil
-                      (string (string/join (map (fn [n]
-                                                  (if (tuple? n)
-                                                    (string "(" (n 1) ")")
-                                                    (string n)))
-                                            rhs-items) " ")))]
-            [lhs rhs]))))))
+  (let [s (string/trim (string header))]
+    (if-let [idx (ly/find-top-level-char s (chr ":"))]
+      (let [rhs (string/trim (string/slice s (+ idx 1)))]
+        [(string/trim (string/slice s 0 idx))
+         (if (= rhs "") nil rhs)])
+      [s nil])))
+
+(defn- header/extract-name-and-params [lhs]
+  (let [trimmed (string/trim lhs)]
+    (if-let [lp (string/find "(" trimmed)]
+      (let [rp (- (length trimmed) 1)]
+        (if (= (trimmed rp) (chr ")"))
+          [(string/trim (string/slice trimmed 0 lp))
+           (string/slice trimmed (+ lp 1) rp)]
+          [trimmed nil]))
+      [trimmed nil])))
+
+(defn- header/params [text]
+  (if (or (nil? text) (= (string/trim text) ""))
+    @[]
+    (let [raw-parts (ly/split-top-level text (chr ","))
+          parts @[]
+          out @[]]
+      (var pending nil)
+      (each raw raw-parts
+        (let [part (string/trim raw)]
+          (when (not= part "")
+            (let [chunk (if pending (string pending "," part) part)]
+              (if (ly/find-top-level-char chunk (chr ":"))
+                (do
+                  (array/push parts chunk)
+                  (set pending nil))
+                (set pending chunk))))))
+      (when pending
+        (array/push parts pending))
+      (each p parts
+        (let [x (string/trim p)]
+          (when (not= x "")
+            (if-let [ix (ly/find-top-level-char x (chr ":"))]
+              (let [names-part (string/trim (string/slice x 0 ix))
+                    ty (sp/parse/type-text (string/trim (string/slice x (+ ix 1))))
+                    names (ly/split-top-level names-part (chr ","))]
+                (each name names
+                  (let [trimmed-name (string/trim name)]
+                    (when (not= trimmed-name "")
+                      (array/push out (a/decl/param trimmed-name ty (a/span/none)))))))
+              (array/push out (a/decl/param x nil (a/span/none)))))))
+      out)))
 
 (defn header/name+params [lhs]
-  (let [parsed (p/parse/one (string "(" lhs ")"))]
-    (when (not (and (tuple? parsed) (= (parsed 0) :list)))
-      (errorf "invalid record header: %v" lhs))
-    (let [items (parsed 1)]
-      (when (zero? (length items))
-        (errorf "empty record header: %v" lhs))
-      (when (not (and (tuple? (items 0)) (= ((items 0) 0) :atom)))
-        (errorf "record name must be an atom in header: %v" lhs))
-      (let [name ((items 0) 1)
-            params (map l/bind/from-node (slice items 1 (length items)))]
-        [name params]))))
+  (let [[name params-text] (header/extract-name-and-params lhs)]
+    (when (= name "")
+      (errorf "empty record header: %v" lhs))
+    [name (header/params params-text)]))
 
-(defn items/eq-index [items]
-  (find-index |(and (tuple? $) (= ($ 0) :atom) (= ($ 1) "=")) items))
-
-(defn items/lhs-of-eq [items]
-  (if-let [eq-index (items/eq-index items)]
-    (slice items 0 eq-index)
-    items))
+(defn- line/lhs-of-eq [line]
+  (let [text (string/trim (string line))]
+    (if-let [idx (ly/find-top-level-char text (chr "="))]
+      (string/trim (string/slice text 0 idx))
+      text)))
 
 (defn field/binder-from-line [line]
-  (let [lhs-items (items/lhs-of-eq (line/items line))
-        node (if (and (= (length lhs-items) 1)
-                      (tuple? (lhs-items 0))
-                      (= ((lhs-items 0) 0) :list))
-               (lhs-items 0)
-               [:list lhs-items])]
-    (if (l/bind/single-spec? node)
-      (l/bind/from-node node)
+  (let [lhs (line/lhs-of-eq line)
+        trimmed (string/trim lhs)
+        inner (if (and (> (length trimmed) 1)
+                       (= (trimmed 0) (chr "("))
+                       (= (trimmed (- (length trimmed) 1)) (chr ")")))
+                (string/slice trimmed 1 (- (length trimmed) 1))
+                trimmed)]
+    (if-let [idx (ly/find-top-level-char inner (chr ":"))]
+      (let [name (string/trim (string/slice inner 0 idx))
+            ty-text (string/trim (string/slice inner (+ idx 1)))]
+        (if (= name "")
+          nil
+          (a/decl/param name (sp/parse/type-text ty-text) (a/span/none))))
       nil)))
 
 (defn entry/field-binders [entry]
   (map |(field/binder-from-line ($ 1)) (entry 2)))
 
-(defn seq/concat [xs ys]
-  (array/concat (array/slice xs) ys))
+(defn- record/render-entry-lines [entry indent]
+  (reduce (fn [acc child]
+            (array/concat acc (record/render-entry-lines child (string indent "  "))))
+          @[(string indent (entry 1))]
+          (entry 2)))
 
-(defn node/list [items]
-  [:list items])
+(defn- record/source [header entries]
+  (string/join (reduce (fn [acc entry]
+                         (array/concat acc (record/render-entry-lines entry "  ")))
+                       @[(string header)]
+                       entries)
+               "\n"))
 
-(defn clause/list [items]
-  (node/list (seq/concat @[[:atom "|"]] items)))
+(defn- type/arity [ty]
+  (match ty
+    [:ty/pi _ body _] (+ 1 (type/arity body))
+    [:ty/arrow _ cod _] (+ 1 (type/arity cod))
+    _ 0))
 
-(defn term/sigma-from-binders [binders]
-  (when (zero? (length binders))
-    (errorf "record sigma encoding requires at least one field"))
-  (if (= (length binders) 1)
-    ((binders 0) 2)
-    (let [b (binders 0)]
-      [:list @[(node/atom/new "Sigma")
-               (binder/to-node b)
-               (node/atom/new ".")
-               (term/sigma-from-binders (slice binders 1 (length binders)))]])))
+(defn- type/wrap-params [body params]
+  (reduce (fn [acc param]
+            (let [name (param 1)
+                  dom (or (param 2) (a/ty/universe 0 (a/span/none)))]
+              (a/ty/pi (a/ty/binder name dom (a/span/none)) acc (a/span/none))))
+          body
+          (reverse params)))
 
-(defn term/pair-from-names [names]
+(defn- type/app-head [head args]
+  (reduce (fn [acc arg]
+            (a/ty/app acc (a/ty/var arg (a/span/none)) (a/span/none)))
+          (a/ty/name head (a/span/none))
+          args))
+
+(defn- term/pair-from-names [names]
   (when (zero? (length names))
     (errorf "record constructor encoding requires at least one field name"))
   (if (= (length names) 1)
-    [:atom (names 0)]
-    [:list @[(node/atom/new "pair")
-             [:atom (names 0)]
-             (term/pair-from-names (slice names 1 (length names)))]]))
+    (a/tm/var (names 0) (a/span/none))
+    (a/tm/op "pair"
+             @[(a/tm/var (names 0) (a/span/none))
+               (term/pair-from-names (slice names 1 (length names)))]
+             (a/span/none))))
 
-(defn term/app-head [head args]
-  (node/app-chain [:atom head] (map |[:atom $] args)))
+(defn- type/sigma-from-fields [fields]
+  (when (zero? (length fields))
+    (errorf "record sigma encoding requires at least one field"))
+  (if (= (length fields) 1)
+    ((fields 0) 2)
+    (let [field (fields 0)
+          binder (a/ty/binder (field 1) (field 2) (a/span/none))]
+      (a/ty/sigma binder (type/sigma-from-fields (slice fields 1 (length fields))) (a/span/none)))))
 
-(defn form/def-from-type+clauses [name ann clauses]
-  (node/list (seq/concat @[[:atom "def"] [:atom (string name ":")] ann]
-                         clauses)))
+(defn- clause/from-vars [names body]
+  (a/decl/clause (map |(a/pat/var $ (a/span/none)) names) body (a/span/none)))
 
-(defn form/clause [patterns body]
-  (clause/list
-    (seq/concat
-      (map |[:atom $] patterns)
-      @[[:atom "="] body])))
+(defn- params/names [params]
+  (map |($ 1) params))
 
-(defn entry/child-binder-node [entry]
-  (let [items0 (line/items (entry 1))
-        eq-index (items/eq-index items0)
-        lhs-items (if (nil? eq-index)
-                    items0
-                    (slice items0 0 eq-index))]
-    (if (and (= (length lhs-items) 1)
-             (tuple? (lhs-items 0))
-             (= ((lhs-items 0) 0) :list))
-      (lhs-items 0)
-      [:list lhs-items])))
+(defn- record->sigma-decls [name params entries]
+  (let [ctor-entry (entries 0)
+        ctor-line (ctor-entry 1)
+        ctor-tokens (ly/split-ws-top-level (string/trim ctor-line))
+        ctor-name (if (> (length ctor-tokens) 0)
+                    (ctor-tokens 0)
+                    (errorf "record constructor line is empty: %v" ctor-entry))
+        fields (entry/field-binders ctor-entry)
+        sigma-body (type/sigma-from-fields fields)
+        type-ann (type/wrap-params (a/ty/universe 0 (a/span/none)) params)
+        type-clause (clause/from-vars (params/names params) sigma-body)
+        type-decl (a/decl/func name type-ann @[type-clause] (a/span/none))
+        ctor-params (array/concat (array/slice params) fields)
+        ctor-ann (type/wrap-params (type/app-head name (params/names params)) ctor-params)
+        ctor-clause (clause/from-vars (params/names ctor-params)
+                                      (term/pair-from-names (params/names fields)))
+        ctor-decl (a/decl/func ctor-name ctor-ann @[ctor-clause] (a/span/none))]
+    @[type-decl ctor-decl]))
 
-(defn entry/ctor-items [entry]
-  (let [base (line/items (entry 1))
-        child-binders (map entry/child-binder-node (entry 2))]
-    (seq/concat base child-binders)))
+(defn- record->surface-decls [header entries]
+  (let [prog (sp/parse/program (record/source header entries))]
+    (prog 1)))
 
-(defn atom/type-token? [node]
-  (and (tuple? node)
-       (= (node 0) :atom)
-       (not (nil? (token/type-level (node 1))))))
-
-(defn params/index-positions [params]
-  (reduce (fn [acc i]
-            (if (atom/type-token? ((params i) 2))
-              acc
-              (do (array/push acc i))))
-          @[]
-          (range (length params))))
-
-(defn selectors/for-clause [params selectors]
-  (let [k (length params)]
-    (if (= (length selectors) k)
-      selectors
-      (let [defaults (map |[:atom ($ 1)] params)
-            index-pos (params/index-positions params)
-            lookup (reduce (fn [acc i]
-                             (if (< i (length selectors))
-                               (put acc (index-pos i) (selectors i))
-                               acc))
-                           @{}
-                           (range (length index-pos)))]
-        (map (fn [pos]
-               (or (get lookup pos) (defaults pos)))
-             (range k))))))
-
-(defn entry/data-clause-node [params entry]
-  (let [items (entry/ctor-items entry)
-        eq-index (items/eq-index items)]
-    (if (nil? eq-index)
-      (clause/list items)
-      (let [selectors (slice items 0 eq-index)
-            rhs (slice items (+ eq-index 1) (length items))
-            ctor-name (if (and (> (length rhs) 0)
-                               (tuple? (rhs 0))
-                               (= ((rhs 0) 0) :atom))
-                        ((rhs 0) 1)
-                        nil)
-            filled-selectors (selectors/for-clause params selectors)
-            full-selectors (if (and (= ctor-name "refl")
-                                     (> (length selectors) 0)
-                                     (< (length selectors) (length params)))
-                              (array/push (array/slice filled-selectors) (selectors 0))
-                              filled-selectors)]
-        (clause/list (seq/concat (seq/concat full-selectors @[[:atom "="]]) rhs))))))
-
-(defn patterns/normalize-arity [pat-items arity]
-  (cond
-    (and (= arity 1) (> (length pat-items) 1))
-    @[[:list pat-items]]
-
-    true pat-items))
-
-(defn entry/func-clause-node [arity entry]
-  (let [items (line/items (entry 1))
-        eq-index (items/eq-index items)]
-    (if (nil? eq-index)
-      (clause/list items)
-      (let [patterns0 (slice items 0 eq-index)
-            body (slice items (+ eq-index 1) (length items))
-            patterns (patterns/normalize-arity patterns0 arity)]
-        (clause/list (seq/concat (seq/concat patterns @[[:atom "="]]) body))))))
+(defn- record->function-decls [name params ann-text clause-entries]
+  (let [source (record/source (string "tmp: " ann-text) clause-entries)
+        prog (sp/parse/program source)
+        decls (prog 1)]
+    (when (or (not= (length decls) 1)
+              (not= ((decls 0) 0) :decl/func))
+      (errorf "record function desugaring expected one function decl, got: %v" decls))
+    (let [parsed (decls 0)]
+      @[(a/decl/func name
+                      (type/wrap-params (parsed 2) params)
+                      (parsed 3)
+                      (a/span/none))])))
 
 (defn record/function-type-line? [line]
   (let [t (string/trim (string line))]
@@ -702,12 +615,11 @@
 
 (defn record/sigma-shape? [entries]
   (let [has-single-entry (= (length entries) 1)
-        has-children (> (length ((entries 0) 2)) 0)
-        ctor-items (line/items ((entries 0) 1))
+         has-children (> (length ((entries 0) 2)) 0)
+        ctor-line ((entries 0) 1)
+        ctor-items (ly/split-ws-top-level (string/trim ctor-line))
         ctor-line-has-no-equals (and (> (length ctor-items) 0)
-                                      (tuple? (ctor-items 0))
-                                      (= ((ctor-items 0) 0) :atom)
-                                      (nil? (items/eq-index ctor-items)))
+                                     (nil? (ly/find-top-level-char ctor-line (chr "="))))
         binders (entry/field-binders (entries 0))
         all-binders-valid (all |(not (nil? $)) binders)]
     (and has-single-entry
@@ -715,60 +627,27 @@
          ctor-line-has-no-equals
          all-binders-valid)))
 
-(defn record->sigma-forms [name params entries]
-  (let [ctor-entry (entries 0)
-        ctor-items (line/items (ctor-entry 1))
-        ctor-name ((ctor-items 0) 1)
-        fields (entry/field-binders ctor-entry)
-        sigma-body (term/sigma-from-binders fields)
-        type-ann (l/term/build-forall params [:atom "Type"])
-        type-clause (form/clause (map |($ 1) params) sigma-body)
-        type-form (form/def-from-type+clauses name type-ann @[type-clause])
-        ctor-ann (l/term/build-forall (seq/concat params fields)
-                                      (term/app-head name (map |($ 1) params)))
-        ctor-clause (form/clause (map |($ 1) (seq/concat params fields))
-                                 (term/pair-from-names (map |($ 1) fields)))
-        ctor-form (form/def-from-type+clauses ctor-name ctor-ann @[ctor-clause])]
-    @[type-form ctor-form]))
-
-(defn record->forms [decl]
+(defn record->decls [decl]
   (match decl
     [:decl/record header entries]
     (let [[lhs rhs] (header/split-colon header)
-          [name params] (header/name+params lhs)
-          param-nodes (map binder/to-node params)
+           [name params] (header/name+params lhs)
           has-explicit-type? (not (nil? rhs))
           is-sigma-record? (and (nil? rhs) (record/sigma-shape? entries))
           is-function-like? (or has-explicit-type?
-                               (and (> (length entries) 0)
-                                    (record/function-type-line? ((entries 0) 1))))]
+                                 (and (> (length entries) 0)
+                                      (record/function-type-line? ((entries 0) 1))))]
       (cond
         is-sigma-record?
-        (record->sigma-forms name params entries)
-        
+        (record->sigma-decls name params entries)
+
         is-function-like?
         (let [ann-text (if rhs rhs ((entries 0) 1))
-              ann (line/term ann-text)
-              [fn-params _] (l/term/split-pi ann)
-              arity (length fn-params)
-              clause-entries (if rhs entries (slice entries 1 (length entries)))
-              clauses (map |(entry/func-clause-node arity $) clause-entries)
-              head-nodes
-              (if (zero? (length param-nodes))
-                @[[:atom "def"] [:atom (string name ":")] ann]
-                (seq/concat (seq/concat @[[:atom "def"] [:atom name]]
-                                        param-nodes)
-                            @[[:atom ":"] ann]))]
-          @[(node/list (seq/concat head-nodes clauses))])
-        
+              clause-entries (if rhs entries (slice entries 1 (length entries)))]
+          (record->function-decls name params ann-text clause-entries))
+
         true
-        (let [sort (if rhs (line/term rhs) [:atom "Type"])
-              clauses (map |(entry/data-clause-node params $) entries)
-              data-nodes (seq/concat (seq/concat @[[:atom "data"] [:atom name]]
-                                                 param-nodes)
-                                     (seq/concat @[[:atom ":"] sort]
-                                                 clauses))]
-          @[(node/list data-nodes)])))
+        (record->surface-decls header entries)))
     _
     (errorf "expected :decl/record, got: %v" decl)))
 
@@ -777,9 +656,9 @@
         data-env @[]]
     (each decl decls
       (let [resolved-list (match decl
-                            [:decl/record _ _]
-                            (map |(l/decl/lower $ data-env) (record->forms decl))
-                            _ @[decl])]
+                             [:decl/record _ _]
+                             (sp/lower/program (a/program (record->decls decl) (a/span/none)))
+                             _ @[decl])]
         (each d resolved-list
           (when (= (d 0) :decl/data)
             (array/push data-env [(d 1) (d 4)])))
@@ -829,21 +708,13 @@
         sig-env (sig/from-decls resolved)]
     (map |(decl/elab sig-env $) resolved)))
 
-(defn elab/forms [forms]
-  (elab/program (l/lower/program forms)))
-
-(defn elab/text [src]
-  (elab/forms (p/parse/text src)))
-
 (def exports
   {:elab/state elab/state
    :elab/hole elab/hole
    :elab/func-ref elab/func-ref
    :elab/ctor-call elab/ctor-call
    :elab/program elab/program
-   :elab/forms elab/forms
-   :elab/text elab/text
-   :record->forms record->forms
+   :record->decls record->decls
    :resolve-decls program/resolve-decls
    :decl/elab (fn [decl] (decl/elab @[] decl))
    :term/elab (fn [env node] (elab/term env @[] node))})
