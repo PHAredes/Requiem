@@ -5,7 +5,6 @@
 (import ../../src/elab :as e)
 (import ../../src/coreTT :as tt)
 (import ../../src/levels :as lvl)
-(import ../../src/frontend/sexpr/parser :as p)
 
 (defn mk-sig []
   (let [sig (s/sig/empty)]
@@ -130,12 +129,28 @@
   "Dispatch aliases normalize sigma spellings")
 
 (test/assert suite
-  (let [node (p/parse/one "(J Type1 Type0 (fn (y) (fn (p) (Id Type1 Type0 y))) (refl Type0) Type0 (refl Type0))")
+  (let [motive-body [:list @[[ :atom "Id" ]
+                              [:atom "Type1"]
+                              [:atom "Type0"]
+                              [:atom "y"]]]
+        motive-inner [:list @[[ :atom "fn" ]
+                               [:list @[[:atom "p"]]]
+                               motive-body]]
+        motive [:list @[[ :atom "fn" ]
+                         [:list @[[:atom "y"]]]
+                         motive-inner]]
+        node [:list @[[ :atom "J" ]
+                       [:atom "Type1"]
+                       [:atom "Type0"]
+                       motive
+                       [:list @[[:atom "refl"] [:atom "Type0"]]]
+                       [:atom "Type0"]
+                       [:list @[[:atom "refl"] [:atom "Type0"]]]]]
         term ((e/exports :term/elab) @[] node)
         inferred (tt/infer-top term)]
     (and (= (term 0) :t-J)
          (= (get inferred 0) tt/T/Id)))
-  "Elaborated J motives typecheck end-to-end")
+  "Raw elaboration nodes elaborate J motives end-to-end")
 
 (test/assert suite
   (let [node [:tm/lam @["x"] [:tm/var "x" nil] nil]
@@ -155,5 +170,32 @@
          (lvl/eq? (get inferred 1)
                   (lvl/apply-shift (lvl/shift 1) (lvl/uvar 'u)))))
   "Elaboration preserves symbolic universe levels in direct AST input")
+
+(test/assert suite
+  (let [decls ((e/exports :record->decls)
+               [:decl/record
+                "id(A: Type): A -> A"
+                @[
+                  [:entry "x = x" @[]]
+                ]])]
+    (and (= (length decls) 1)
+         (= ((decls 0) 0) :decl/func)))
+  "Record desugaring reuses the surface parser for function-like records")
+
+(test/assert suite
+  (let [decls ((e/exports :record->decls)
+               [:decl/record
+                "Pair(A: Type):"
+                @[
+                  [:entry "mk"
+                   @[
+                     [:entry "(fst: A)" @[]]
+                     [:entry "(snd: A)" @[]]
+                   ]]
+                ]])]
+    (and (= (length decls) 2)
+         (= ((decls 0) 0) :decl/func)
+         (= ((decls 1) 0) :decl/func)))
+  "Record sigma shorthand desugars into surface declarations without sexpr nodes")
 
 (test/end-suite suite)

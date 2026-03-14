@@ -1,5 +1,12 @@
 #!/usr/bin/env janet
 
+# Deprecated compatibility parser.
+#
+# Keep this module minimal: it exists only to support `src/elab_legacy.janet`
+# and a small legacy test surface during the migration away from sexpr input.
+
+(import ./deprecated :as dep)
+
 (def grammar
   '{:ws (drop :s*)
     :stop (+ :s "(" ")" "[" "]")
@@ -233,7 +240,9 @@
       (errorf "parse failed"))))
 
 (defn parse/text [src]
-  "Parse all top-level forms from source text, using PEG layout fallback."
+  "Parse deprecated legacy source text for `src/elab_legacy.janet`."
+  (dep/warn! :sexpr-parser
+              "`src/frontend/sexpr/` is deprecated; prefer `src/frontend/surface/` for source parsing")
   (let [txt (string src)]
     (if-let [forms (parse/all grammar/compiled txt)]
       (if (forms/all-lists? forms)
@@ -265,59 +274,17 @@
           _ (errorf "parse failed"))
         (errorf "parse failed")))))
 
-(defn parse/text-raw [src]
-  "Parse all top-level forms from source text (source PEG)."
-  (if-let [forms (parse/all grammar (string src))]
-    forms
-    (errorf "parse failed")))
-
-(defn parse/one [src]
-  "Parse exactly one top-level form from source text."
-  (let [forms (parse/text src)]
-    (if (= (length forms) 1)
-      (forms 0)
-      (errorf "expected one top-level form, got %d" (length forms)))))
-
-(defn render/node [node]
-  (match node
-    [:atom tok] tok
-    [:list xs] (string "(" (string/join (map render/node xs) " ") ")")
-    [:brackets xs] (string "[" (string/join (map render/node xs) " ") "]")
-    _ (errorf "render/node: invalid raw node %v" node)))
-
-(defn render/program [forms]
-  "Render parsed forms into canonical text."
-  (string/join (map render/node forms) "\n"))
-
 (defn norm/layout [node]
-  "Layout-only normalization: [] and () become :list."
+  "Legacy helper: normalize [] and () into :list nodes."
   (match node
     [:atom _] node
     [:list xs] [:list (map norm/layout xs)]
     [:brackets xs] [:list (map norm/layout xs)]
     _ node))
 
-(defn norm/program [forms]
-  "Apply layout normalization over a full program."
-  (map norm/layout forms))
-
-(defn has/atom? [node tok]
-  "Check if token appears anywhere in a raw node."
-  (match node
-    [:atom x] (= x tok)
-    [:list xs] (reduce (fn [acc n] (or acc (has/atom? n tok))) false xs)
-    [:brackets xs] (reduce (fn [acc n] (or acc (has/atom? n tok))) false xs)
-    _ false))
-
 (def exports
   {:grammar grammar
    :grammar/compiled grammar/compiled
    :parse/text parse/text
-   :parse/text-raw parse/text-raw
-   :parse/one parse/one
-   :render/node render/node
-   :render/program render/program
    :norm/layout norm/layout
-   :norm/program norm/program
-   :layout/canonicalize layout/canonicalize
-   :has/atom? has/atom?})
+   :layout/canonicalize layout/canonicalize})
