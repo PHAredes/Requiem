@@ -440,15 +440,34 @@
          (if (= rhs "") nil rhs)])
       [s nil])))
 
+(defn- header/read-parenthesized-end [text start]
+  (let [n (length text)]
+    (var depth 0)
+    (var i start)
+    (var found false)
+    (while (and (< i n) (not found))
+      (let [c (text i)]
+        (cond
+          (= c (chr "(")) (do (++ depth) (++ i))
+          (= c (chr ")")) (do (-- depth)
+                               (when (= depth 0)
+                                 (set found true)
+                                 (++ i)))
+          true (++ i))))
+    (if found i nil)))
+
 (defn- header/extract-name-and-params [lhs]
   (let [trimmed (string/trim lhs)]
-    (if-let [lp (string/find "(" trimmed)]
-      (let [rp (- (length trimmed) 1)]
-        (if (= (trimmed rp) (chr ")"))
-          [(string/trim (string/slice trimmed 0 lp))
-           (string/slice trimmed (+ lp 1) rp)]
-          [trimmed nil]))
-      [trimmed nil])))
+    (if (zero? (length trimmed))
+      [trimmed nil]
+      (if-let [lp (ly/find-top-level-char trimmed (chr "("))]
+        (if-let [end (header/read-parenthesized-end trimmed lp)]
+          (if (= end (length trimmed))
+            [(string/trim (string/slice trimmed 0 lp))
+             (string/slice trimmed (+ lp 1) (- end 1))]
+            [trimmed nil])
+          [trimmed nil])
+        [trimmed nil]))))
 
 (defn- header/params [text]
   (if (or (nil? text) (= (string/trim text) ""))
@@ -513,18 +532,17 @@
 (defn entry/field-binders [entry]
   (map |(field/binder-from-line ($ 1)) (entry 2)))
 
-(defn- record/render-entry-lines [entry indent]
+(defn- record/flatten-entry-lines [entry]
   (reduce (fn [acc child]
-            (array/concat acc (record/render-entry-lines child (string indent "  "))))
-          @[(string indent (entry 1))]
+            (array/concat acc (record/flatten-entry-lines child)))
+          @[(entry 1)]
           (entry 2)))
 
-(defn- record/source [header entries]
-  (string/join (reduce (fn [acc entry]
-                         (array/concat acc (record/render-entry-lines entry "  ")))
-                       @[(string header)]
-                       entries)
-               "\n"))
+(defn- record/flatten-lines [entries]
+  (reduce (fn [acc entry]
+            (array/concat acc (record/flatten-entry-lines entry)))
+          @[]
+          entries))
 
 (defn- type/arity [ty]
   (match ty
@@ -590,22 +608,87 @@
         ctor-decl (a/decl/func ctor-name ctor-ann @[ctor-clause] (a/span/none))]
     @[type-decl ctor-decl]))
 
-(defn- record->surface-decls [header entries]
-  (let [prog (sp/parse/program (record/source header entries))]
-    (prog 1)))
+(defn- ctor/rhs [rhs]
+  (let [trimmed (string/trim rhs)
+        n (length trimmed)]
+    (cond
+      (or (= trimmed "") (= trimmed "()")) [nil @[]]
+      true
+      (let [name-end (or (ly/find-first-top-level-char trimmed @[(chr " ") (chr "\t") (chr "(")])
+                         n)
+            ctor-name (string/trim (string/slice trimmed 0 name-end))
+            rest (string/trim (string/slice trimmed name-end n))
+            fields (sp/parse/fields rest nil a/decl/field-named a/decl/field-anon)]
+        (when (= ctor-name "")
+          (errorf "empty constructor rhs: %q" rhs))
+        [ctor-name fields]))))
+
+(defn- record->data-decls [name params rhs entries]
+  (let [sort (if rhs
+               (sp/parse/type-text rhs)
+               (a/ty/universe 0 (a/span/none)))
+        ctors (reduce (fn [acc entry]
+                        (let [line (string/trim (entry 1))]
+                          (if-let [idx (ly/find-top-level-char line (chr "="))]
+                            (let [lhs (string/trim (string/slice line 0 idx))
+                                  rhs (string/trim (string/slice line (+ idx 1)))
+                                  indices @[]]
+                              (each p (ly/split-top-level lhs (chr ","))
+                                (array/push indices (sp/parse/pat-text p)))
+                              (let [[ctor-name fields] (ctor/rhs rhs)]
+                                (if ctor-name
+                                  [;acc (a/decl/ctor-indexed indices ctor-name fields (a/span/none))]
+                                  acc)))
+                            (let [[ctor-name fields] (ctor/rhs line)]
+                              (if ctor-name
+                                [;acc (a/decl/ctor-plain ctor-name fields (a/span/none))]
+                                acc)))))
+                      @[]
+                      entries)]
+    @[(a/decl/data name params sort ctors (a/span/none))]))
+
+(defn- parse/clause-patterns [lhs arity]
+  (let [parts (ly/split-ws-top-level lhs)
+        pats @[]]
+    (var cur 0)
+    (for _ 0 arity
+      (when (>= cur (length parts))
+        (errorf "expected %d pattern(s), got %d in clause: %s" arity (length pats) lhs))
+      (array/push pats (sp/parse/pat-text (parts cur)))
+      (++ cur))
+    (when (< cur (length parts))
+      (errorf "too many pattern fragments in clause: %s" lhs))
+    pats))
 
 (defn- record->function-decls [name params ann-text clause-entries]
-  (let [source (record/source (string "tmp: " ann-text) clause-entries)
-        prog (sp/parse/program source)
-        decls (prog 1)]
-    (when (or (not= (length decls) 1)
-              (not= ((decls 0) 0) :decl/func))
-      (errorf "record function desugaring expected one function decl, got: %v" decls))
-    (let [parsed (decls 0)]
-      @[(a/decl/func name
-                      (type/wrap-params (parsed 2) params)
-                      (parsed 3)
-                      (a/span/none))])))
+  (let [lines (record/flatten-lines clause-entries)
+        type-parts @[]
+        clause-lines @[]]
+    (var found-clause false)
+    (each line lines
+      (let [trimmed (string/trim line)]
+        (if found-clause
+          (array/push clause-lines trimmed)
+          (if (ly/find-top-level-char trimmed (chr "="))
+            (do
+              (set found-clause true)
+              (array/push clause-lines trimmed))
+            (array/push type-parts trimmed)))))
+    (let [full-type-text (if (zero? (length type-parts))
+                           ann-text
+                           (string ann-text " " (string/join type-parts " ")))
+          body-ty (sp/parse/type-text full-type-text)
+          ty (type/wrap-params body-ty params)
+          arity (type/arity body-ty)
+          clauses (map (fn [line]
+                         (if-let [idx (ly/find-top-level-char line (chr "="))]
+                           (let [lhs (string/trim (string/slice line 0 idx))
+                                 rhs (string/trim (string/slice line (+ idx 1)))
+                                 pats (parse/clause-patterns lhs arity)]
+                             (a/decl/clause pats (sp/parse/expr-text rhs) (a/span/none)))
+                           (errorf "invalid clause line: %s" line)))
+                       clause-lines)]
+      @[(a/decl/func name ty clauses (a/span/none))])))
 
 (defn record/function-type-line? [line]
   (let [t (string/trim (string line))]
@@ -647,7 +730,7 @@
           (record->function-decls name params ann-text clause-entries))
 
         true
-        (record->surface-decls header entries)))
+        (record->data-decls name params rhs entries)))
     _
     (errorf "expected :decl/record, got: %v" decl)))
 
