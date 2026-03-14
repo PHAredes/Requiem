@@ -6,6 +6,7 @@
 (import ./levels :as lvl)
 (import ./meta :as meta)
 (import ./checker :as checker)
+(import ./matches :as matches)
 (import ./print :as printer)
 
 # Tags
@@ -88,12 +89,113 @@
       (errorf "unbound variable '%v' - not found in context.\nAvailable variables: %v" x (map keyword (h/keys Γ)))
       v)))
 
+(defn- ctx/bound? [Γ x]
+  (not (nil? (h/get Γ (string x)))))
+
 # NbE: raise / lower
 (var raise nil)
 (var lower nil)
 (var infer nil)
 (var eval nil)
 (var sem-eq nil)
+(var runtime-sig nil)
+(var delta/whnf nil)
+
+(defn- term/spine [tm]
+  (var cur tm)
+  (var rev-args @[])
+  (while (and (tuple? cur) (= (cur 0) :app))
+    (array/push rev-args (cur 2))
+    (set cur (cur 1)))
+  [cur (reverse rev-args)])
+
+(defn- term/app-chain [head args]
+  (reduce (fn [acc arg] [:app acc arg]) head args))
+
+(defn- term/subst [tm sigma]
+  (match tm
+    [:var x] (or (get sigma x) tm)
+    [:app f a] [:app (term/subst f sigma) (term/subst a sigma)]
+    [:lam body] [:lam (fn [x] (term/subst (body x) sigma))]
+    [:type _] tm
+    [:t-pi A B] [:t-pi (term/subst A sigma) (fn [x] (term/subst (B x) sigma))]
+    [:t-sigma A B] [:t-sigma (term/subst A sigma) (fn [x] (term/subst (B x) sigma))]
+    [:pair l r] [:pair (term/subst l sigma) (term/subst r sigma)]
+    [:fst p] [:fst (term/subst p sigma)]
+    [:snd p] [:snd (term/subst p sigma)]
+    [:t-id A x y] [:t-id (term/subst A sigma) (term/subst x sigma) (term/subst y sigma)]
+    [:t-refl x] [:t-refl (term/subst x sigma)]
+    [:t-J A x P d y p]
+    [:t-J (term/subst A sigma)
+          (term/subst x sigma)
+          (term/subst P sigma)
+          (term/subst d sigma)
+          (term/subst y sigma)
+          (term/subst p sigma)]
+    _ tm))
+
+(defn- sig/ctor-name-set [sig]
+  (let [out @{}]
+    (when sig
+      (eachp [name entry] sig
+        (when (= (entry :kind) :data)
+          (each ctor (or (entry :ctors) @[])
+            (put out (ctor :name) true)))))
+    out))
+
+(defn- delta/reduce-clause [Γ sig head args]
+  (when (and (tuple? head)
+             (= (head 0) :var))
+    (if-let [entry (get sig (head 1))]
+      (when (= (entry :kind) :func)
+        (let [arity (length (or (entry :params) @[]))]
+          (when (>= (length args) arity)
+            (let [need (slice args 0 arity)
+                  rest (slice args arity)
+                  ctor-set (sig/ctor-name-set sig)]
+              (var reduced nil)
+              (var blocked false)
+              (each clause (or (entry :clauses) @[])
+                (when (and (nil? reduced) (not blocked))
+                  (match (matches/matches* (map (fn [arg] (delta/whnf Γ sig arg)) need)
+                                           (clause :patterns)
+                                           ctor-set)
+                    [:yes sigma]
+                    (set reduced (term/app-chain (term/subst (clause :body) sigma) rest))
+
+                    [:no] nil
+                    [:stuck] (set blocked true))))
+              reduced))))
+      nil)))
+
+(set delta/whnf
+     (fn [Γ sig tm]
+       (match tm
+         [:var x]
+         (if-let [reduced (delta/reduce-clause Γ sig tm @[])]
+           (delta/whnf Γ sig reduced)
+           tm)
+
+         [:app _ _]
+         (let [[head args] (term/spine tm)
+               head-whnf (delta/whnf Γ sig head)]
+           (match head-whnf
+             [:lam body]
+             (delta/whnf Γ sig (term/app-chain (body (args 0)) (slice args 1)))
+
+             _
+             (if-let [reduced (delta/reduce-clause Γ sig head-whnf args)]
+               (delta/whnf Γ sig reduced)
+               (term/app-chain head-whnf args))))
+
+         _ tm)))
+
+(defn eval/with-sig [sig thunk]
+  (let [saved runtime-sig]
+    (set runtime-sig sig)
+    (let [result (thunk)]
+      (set runtime-sig saved)
+      result)))
 
 (defn- tag-of [x]
   (if (tuple? x) (get x 0) 0))
@@ -554,24 +656,25 @@
                    (print/sem pv)))))
 
 (set eval
-     (fn [Γ tm]
-        "Evaluate a term in context Γ to a semantic value"
-        (if (sem/value? tm)
-          tm
-          (match tm
-            [:var x] (eval/var Γ x)
-            [:lam body] (eval/lam Γ body)
-            [:app f x] (eval/app Γ f x)
+      (fn [Γ tm]
+         "Evaluate a term in context Γ to a semantic value"
+         (let [tm (if runtime-sig (delta/whnf Γ runtime-sig tm) tm)]
+           (if (sem/value? tm)
+            tm
+            (match tm
+             [:var x] (eval/var Γ x)
+             [:lam body] (eval/lam Γ body)
+             [:app f x] (eval/app Γ f x)
             [:type l] (ty/type l)
             [:t-pi A B] (eval/t-pi Γ A B)
             [:t-sigma A B] (eval/t-sigma Γ A B)
             [:pair a b] (eval/pair Γ a b)
             [:fst p] (eval/fst Γ p)
             [:snd p] (eval/snd Γ p)
-            [:t-id A x y] (eval/t-id Γ A x y)
-            [:t-refl x] (eval/t-refl Γ x)
-            [:t-J A x P d y p] (eval/t-J Γ A x P d y p)
-            _ tm))))
+             [:t-id A x y] (eval/t-id Γ A x y)
+             [:t-refl x] (eval/t-refl Γ x)
+             [:t-J A x P d y p] (eval/t-J Γ A x P d y p)
+             _ tm)))))
 
 (defn eval/session [f]
   "Run a computation in a fresh evaluation session with deep stack"
@@ -581,6 +684,12 @@
 
 (defn nf [ty tm]
   (eval/session (fn [] (lower ty (eval (ctx/empty) tm)))))
+
+(defn nf/in-sig [Γ sig ty tm]
+  (eval/session (fn [] (eval/with-sig sig (fn [] (lower ty (eval Γ tm)))))))
+
+(defn nf/sig [sig ty tm]
+  (nf/in-sig (ctx/empty) sig ty tm))
 
 # Bidirectional checker / metas are installed later.
 (def meta-state
@@ -689,9 +798,11 @@
    :nf/pair nf/pair
    :nf/id nf/id
    :nf/refl nf/refl
-   :eval eval
-   :nf nf
-   :lower lower
+    :eval eval
+    :nf nf
+    :nf/in-sig nf/in-sig
+    :nf/sig nf/sig
+    :lower lower
    :raise raise
    :sem-eq sem-eq
    :type-eq type-eq
@@ -701,10 +812,11 @@
    :infer infer
    :check-top check-top
    :infer-top infer-top
-   :ctx/empty ctx/empty
-   :ctx/add ctx/add
-   :ctx/lookup ctx/lookup
-   :eval/session eval/session
+    :ctx/empty ctx/empty
+    :ctx/add ctx/add
+    :ctx/lookup ctx/lookup
+    :eval/with-sig eval/with-sig
+    :eval/session eval/session
    :goals goals
    :goals/set-collect! goals/set-collect!
    :goals/collect? goals/collect?})
