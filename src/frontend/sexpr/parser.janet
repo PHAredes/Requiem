@@ -233,12 +233,6 @@
     (string/join (map layout/block->canonical (caps 0)) "\n")
     (errorf "unexpected layout parser capture shape: %v" caps)))
 
-(defn layout/canonicalize [src]
-  (let [txt (string src)]
-    (if-let [caps (peg/match layout/compiled txt)]
-      (layout/caps->canonical caps)
-      (errorf "parse failed"))))
-
 (defn parse/text [src]
   "Parse deprecated legacy source text for `src/elab_legacy.janet`."
   (dep/warn! :sexpr-parser
@@ -284,5 +278,4 @@
 
 (def exports
   {:parse/text parse/text
-   :norm/layout norm/layout
-   :layout/canonicalize layout/canonicalize})
+   :norm/layout norm/layout})
