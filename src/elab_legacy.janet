@@ -11,14 +11,16 @@
 (import ./frontend/sexpr/deprecated :as dep)
 (import ./elab :as e)
 
+(defn- warn! []
+  (dep/warn! :elab-legacy-entrypoint
+             "`src/elab_legacy.janet` is deprecated; prefer `surface/parser` + `surface/lower` + `elab/program`"))
+
 (defn elab/forms [forms]
-  (dep/warn! :elab-legacy-forms
-             "`src/elab_legacy.janet` consumes deprecated s-expression forms; prefer `elab/program` with lowered surface declarations")
+  (warn!)
   (e/elab/program (l/lower/program forms)))
 
 (defn elab/text [src]
-  (dep/warn! :elab-legacy-text
-             "`src/elab_legacy.janet` uses the deprecated s-expression frontend; prefer `surface/parser` + `surface/lower` + `elab/program`")
+  (warn!)
   (elab/forms (p/parse/text src)))
 
 (def exports

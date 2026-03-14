@@ -5,8 +5,6 @@
 # Keep this module minimal: it exists only to support `src/elab_legacy.janet`
 # and a small legacy test surface during the migration away from sexpr input.
 
-(import ./deprecated :as dep)
-
 (def grammar
   '{:ws (drop :s*)
     :stop (+ :s "(" ")" "[" "]")
@@ -235,8 +233,6 @@
 
 (defn parse/text [src]
   "Parse deprecated legacy source text for `src/elab_legacy.janet`."
-  (dep/warn! :sexpr-parser
-              "`src/frontend/sexpr/` is deprecated; prefer `src/frontend/surface/` for source parsing")
   (let [txt (string src)]
     (if-let [forms (parse/all grammar/compiled txt)]
       (if (forms/all-lists? forms)
