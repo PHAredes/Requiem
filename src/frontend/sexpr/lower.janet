@@ -5,7 +5,6 @@
 # Keep this module minimal: external callers should go through
 # `src/elab_legacy.janet`, not import this file directly.
 
-(import ./deprecated :as dep)
 (import ../../lowered_syntax :as ls)
 
 (def node/atom? ls/node/atom?)
@@ -819,8 +818,6 @@
       (errorf "top-level form must be a list (s-expression): %v\nAll top-level forms must be properly parenthesized" norm))))
 
 (defn lower/program [forms]
-  (dep/warn! :sexpr-lower
-             "s-expression lowering is deprecated; prefer `src/frontend/surface/lower` or `src/elab_legacy.janet` only for compatibility")
   (let [[decls _]
         (reduce (fn [[acc data-env] form]
                   (let [decl (decl/lower form data-env)
