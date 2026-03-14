@@ -86,10 +86,28 @@
           (array/push out @{:text trimmed :col col :line (+ i 1)}))))
     out))
 
+(defn indent/blockize [src]
+  (let [lines (indent/tokenize src)
+        blocks @[]]
+    (var current nil)
+    (each ln lines
+      (if (= (ln :col) 0)
+        (do
+          (when current
+            (array/push blocks current))
+          (set current @{:head ln :body @[]}))
+        (if current
+          (array/push (current :body) ln)
+          (errorf "indented line without declaration: %s" (ln :text)))))
+    (when current
+      (array/push blocks current))
+    blocks))
+
 (def exports
   {:is-space-byte? is-space-byte?
    :split-top-level split-top-level
    :split-ws-top-level split-ws-top-level
    :find-top-level-char find-top-level-char
    :find-first-top-level-char find-first-top-level-char
-   :indent/tokenize indent/tokenize})
+   :indent/tokenize indent/tokenize
+   :indent/blockize indent/blockize})
