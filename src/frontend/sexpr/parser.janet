@@ -283,8 +283,6 @@
     _ node))
 
 (def exports
-  {:grammar grammar
-   :grammar/compiled grammar/compiled
-   :parse/text parse/text
+  {:parse/text parse/text
    :norm/layout norm/layout
    :layout/canonicalize layout/canonicalize})
