@@ -5,6 +5,32 @@
 
 (defn sig/empty [] @{})
 
+(defn- normalize/ctor [ctor]
+  (match ctor
+    [:core/ctor name pat-binders patterns params encoded-type]
+    {:name name
+     :pat-binders (or pat-binders @[])
+     :patterns (or patterns @[])
+     :params (or params @[])
+     :type encoded-type}
+
+    [:ctor name pat-binders patterns params encoded-type _]
+    {:name name
+     :pat-binders (or pat-binders @[])
+     :patterns (or patterns @[])
+     :params (or params @[])
+     :type encoded-type}
+
+    _ ctor))
+
+(defn- normalize/clause [clause]
+  (match clause
+    [:core/clause patterns body]
+    {:patterns (or patterns @[])
+     :body body}
+
+    _ clause))
+
 (defn sig/add-data [sig name params sort ctors]
   (put sig
        name
@@ -12,17 +38,18 @@
         :name name
         :params (or params @[])
         :sort sort
-        :ctors (or ctors @[])})
+        :ctors (map normalize/ctor (or ctors @[]))})
   sig)
 
-(defn sig/add-func [sig name params result core-type]
+(defn sig/add-func [sig name params result core-type &opt clauses]
   (put sig
        name
        {:kind :func
-        :name name
-        :params (or params @[])
-        :result result
-        :type core-type})
+         :name name
+         :params (or params @[])
+         :result result
+         :type core-type
+         :clauses (map normalize/clause (or clauses @[]))})
   sig)
 
 (defn sig/lookup [sig name]
@@ -41,6 +68,15 @@
       :func (e :type)
       :data (e :sort)
       _ (errorf "sig/type-of: unsupported entry kind for '%v'" name))))
+
+(defn sig/clauses [sig name]
+  (let [e (sig/entry sig name)]
+    (when (not= (e :kind) :func)
+      (errorf "sig/clauses: '%v' is not a function" name))
+    (or (e :clauses) @[])))
+
+(defn sig/func-arity [sig name]
+  (length (sig/params sig name)))
 
 (defn sig/ctors [sig data-name]
   (let [e (sig/entry sig data-name)]
@@ -86,8 +122,8 @@
     [:core/data name params sort ctors]
     (sig/add-data sig name params sort ctors)
 
-    [:core/func name params result core-type _clauses]
-    (sig/add-func sig name params result core-type)
+    [:core/func name params result core-type clauses]
+    (sig/add-func sig name params result core-type clauses)
 
     _ sig))
 
@@ -100,9 +136,11 @@
    :sig/add-func sig/add-func
    :sig/lookup sig/lookup
    :sig/entry sig/entry
-   :sig/params sig/params
-   :sig/type-of sig/type-of
-   :sig/ctors sig/ctors
+    :sig/params sig/params
+    :sig/type-of sig/type-of
+    :sig/clauses sig/clauses
+    :sig/func-arity sig/func-arity
+    :sig/ctors sig/ctors
    :sig/ctor sig/ctor
    :sig/ctor-name-set sig/ctor-name-set
    :sig/delta-ref sig/delta-ref
