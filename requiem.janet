@@ -3,6 +3,7 @@
 (import ./src/frontend/surface/parser :as sp)
 (import ./src/elab :as e)
 (import ./src/coreTT :as tt)
+(import ./src/sig :as sig)
 (import /build/hamt :as h)
 (import /build/timer :as timer)
 (import ./src/levels :as lvl)
@@ -749,6 +750,7 @@
             lowered))
   (print/decls lowered)
   (def core (e/elab/program lowered))
+  (def runtime-sig (sig/sig/build core))
   (def global-ctx (build-global-ctx core))
   (def global-name-set (global-names global-ctx))
   (print/type-hole-goals surface-type-holes global-name-set)
@@ -773,8 +775,9 @@
             [:core/compute tm]
             (when (mode/runs-computes? mode)
               (printf "\nCompute: %s" (pp/print/tm tm))
-              (let [res (tt/nf (tt/ty/type 100) tm)]
-                (printf "  => %s" (pp/print/nf res))))
+              (let [ty (tt/infer global-ctx tm)
+                    res (tt/nf/in-sig global-ctx runtime-sig ty tm)]
+                 (printf "  => %s" (pp/print/nf res))))
 
             [:core/check tm ty]
             (do

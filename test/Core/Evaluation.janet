@@ -2,6 +2,7 @@
 
 (import ../Utils/TestRunner :as test)
 (import ../../src/coreTT :as c)
+(import ../../src/sig :as sig)
 
 (def suite (test/start-suite "Core Evaluation"))
 
@@ -70,5 +71,70 @@
          (= (get ne 0) :napp)
          (= (get arg 0) c/NF/Lam))
     "Neutral applications keep the lowered argument shape"))
+
+(let [bool-decl
+      [:core/data "Bool" @[] [:type 0]
+       @[
+         [:core/ctor "true" @[] @[] @[] [:var "Bool"]]
+         [:core/ctor "false" @[] @[] @[] [:var "Bool"]]]]
+      nat-decl
+      [:core/data "Nat" @[] [:type 0]
+       @[
+         [:core/ctor "zero" @[] @[] @[] [:var "Nat"]]
+         [:core/ctor "succ" @[] @[] @[[ :bind "pred" [:var "Nat"] ]]
+          [:t-pi [:var "Nat"] (fn [_] [:var "Nat"])]]]]
+      not-decl
+      [:core/func "not"
+       @[[ :bind "b" [:var "Bool"] ]]
+       [:var "Bool"]
+       [:t-pi [:var "Bool"] (fn [_] [:var "Bool"])]
+       @[
+         [:core/clause @[[:pat/con "true" @[]]] [:var "false"]]
+         [:core/clause @[[:pat/con "false" @[]]] [:var "true"]]]]
+      plus-decl
+      [:core/func "plus"
+       @[[ :bind "m" [:var "Nat"] ]
+         [ :bind "n" [:var "Nat"] ]]
+       [:var "Nat"]
+       [:t-pi [:var "Nat"] (fn [_] [:t-pi [:var "Nat"] (fn [_] [:var "Nat"])])]
+       @[
+         [:core/clause @[[:pat/con "zero" @[]] [:pat/var "n"]] [:var "n"]]
+         [:core/clause @[[:pat/con "succ" @[[:pat/var "m"]]] [:pat/var "n"]]
+          [:app [:var "succ"] [:app [:app [:var "plus"] [:var "m"]] [:var "n"]]]]]]
+       core @[bool-decl nat-decl not-decl plus-decl]
+       runtime-sig (sig/sig/build core)
+       bool-sem (c/eval (c/ctx/empty) [:var "Bool"])
+       nat-sem (c/eval (c/ctx/empty) [:var "Nat"])
+       succ-sem (c/ty/pi nat-sem (fn [_] nat-sem))
+       not-sem (c/ty/pi bool-sem (fn [_] bool-sem))
+       plus-sem (c/ty/pi nat-sem (fn [_] (c/ty/pi nat-sem (fn [_] nat-sem))))
+       Γ0 (c/ctx/empty)
+       Γ1 (c/ctx/add Γ0 "Bool" (c/ty/type 0))
+       Γ2 (c/ctx/add Γ1 "true" bool-sem)
+       Γ3 (c/ctx/add Γ2 "false" bool-sem)
+       Γ4 (c/ctx/add Γ3 "Nat" (c/ty/type 0))
+       Γ5 (c/ctx/add Γ4 "zero" nat-sem)
+       Γ6 (c/ctx/add Γ5 "succ" succ-sem)
+       Γ7 (c/ctx/add Γ6 "not" not-sem)
+       Γ8 (c/ctx/add Γ7 "plus" plus-sem)
+       bool-ty bool-sem
+       nat-ty nat-sem
+       succ3 [:app [:var "succ"]
+                    [:app [:var "succ"]
+                          [:app [:var "succ"] [:var "zero"]]]]]
+  (test/assert suite
+    (= (c/nf/in-sig Γ8 runtime-sig bool-ty [:app [:var "not"] [:var "true"]])
+       (c/nf/in-sig Γ8 runtime-sig bool-ty [:var "false"]))
+    "User-defined functions delta-reduce through the runtime signature")
+
+  (test/assert suite
+    (= (c/nf/in-sig Γ8
+                    runtime-sig
+                    nat-ty
+                    [:app [:app [:var "plus"]
+                                 [:app [:var "succ"] [:app [:var "succ"] [:var "zero"]]]]
+                          [:app [:var "succ"] [:var "zero"]]])
+       (c/nf/in-sig Γ8 runtime-sig nat-ty succ3))
+    "Recursive user-defined functions compute via ordered clauses"))
 
 (test/end-suite suite)

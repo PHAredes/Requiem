@@ -25,7 +25,9 @@
         ne/fst (deps :ne/fst)
         print/sem (deps :print/sem)
         print/tm (deps :print/tm)
-        meta (deps :meta)]
+        meta (deps :meta)
+        constraints (deps :constraints)
+        unify (deps :unify)]
 
     (var infer nil)
     (var check nil)
@@ -302,9 +304,189 @@
                            (print/sem A)
                            (print/sem A1))))))))
 
+    (defn constraints/gen [Γ t A]
+      "Generate constraints for checking term t against type A"
+      (let [cs @[]
+            t-tag (if (tuple? t) (get t 0) nil)
+            A-tag (tag-of A)]
+        (cond
+          # Hole constraints - create metavariable for unknown terms
+          (= t-tag :hole)
+          (match t
+            [:hole hole-name]
+            (let [mv (meta :fresh-meta)
+                  env (constraints :ctx/from-env Γ)]
+              (array/push cs (constraints :constraint/hole mv hole-name env :elab/hole)))
+            _ (errorf "invalid hole term: %v" t))
+
+          # Lambda constraints - expect Pi type and generate body constraint
+          (= t-tag :lam)
+          (match t
+            [:lam body]
+            (if (= A-tag T/Pi)
+              (let [[_ dom cod] A
+                    mv (meta :fresh-meta)
+                    env (constraints :ctx/from-env Γ)]
+                (array/push cs (constraints :constraint/dependent mv "lam-body" env (cod (raise dom (ne/var mv))) @[dom] :elab/lambda)))
+              (let [mv (meta :fresh-meta)
+                    env (constraints :ctx/from-env Γ)]
+                (array/push cs (constraints :constraint/dependent mv "lam-pi" env A @[] :elab/lambda))))
+            _ (errorf "invalid lambda term: %v" t))
+
+          # Application constraints - expect Pi type for function
+          (= t-tag :app)
+          (match t
+            [:app f x]
+            (try
+              (let [fA (infer Γ f)
+                    ftag (tag-of fA)]
+                (unless (= ftag T/Pi)
+                  (let [dom-mv (meta :fresh-meta)
+                        cod-mv (meta :fresh-meta)
+                        env (constraints :ctx/from-env Γ)]
+                    (array/push cs (constraints :constraint/dependent dom-mv "app-pi" env (ty/pi [:var dom-mv] (fn [x] [:var cod-mv])) @[fA] :elab/application)))))
+              ([e]
+                # If inference fails, create a constraint without inferred type
+                (let [dom-mv (meta :fresh-meta)
+                      cod-mv (meta :fresh-meta)
+                      env (constraints :ctx/from-env Γ)]
+                  (array/push cs (constraints :constraint/dependent dom-mv "app-pi" env (ty/pi [:var dom-mv] (fn [x] [:var cod-mv])) @[] :elab/application)))))
+            _ (errorf "invalid application term: %v" t))
+
+          # Recursive constraint generation for other term forms
+          (= t-tag :fst)
+          (match t
+            [:fst p]
+            (let [p-cs (constraints/gen Γ p A)]
+              (each c p-cs (array/push cs c)))
+            _ (errorf "invalid fst term: %v" t))
+
+          (= t-tag :snd)
+          (match t
+            [:snd p]
+            (let [p-cs (constraints/gen Γ p A)]
+              (each c p-cs (array/push cs c)))
+            _ (errorf "invalid snd term: %v" t))
+
+          (= t-tag :pair)
+          (match t
+            [:pair l r]
+            (when (= A-tag T/Sigma)
+              (let [[_ A1 B1] A
+                    l-cs (constraints/gen Γ l A1)
+                    r-cs (constraints/gen Γ r (B1 (eval Γ l)))]
+                (each c l-cs (array/push cs c))
+                (each c r-cs (array/push cs c))))
+            _ (errorf "invalid pair term: %v" t))
+
+          # Default case - no constraints for unsupported forms
+          true
+          cs)))
+
+    (defn infer/c [Γ t]
+      "Infer type with constraint generation"
+      (let [result (infer Γ t)
+            constraints (constraints/gen Γ t result)]
+        {:result result :constraints constraints}))
+
+    (defn solve-constraints [constraints]
+      "Solve a list of constraints using unification"
+      (unify :unify/solve constraints))
+
+    (defn infer/constraint [Γ t expected]
+      "Constraint-based inference: infer type and solve constraints against expected type"
+      (try
+        (let [inferred (infer Γ t)
+              constraints (constraints/gen Γ t expected)
+              solved (solve-constraints constraints)]
+          (if (empty? solved)
+            {:result inferred :solved true}
+            {:result inferred :constraints solved :solved false}))
+        ([e]
+          {:error e :solved false})))
+
+    (defn check/c [Γ t A]
+      "Check term against type with constraint generation"
+      (try
+        (let [result (check Γ t A)
+              constraints (constraints/gen Γ t A)]
+          {:result result :constraints constraints})
+        ([e]
+          {:error e :constraints @[]})))
+
+    (defn fill-hole [constraints hole-name solution]
+      "Fill a named hole in constraints with a solution"
+      (var found false)
+      (let [updated (map (fn [c]
+                           (if (and (c :name) (= (c :name) hole-name))
+                             (do (set found true)
+                                 (put (table/clone c) :solution solution))
+                             c))
+                         constraints)]
+        (if found
+          {:solved (solve-constraints updated) :filled true}
+          {:solved constraints :filled false})))
+
+    (defn suggest-solutions [constraints Γ]
+      "Suggest possible solutions for unsolved constraints"
+      (let [suggestions @[]]
+        (each c constraints
+          (when (nil? (c :solution))
+            (cond
+              (= (c :origin) :elab/hole)
+              (array/push suggestions {:hole (c :name) :type (c :expected) :context (c :ctx)})
+
+              (= (c :origin) :elab/lambda)
+              (array/push suggestions {:constraint "lambda-pi" :expected (c :expected) :context (c :ctx)})
+
+              (= (c :origin) :elab/application)
+              (array/push suggestions {:constraint "app-pi" :expected (c :expected) :context (c :ctx)}))))
+        suggestions))
+
+    (defn interactive-elab [Γ t A]
+      "Interactive elaboration with hole filling suggestions"
+      (let [check-result (check/c Γ t A)
+            constraints (check-result :constraints)
+            suggestions (suggest-solutions constraints Γ)]
+        (merge check-result {:suggestions suggestions})))
+
+    (defn constraint-summary [constraints]
+      "Generate a user-friendly summary of constraints"
+      (let [summary @[]]
+        (each c constraints
+          (let [status (if (c :solution) "solved" "unsolved")
+                name (or (c :name) "anonymous")
+                origin (c :origin)]
+            (array/push summary {:name name :status status :origin origin :expected (c :expected)})))
+        summary))
+
+    (defn refine-type [Γ t partial-type]
+      "Refine a partial type using constraint-based inference"
+      (let [result (infer/constraint Γ t partial-type)]
+        (if (result :solved)
+          {:refined-type (result :type) :success true}
+          {:refined-type partial-type :constraints (result :constraints) :success false})))
+
+    (defn auto-complete [Γ partial-term expected-type]
+      "Suggest auto-completions for partial terms"
+      (let [constraints (constraints/gen Γ partial-term expected-type)
+            suggestions (suggest-solutions constraints Γ)]
+        {:suggestions suggestions :constraints (constraint-summary constraints)}))
+
     {:infer infer
      :check check
      :subtype subtype
-     :check-univ check-univ}))
+     :check-univ check-univ
+     :constraints/gen constraints/gen
+     :infer/c infer/c
+     :check/c check/c
+     :infer/constraint infer/constraint
+     :solve-constraints solve-constraints
+     :fill-hole fill-hole
+     :suggest-solutions suggest-solutions
+     :interactive-elab interactive-elab
+     :constraint-summary constraint-summary
+     :refine-type refine-type
+     :auto-complete auto-complete}))
 
 (def exports {:make make})
