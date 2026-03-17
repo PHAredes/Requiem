@@ -8,6 +8,8 @@
 (import ./checker :as checker)
 (import ./matches :as matches)
 (import ./print :as printer)
+(import ./constraints :as constraints)
+(import ./unify :as unify)
 
 # Tags
 (def T/Type 0x01)
@@ -726,7 +728,9 @@
                  :ne/fst ne/fst
                  :print/sem print/sem
                  :print/tm print/tm
-                 :meta meta-state}))
+                  :meta meta-state
+                  :constraints constraints/exports
+                  :unify unify/exports}))
 
 (def goals (meta-state :goals))
 (def goals/set-collect! (meta-state :set-collect!))
