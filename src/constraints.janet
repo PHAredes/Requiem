@@ -10,13 +10,15 @@
 (defn- ctx/entry-name [entry]
   (entry 0))
 
-(defn constraint/make [mv &opt name expected solution ctx origin]
+(defn constraint/make [mv &opt name expected solution ctx origin dependencies level-constraints]
   @{:mv mv
     :name name
     :expected expected
     :solution solution
     :ctx (or ctx @[])
-    :origin (or origin :unknown)})
+    :origin (or origin :unknown)
+    :dependencies (or dependencies @[])
+    :level-constraints (or level-constraints @[])})
 
 (defn ctx/from-env [env]
   (let [seen @{}
@@ -31,6 +33,18 @@
 
 (defn constraint/hole [mv name env &opt origin]
   (constraint/make mv name nil nil (ctx/from-env env) (or origin :elab/hole)))
+
+(defn constraint/dependent [mv name env expected dependencies &opt origin]
+  "Create a dependent constraint that depends on other metavariables"
+  (constraint/make mv name expected nil (ctx/from-env env) (or origin :elab/dependent) dependencies))
+
+(defn constraint/level [mv name env level-expr &opt origin]
+  "Create a level constraint for universe level inference"
+  (constraint/make mv name nil nil (ctx/from-env env) (or origin :elab/level) @[] @[level-expr]))
+
+(defn constraint/implicit [mv name env expected dependencies &opt origin]
+  "Create an implicit argument constraint"
+  (constraint/make mv name expected nil (ctx/from-env env) (or origin :elab/implicit) dependencies))
 
 (defn- goals/expected-map [goals]
   (reduce (fn [acc goal]
@@ -96,14 +110,43 @@
           @{}
           constraints))
 
+(defn constraint/dependencies [constraints]
+  "Get all dependencies across all constraints"
+  (reduce (fn [acc c]
+            (reduce (fn [acc2 dep]
+                      (put acc2 dep true))
+                    acc
+                    (c :dependencies)))
+          @{}
+          constraints))
+
+(defn constraint/level-constraints [constraints]
+  "Extract all level constraints from constraints"
+  (reduce (fn [acc c]
+            (array/concat acc (c :level-constraints)))
+          @[]
+          constraints))
+
+(defn constraint/with-dependencies [constraints dependencies]
+  "Add dependencies to all constraints"
+  (map (fn [c]
+         (put (table/clone c) :dependencies (array/concat (c :dependencies) dependencies)))
+       constraints))
+
 (def exports
   {:constraint/make constraint/make
    :ctx/from-env ctx/from-env
    :constraint/hole constraint/hole
+   :constraint/dependent constraint/dependent
+   :constraint/level constraint/level
+   :constraint/implicit constraint/implicit
    :constraint/merge-goals constraint/merge-goals
    :constraint/mv-set constraint/mv-set
    :constraint/name-map constraint/name-map
    :constraint/name-set constraint/name-set
    :constraint/solved-name-set constraint/solved-name-set
+   :constraint/dependencies constraint/dependencies
+   :constraint/level-constraints constraint/level-constraints
+   :constraint/with-dependencies constraint/with-dependencies
    :constraints/without-name-set constraints/without-name-set
    :constraints/without-mvs constraints/without-mvs})
