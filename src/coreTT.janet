@@ -617,7 +617,10 @@
   (let [v (eval Γ p)
         tag (tag-of v)]
     (cond
-      (= tag T/Pair) (get v 1)
+      (= tag T/Pair) 
+      (match v
+        [T/Pair v1 _] v1
+        _ (errorf "invalid pair structure in fst: %s" (print/sem v)))
       (= tag T/Neutral) (sem/neutral (ne/fst (get v 1)))
       true (errorf "fst expects a pair value (Σ type), but got: %s"
                    (print/sem v)))))
@@ -626,7 +629,10 @@
   (let [v (eval Γ p)
         tag (tag-of v)]
     (cond
-      (= tag T/Pair) (get v 2)
+      (= tag T/Pair)
+      (match v
+        [T/Pair _ v2] v2
+        _ (errorf "invalid pair structure in snd: %s" (print/sem v)))
       (= tag T/Neutral) (sem/neutral (ne/snd (get v 1)))
       true (errorf "snd expects a pair value (Σ type), but got: %s"
                    (print/sem v)))))
