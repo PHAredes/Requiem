@@ -145,6 +145,17 @@
             (put out (ctor :name) true)))))
     out))
 
+(defn- try-clauses [clauses need ctor-set]
+  # Returns [:yes body sigma] | [:no] | [:stuck]
+  (var result [:no])
+  (label break
+    (each clause clauses
+      (match (matches/matches* need (clause :patterns) ctor-set)
+        [:yes sigma] (do (set result [:yes (clause :body) sigma]) (break))
+        [:stuck]     (do (set result [:stuck])                    (break))
+        [:no]        nil)))
+  result)
+
 (defn- delta/reduce-clause [Γ sig head args]
   (when (and (tuple? head)
              (= (head 0) :var))
@@ -152,22 +163,12 @@
       (when (= (entry :kind) :func)
         (let [arity (length (or (entry :params) @[]))]
           (when (>= (length args) arity)
-            (let [need (slice args 0 arity)
+            (let [need (map (fn [arg] (delta/whnf Γ sig arg)) (slice args 0 arity))
                   rest (slice args arity)
                   ctor-set (sig/ctor-name-set sig)]
-              (var reduced nil)
-              (var blocked false)
-              (each clause (or (entry :clauses) @[])
-                (when (and (nil? reduced) (not blocked))
-                  (match (matches/matches* (map (fn [arg] (delta/whnf Γ sig arg)) need)
-                                           (clause :patterns)
-                                           ctor-set)
-                    [:yes sigma]
-                    (set reduced (term/app-chain (term/subst (clause :body) sigma) rest))
-
-                    [:no] nil
-                    [:stuck] (set blocked true))))
-              reduced))))
+              (match (try-clauses (or (entry :clauses) @[]) need ctor-set)
+                [:yes body sigma] (term/app-chain (term/subst body sigma) rest)
+                _                 nil)))))
       nil)))
 
 (set delta/whnf
@@ -195,9 +196,8 @@
 (defn eval/with-sig [sig thunk]
   (let [saved runtime-sig]
     (set runtime-sig sig)
-    (let [result (thunk)]
-      (set runtime-sig saved)
-      result)))
+    (defer (set runtime-sig saved)
+      (thunk))))
 
 (defn- tag-of [x]
   (if (tuple? x) (get x 0) 0))
