@@ -312,29 +312,29 @@
         (cond
           # Hole constraints - create metavariable for unknown terms
           (= t-tag :hole)
-          (if (and (tuple? t) (>= (length t) 2))
-            (let [hole-name (get t 1)
-                  mv (meta :fresh-meta)
+          (match t
+            [:hole hole-name]
+            (let [mv (meta :fresh-meta)
                   env (constraints :ctx/from-env Γ)]
               (array/push constraints (constraints :constraint/hole mv hole-name env :elab/hole)))
-            (errorf "invalid hole term: %v" t))
+            _ (errorf "invalid hole term: %v" t))
 
           # Lambda constraints - expect Pi type
           (= t-tag :lam)
-          (if (and (tuple? t) (>= (length t) 2))
+          (match t
+            [:lam body]
             (unless (= A-tag T/Pi)
               (let [mv (meta :fresh-meta)
                     env (constraints :ctx/from-env Γ)]
                 (array/push constraints (constraints :constraint/dependent mv "lam-pi" env A @[] :elab/lambda))))
-            (errorf "invalid lambda term: %v" t))
+            _ (errorf "invalid lambda term: %v" t))
 
           # Application constraints - expect Pi type for function
           (= t-tag :app)
-          (if (and (tuple? t) (>= (length t) 3))
+          (match t
+            [:app f x]
             (try
-              (let [f (get t 1)
-                    x (get t 2)
-                    fA (infer Γ f)
+              (let [fA (infer Γ f)
                     ftag (tag-of fA)]
                 (unless (= ftag T/Pi)
                   (let [mv (meta :fresh-meta)
