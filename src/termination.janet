@@ -207,15 +207,75 @@
 # Type-based/CPO termination checker
 # -----------------------------------------------------------------------------
 
+(defn cpo/accessibility [term env]
+  "Check accessibility predicate for term in environment"
+  (match term
+    [:var x] (get env x)
+    [:lam body] (fn [arg] (cpo/accessibility body (put env (gensym) arg)))
+    [:app f x] (and (cpo/accessibility f env) (cpo/accessibility x env))
+    [:type _] true
+    [:t-pi A B] (and (cpo/accessibility A env) (cpo/accessibility B env))
+    _ true))
+
+(defn cpo/ordering [t1 t2 env]
+  "Computability path ordering relation"
+  (match [t1 t2]
+    [[:var x1] [:var x2]] (= x1 x2)
+    [[:lam body1] [:lam body2]] (cpo/ordering body1 body2 env)
+    [[:app f1 x1] [:app f2 x2]] (and (cpo/ordering f1 f2 env) (cpo/ordering x1 x2 env))
+    [[:type l1] [:type l2]] (<= l1 l2)
+    [[:t-pi A1 B1] [:t-pi A2 B2]] (and (cpo/ordering A1 A2 env) (cpo/ordering B1 B2 env))
+    _ (and (cpo/accessibility t1 env) (cpo/accessibility t2 env))))
+
+(defn cpo/rec-check [f body env]
+  "Check recursive calls satisfy ordering"
+  (defn find-rec-calls [term rec-f env]
+    (match term
+      [:app g x] (if (= g rec-f)
+                   (array [x])
+                   (array/concat (find-rec-calls g rec-f env)
+                                (find-rec-calls x rec-f env)))
+      [:lam b] (find-rec-calls b rec-f (put env (gensym) :dummy))
+      [:var _] []
+      [:type _] []
+      [:t-pi A B] (array/concat (find-rec-calls A rec-f env)
+                               (find-rec-calls B rec-f env))
+      _ []))
+  
+  (let [rec-calls (find-rec-calls body f env)]
+    (each [call rec-calls]
+      (when (not (cpo/ordering call f env))
+        (return false)))
+    true))
+
 (defn cpo/check [f-def]
   "Type-based termination checker (higher-order)."
-  {:terminates true
-   :method :cpo})
+  (match f-def
+    [:core/func name _ _ clauses _]
+    (let [env @{}]
+      (each clause clauses
+        (match clause
+          [:core/clause _ body]
+          (when (not (cpo/rec-check name body env))
+            (return {:terminates false :reason "recursive call violates ordering"}))
+          _ nil))
+      {:terminates true :method :cpo})
+    _ {:terminates true :method :cpo}))
 
 (defn cpo/check-mutual [f-defs]
   "Type-based termination for mutual recursion."
-  {:terminates true
-   :method :cpo})
+  (let [env @{}]
+    (each f-def f-defs
+      (match f-def
+        [:core/func name _ _ clauses _]
+        (each clause clauses
+          (match clause
+            [:core/clause _ body]
+            (when (not (cpo/rec-check name body env))
+              (return {:terminates false :reason "mutual recursion violates ordering"}))
+            _ nil))
+        _ nil))
+    {:terminates true :method :cpo}))
 
 # -----------------------------------------------------------------------------
 # Main exports - separate checkers for profiling
