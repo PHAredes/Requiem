@@ -3,6 +3,7 @@
 (import ./src/frontend/surface/parser :as sp)
 (import ./src/elab :as e)
 (import ./src/coreTT :as tt)
+(import ./src/reports :as reports)
 (import ./src/sig :as sig)
 (import /build/hamt :as h)
 (import /build/timer :as timer)
@@ -292,12 +293,6 @@
                            start-next
                            (fn [] (print/goal-sem sem)))))
 
-(defn- tt/goals/restore! [saved-goals saved-collect]
-  (array/clear tt/goals)
-  (each g saved-goals
-    (array/push tt/goals g))
-  (tt/goals/set-collect! saved-collect))
-
 (defn- partition/goal-ctx [ctx hidden-names]
   (reduce (fn [[local global] entry]
             (if (get hidden-names (entry 0))
@@ -373,7 +368,7 @@
     (printf "%sAvailable names:" indent)
     (print/bindings global-ctx (string indent "  ") local-names)
     (printf "%s------------------------------" indent)
-    (printf "%s?%s : %s" indent (string (g :name)) (print/goal-type (g :expected) local-names))))
+    (printf "%s?%s : %s" indent (or (g :name) "_") (print/goal-type (g :expected) local-names))))
 
 (defn- print/goals [goals hidden-names preferred-name-groups &opt header indent]
   (let [indent (or indent "  ")]
@@ -389,6 +384,23 @@
                           indent)
         (when (< (+ i 1) (length goals))
           (print ""))))))
+
+(defn- report/entries [report]
+  (array/concat (array/slice (report :pending-goals))
+                (array/slice (report :constraints))))
+
+(defn- report/find-entry [report hole-name]
+  (find |(and ($ :name) (= ($ :name) hole-name))
+        (report/entries report)))
+
+(defn- result/empty []
+  {:constraints @[] :goals @[]})
+
+(defn- result/merge [left right]
+  {:constraints (array/concat (array/slice (left :constraints))
+                              (or (right :constraints) @[]))
+   :goals (array/concat (array/slice (left :goals))
+                        (or (right :goals) @[]))})
 
 (defn- global-names [Γ]
   (reduce (fn [acc k]
@@ -429,15 +441,18 @@
   (print "Modes:")
   (print "  run      parse, elaborate, and execute compute blocks")
   (print "  check    parse and elaborate without running compute blocks")
+  (print "  fill     fill a named hole in check blocks")
   (print "  compile  alias of run")
   (print "  help     show this help")
   (print "")
   (print "Input:")
   (print "  the CLI accepts `.requiem` source files only")
+  (print "  fill syntax: requiem fill <file> <hole-name> <expr>")
   (print "")
   (print "Examples:")
   (print "  requiem examples/test.requiem")
   (print "  requiem check examples/test.requiem")
+  (print "  requiem fill examples/holes.requiem goal \"Type0\"")
   (print "  requiem compile @examples/test.requiem"))
 
 (defn- print/surface-type [ty]
@@ -562,6 +577,22 @@
                   (fn [x]
                     (recur (+ i 1) (tt/ctx/add cur-ctx name x)))))))
   (recur 0 Γ))
+
+(defn- sig-env/from-decls [decls]
+  (reduce (fn [acc decl]
+            (match decl
+              [:decl/func name params _ _]
+              (array/push acc [name params])
+              _ acc))
+          @[]
+          decls))
+
+(defn- env/from-goal-ctx [ctx]
+  (reduce (fn [acc entry]
+            (array/push acc [(entry 0) [:var (entry 0)]])
+            acc)
+          @[]
+          ctx))
 
 (defn- build-global-ctx [core-decls]
   (var Γ (tt/ctx/empty))
@@ -696,19 +727,25 @@
         _ nil))
     {:ctors ctors :ctor-name-set ctor-name-set}))
 
+(defn- check/live [Γ tm expected-sem]
+  (let [result (tt/check/c Γ tm expected-sem)]
+    (when (result :error)
+      (error (result :error)))
+    result))
+
 (defn- check/with-ctors [Γ tm expected-core ctor-env]
   (let [expected-sem (tt/eval Γ expected-core)
         [head args] (term/spine tm)
         info (and head (get (ctor-env :ctors) head))]
     (cond
       (nil? info)
-      (tt/check Γ tm expected-sem)
+      (check/live Γ tm expected-sem)
 
       true
       (let [[exp-head exp-args] (term/spine expected-core)]
         (cond
           (or (nil? exp-head) (not= exp-head (info :data)))
-          (tt/check Γ tm expected-sem)
+          (check/live Γ tm expected-sem)
 
           true
           (let [ctor (info :ctor)
@@ -724,96 +761,204 @@
                           head
                           (length params)
                           (length args)))
-                (for i 0 (length params)
-                  (let [arg (args i)
-                        param-ty (term/subst ((params i) 2) sigma)]
-                    (check/with-ctors Γ arg param-ty ctor-env)))
-                true)
-              (tt/check Γ tm expected-sem))))))))
+                (reduce (fn [acc i]
+                          (let [arg (args i)
+                                param-ty (term/subst ((params i) 2) sigma)]
+                            (result/merge acc (check/with-ctors Γ arg param-ty ctor-env))))
+                        (result/empty)
+                        (range (length params))))
+              (check/live Γ tm expected-sem))))))))
 
-(defn run/file-surface [path mode]
-  (def start-ms (timer/ms))
+(defn- program/load [path]
   (def src (with-default-prelude (string (slurp path))))
   (print "Parsing " path "...")
   (def prog (sp/parse/program src))
-  (def surface-type-holes @[])
-  (each decl (prog 1)
-    (collect/decl-type-holes decl surface-type-holes))
+  (def surface-type-holes ((reports/exports :report/type-holes) prog collect/decl-type-holes))
   (def lowered (sp/lower/program prog))
-  (def lowered-check-names
-    (reduce (fn [acc decl]
-              (match decl
-                [:decl/check tm _]
-                [;acc (term/lambda-names tm)]
-                _ acc))
-            @[]
-            lowered))
+  (def resolved ((e/exports :resolve-decls) lowered))
+  (def lowered-check-names ((reports/exports :report/check-name-hints) lowered term/lambda-names))
+  (def sig-env (sig-env/from-decls resolved))
   (print/decls lowered)
   (def core (e/elab/program lowered))
   (def runtime-sig (sig/sig/build core))
   (def global-ctx (build-global-ctx core))
   (def global-name-set (global-names global-ctx))
-  (print/type-hole-goals surface-type-holes global-name-set)
   (def ctor-env (build-ctor-env core))
+  {:prog prog
+   :surface-type-holes surface-type-holes
+   :lowered lowered
+   :resolved resolved
+   :lowered-check-names lowered-check-names
+   :sig-env sig-env
+   :core core
+   :runtime-sig runtime-sig
+   :global-ctx global-ctx
+   :global-name-set global-name-set
+   :ctor-env ctor-env})
+
+(defn- fill/check-report! [tm ty Γ hole-name replacement-node sig-env ctor-env global-name-set preferred-names]
+  (let [initial (check/with-ctors Γ tm ty ctor-env)
+        report ((reports/exports :report/from-state) (initial :constraints) (initial :goals) @{})]
+    (if-let [entry (report/find-entry report hole-name)]
+      (let [replacement-core ((e/exports :term/elab-in-sig) (env/from-goal-ctx (entry :ctx)) sig-env replacement-node)
+            filled (tt/fill-hole Γ tm (tt/eval Γ ty) hole-name replacement-core)
+            check (filled :check)]
+        (when (check :error)
+          (error (check :error)))
+        (let [filled-report ((reports/exports :report/from-state) (check :constraints) (check :goals) @{})]
+        (printf "\nFilled ?%s with %s" hole-name (pp/print/tm replacement-core))
+        (printf "  In: %s : %s" (pp/print/tm tm) (pp/print/tm ty))
+        (printf "  => %s" (pp/print/tm (filled :term)))
+        (print "  => OK")
+        (let [entries (report/entries filled-report)]
+          (when (> (length entries) 0)
+            (print "  Remaining goals:")
+            (print/goals entries global-name-set @[preferred-names] nil "    ")))
+        true))
+      false)))
+
+(defn- fill/candidates [core global-ctx ctor-env lowered-check-names]
+  (let [out @[]
+        ]
+    (var check-goal-index 0)
+    (each decl core
+      (match decl
+        [:core/func name params result _ty clauses]
+        (let [Γ (binders->ctx params global-ctx)]
+          (eachp [i clause] clauses
+            (array/push out {:label (string "function " name " clause " (+ i 1))
+                             :tm (clause 2)
+                             :ty result
+                             :ctx (clause/extend-ctx Γ params clause ctor-env)
+                             :preferred-names @[]})))
+
+        [:core/check tm ty]
+        (do
+          (array/push out {:label (string "check block " (+ check-goal-index 1))
+                           :tm tm
+                           :ty ty
+                           :ctx global-ctx
+                           :preferred-names (if (< check-goal-index (length lowered-check-names))
+                                              (lowered-check-names check-goal-index)
+                                              @[])})
+          (++ check-goal-index))
+        _ nil))
+    out))
+
+(defn- fill/find-targets [candidates hole-name ctor-env]
+  (reduce (fn [acc candidate]
+            (let [result (check/with-ctors (candidate :ctx) (candidate :tm) (candidate :ty) ctor-env)
+                  report ((reports/exports :report/from-state) (result :constraints) (result :goals) @{})]
+              (if (report/find-entry report hole-name)
+                [;acc {:candidate candidate :result result}]
+                acc)))
+          @[]
+          candidates))
+
+(defn run/file-surface [path mode]
+  (def start-ms (timer/ms))
+  (def state (program/load path))
+  (def lowered (state :lowered))
+  (def lowered-check-names (state :lowered-check-names))
+  (def core (state :core))
+  (def runtime-sig (state :runtime-sig))
+  (def global-ctx (state :global-ctx))
+  (def global-name-set (state :global-name-set))
+  (def ctor-env (state :ctor-env))
+  (print/type-hole-goals (state :surface-type-holes) global-name-set)
   (var check-goal-index 0)
-  (def goal-name-hints @[])
-  (let [saved-goals (slice tt/goals 0)
-        saved-collect (tt/goals/collect?)]
-    (tt/goals/set-collect! true)
-    (array/clear tt/goals)
-    (try
-      (do
-        (each decl core
-          (match decl
-            [:core/func name params result ty clauses]
-            (do
-              (let [Γ (binders->ctx params global-ctx)
-                    expected result]
-                (each c clauses
-                  (check/with-ctors Γ (c 2) expected ctor-env))))
+  (var all-results (result/empty))
+  (each decl core
+    (match decl
+      [:core/func _name params result _ty clauses]
+      (let [Γ (binders->ctx params global-ctx)
+            expected result]
+        (each c clauses
+          (set all-results
+               (result/merge all-results
+                             (check/with-ctors (clause/extend-ctx Γ params c ctor-env)
+                                               (c 2)
+                                               expected
+                                               ctor-env)))))
 
-            [:core/compute tm]
-            (when (mode/runs-computes? mode)
-              (printf "\nCompute: %s" (pp/print/tm tm))
-              (let [ty (tt/infer global-ctx tm)
-                    res (tt/nf/in-sig global-ctx runtime-sig ty tm)]
-                 (printf "  => %s" (pp/print/nf res))))
+      [:core/compute tm]
+      (when (mode/runs-computes? mode)
+        (printf "\nCompute: %s" (pp/print/tm tm))
+        (let [ty (tt/infer global-ctx tm)
+              res (tt/nf/in-sig global-ctx runtime-sig ty tm)]
+          (printf "  => %s" (pp/print/nf res))))
 
-            [:core/check tm ty]
-            (do
-              (def preferred-names (if (< check-goal-index (length lowered-check-names))
-                                     (lowered-check-names check-goal-index)
-                                     @[]))
-              (++ check-goal-index)
-              (def goal-count-before (length tt/goals))
-              (printf "\nCheck: %s : %s" (pp/print/tm tm) (pp/print/tm ty))
-              (check/with-ctors global-ctx tm ty ctor-env)
-              (print "  => OK")
-              (let [goal-count-after (length tt/goals)]
-                (when (> goal-count-after goal-count-before)
-                  (for _ goal-count-before goal-count-after
-                    (array/push goal-name-hints preferred-names))
-                  (print "  Current goal:")
-                  (print/goals (slice tt/goals goal-count-before goal-count-after)
-                               global-name-set
-                               (slice goal-name-hints goal-count-before goal-count-after)
-                               nil
-                               "    "))))
-             _ nil))
+      [:core/check tm ty]
+      (let [preferred-names (if (< check-goal-index (length lowered-check-names))
+                              (lowered-check-names check-goal-index)
+                              @[])
+            result (check/with-ctors global-ctx tm ty ctor-env)
+            report ((reports/exports :report/from-state) (result :constraints) (result :goals) @{})
+            entries (report/entries report)]
+        (++ check-goal-index)
+        (set all-results (result/merge all-results result))
+        (printf "\nCheck: %s : %s" (pp/print/tm tm) (pp/print/tm ty))
+        (print "  => OK")
+        (when (> (length entries) 0)
+          (print "  Current goal:")
+          (print/goals entries
+                       global-name-set
+                       @[preferred-names]
+                       nil
+                       "    ")))
+      _ nil))
 
-        (let [pending tt/goals]
-          (print/goals pending global-name-set goal-name-hints "\nUnsolved goals:" "  "))
+  (let [pending-report ((reports/exports :report/from-state)
+                        (all-results :constraints)
+                        (all-results :goals)
+                        @{})]
+    (print/goals (report/entries pending-report) global-name-set @[] "\nUnsolved goals:" "  "))
 
-        (print "")
-        (def elapsed-ms (- (timer/ms) start-ms))
-        (printf "Done. %d declaration(s) in %.3fs" (length lowered) (/ elapsed-ms 1000.0))
-        (tt/goals/restore! saved-goals saved-collect))
-      ([err]
-       (tt/goals/restore! saved-goals saved-collect)
-       (error err)))))
+  (print "")
+  (def elapsed-ms (- (timer/ms) start-ms))
+  (printf "Done. %d declaration(s) in %.3fs" (length lowered) (/ elapsed-ms 1000.0)))
+
+(defn run/fill-file-surface [path hole-name replacement-text]
+  (def start-ms (timer/ms))
+  (def state (program/load path))
+  (def replacement-node (sp/parse/expr-text replacement-text))
+  (def core (state :core))
+  (def global-name-set (state :global-name-set))
+  (def ctor-env (state :ctor-env))
+  (def sig-env (state :sig-env))
+  (def global-ctx (state :global-ctx))
+  (def lowered-check-names (state :lowered-check-names))
+  (print/type-hole-goals (state :surface-type-holes) global-name-set)
+  (let [candidates (fill/candidates core global-ctx ctor-env lowered-check-names)
+        matches (fill/find-targets candidates hole-name ctor-env)]
+    (when (= (length matches) 0)
+      (errorf "no fillable goal named ?%s was found" hole-name))
+    (when (> (length matches) 1)
+      (errorf "goal ?%s is ambiguous; found %d matches: %v"
+              hole-name
+              (length matches)
+              (map |(($ :candidate) :label) matches)))
+    (let [target ((matches 0) :candidate)]
+      (printf "\nTarget: %s" (target :label))
+      (fill/check-report! (target :tm)
+                          (target :ty)
+                          (target :ctx)
+                          hole-name
+                          replacement-node
+                          sig-env
+                          ctor-env
+                          global-name-set
+                          (target :preferred-names))))
+  (print "")
+  (def elapsed-ms (- (timer/ms) start-ms))
+  (printf "Done. filled ?%s in %.3fs" hole-name (/ elapsed-ms 1000.0)))
 
 (defn run/file [path mode]
-  (run/file-surface (resolve-path path) mode))
+  (match mode
+    [:fill hole-name replacement-text]
+    (run/fill-file-surface (resolve-path path) hole-name replacement-text)
+    _
+    (run/file-surface (resolve-path path) mode)))
 
 (defn- parse/cli [args]
   (let [args (if (and (> (length args) 0)
@@ -836,6 +981,11 @@
         "check" [:check (args 1)]
         "compile" [:compile (args 1)]
         "help" [:help nil]
+        _ nil)
+
+      (= n 4)
+      (match (args 0)
+        "fill" [[:fill (args 2) (args 3)] (args 1)]
         _ nil)
 
       true

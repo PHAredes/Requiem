@@ -4,13 +4,20 @@
 
 (defn make [deps]
   (let [goals @[]
-        named-goals @{}
         ctx/lookup (deps :ctx/lookup)
         goal-ty (deps :goal-ty)
         goal-term (deps :goal-term)
         print/sem (deps :print/sem)
         sem-eq (deps :sem-eq)]
+    (var named-goals @{})
     (var collect? false)
+
+    (defn goal/name [name]
+      (if (or (nil? name)
+              (= name "_")
+              (= name "?"))
+        nil
+        name))
 
     (defn expected/placeholder? [expected]
       (= expected goal-ty))
@@ -38,6 +45,7 @@
 
     (defn report [name expected Γ]
       (let [ctx      (map (fn [k] [k (ctx/lookup Γ k)]) (h/keys Γ))
+            name     (goal/name name)
             expected (or expected goal-ty)]
         (if-let [goal (and name (get named-goals name))]
           (do
@@ -49,6 +57,11 @@
             (when name (put named-goals name goal))
             (array/push goals goal)
             goal))))
+
+    (defn reset! []
+      (array/clear goals)
+      (set named-goals @{})
+      true)
 
     (defn set-collect! [enabled]
       (set collect? enabled)
@@ -78,6 +91,7 @@
     {:goals goals
      :context-vars context-vars
      :report report
+     :reset! reset!
      :set-collect! set-collect!
      :collect? collecting?
      :error-infer error-infer

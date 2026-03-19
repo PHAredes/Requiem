@@ -741,9 +741,13 @@
 (def goals (meta-state :goals))
 (def goals/set-collect! (meta-state :set-collect!))
 (def goals/collect? (meta-state :collect?))
+(def goals/reset! (meta-state :reset!))
 (set infer (checker-state :infer))
 (def check (checker-state :check))
 (def subtype (checker-state :subtype))
+(def infer/c (checker-state :infer/c))
+(def check/c (checker-state :check/c))
+(def infer/constraint (checker-state :infer/constraint))
 
 (defn type-eq [Γ A B]
   (sem-eq T/Type100 (eval Γ A) (eval Γ B)))
@@ -760,6 +764,50 @@
 (defn infer-top [t]
   (let [Γ (ctx/empty)]
     (infer Γ t)))
+
+(defn- hole/fill-name? [name target]
+  (and target
+       (not= target "_")
+       (not= target "?")
+       (= name target)))
+
+(defn- term/fill-hole [tm target solution]
+  (match tm
+    [:hole name] (if (hole/fill-name? name target) solution tm)
+    [:app f a] [:app (term/fill-hole f target solution)
+                     (term/fill-hole a target solution)]
+    [:lam body] [:lam (fn [x] (term/fill-hole (body x) target solution))]
+    [:type _] tm
+    [:t-pi A B] [:t-pi (term/fill-hole A target solution)
+                       (fn [x] (term/fill-hole (B x) target solution))]
+    [:t-sigma A B] [:t-sigma (term/fill-hole A target solution)
+                             (fn [x] (term/fill-hole (B x) target solution))]
+    [:pair l r] [:pair (term/fill-hole l target solution)
+                       (term/fill-hole r target solution)]
+    [:fst p] [:fst (term/fill-hole p target solution)]
+    [:snd p] [:snd (term/fill-hole p target solution)]
+    [:t-id A x y] [:t-id (term/fill-hole A target solution)
+                         (term/fill-hole x target solution)
+                         (term/fill-hole y target solution)]
+    [:t-refl x] [:t-refl (term/fill-hole x target solution)]
+    [:t-J A x P d y p]
+    [:t-J (term/fill-hole A target solution)
+          (term/fill-hole x target solution)
+          (term/fill-hole P target solution)
+          (term/fill-hole d target solution)
+          (term/fill-hole y target solution)
+          (term/fill-hole p target solution)]
+    _ tm))
+
+(defn fill-hole [Γ tm expected hole-name solution]
+  (let [filled (term/fill-hole tm hole-name solution)]
+    (when (= filled tm)
+      (errorf "unknown named hole ?%v" hole-name))
+    {:term filled
+     :check (check/c Γ filled expected)}))
+
+(defn fill-hole-top [tm expected hole-name solution]
+  (fill-hole (ctx/empty) tm expected hole-name solution))
 
 # Public API
 (def exports
@@ -818,15 +866,21 @@
    :type-eq type-eq
    :term-eq term-eq
    :check check
-   :subtype subtype
-   :infer infer
-   :check-top check-top
-   :infer-top infer-top
-    :ctx/empty ctx/empty
+    :subtype subtype
+    :infer infer
+    :check/c check/c
+    :infer/c infer/c
+    :infer/constraint infer/constraint
+    :check-top check-top
+    :infer-top infer-top
+    :fill-hole fill-hole
+    :fill-hole-top fill-hole-top
+     :ctx/empty ctx/empty
     :ctx/add ctx/add
     :ctx/lookup ctx/lookup
     :eval/with-sig eval/with-sig
     :eval/session eval/session
-   :goals goals
-   :goals/set-collect! goals/set-collect!
-   :goals/collect? goals/collect?})
+    :goals goals
+    :goals/set-collect! goals/set-collect!
+    :goals/collect? goals/collect?
+    :goals/reset! goals/reset!})

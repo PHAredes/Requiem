@@ -1,0 +1,5 @@
+Nat:
+  zero
+  succ Nat
+
+check ?goal : Nat

@@ -27,7 +27,11 @@
         print/tm (deps :print/tm)
         meta (deps :meta)
         constraints (deps :constraints)
-        unify (deps :unify)]
+        unify (deps :unify)
+        goals (meta :goals)
+        goals/reset! (meta :reset!)
+        goals/set-collect! (meta :set-collect!)
+        goals/collect? (meta :collect?)]
 
     (var infer nil)
     (var check nil)
@@ -383,34 +387,68 @@
           true
           cs)))
 
-    (defn infer/c [Γ t]
-      "Infer type with constraint generation"
-      (let [result (infer Γ t)
-            constraints (constraints/gen Γ t result)]
-        {:result result :constraints constraints}))
+    (defn collect/goals [thunk]
+      (let [saved-collect (goals/collect?)
+            saved-goals (array/slice goals)]
+        (goals/reset!)
+        (goals/set-collect! true)
+        (try
+          (let [result (thunk)
+                fresh-goals (array/slice goals)]
+            (goals/reset!)
+            (each goal saved-goals
+              (array/push goals goal))
+            (goals/set-collect! saved-collect)
+            {:result result :goals fresh-goals})
+          ([err]
+           (goals/reset!)
+           (each goal saved-goals
+             (array/push goals goal))
+           (goals/set-collect! saved-collect)
+           (error err)))))
 
     (defn solve-constraints [constraints]
       "Solve a list of constraints using unification"
-      (unify :unify/solve constraints))
+      ((unify :unify/solve) constraints))
+
+    (defn solve-goals [goals]
+      ((constraints :constraints/from-goals) goals))
+
+    (defn infer/c [Γ t]
+      "Infer type while collecting live goal constraints"
+      (let [collected (collect/goals (fn [] (infer Γ t)))]
+        {:result (collected :result)
+         :constraints (solve-goals (collected :goals))
+         :goals (collected :goals)}))
 
     (defn infer/constraint [Γ t expected]
       "Constraint-based inference: infer type and solve constraints against expected type"
       (try
-        (let [inferred (infer Γ t)
-              constraints (constraints/gen Γ t expected)
-              solved (solve-constraints constraints)]
-          (if (empty? solved)
-            {:result inferred :solved true}
-            {:result inferred :constraints solved :solved false}))
+        (let [result (collect/goals
+                       (fn []
+                         (let [inferred (infer Γ t)]
+                           (when expected
+                             (when (not (subtype inferred expected))
+                               (errorf "type mismatch between expected type and inferred type\nExpected: %s\nInferred: %s"
+                                       (print/sem expected)
+                                       (print/sem inferred))))
+                           inferred)))
+              solved (solve-goals (result :goals))]
+          {:result (result :result)
+           :constraints solved
+           :goals (result :goals)
+           :solved (all |($ :solution) solved)})
         ([e]
           {:error e :solved false})))
 
     (defn check/c [Γ t A]
-      "Check term against type with constraint generation"
+      "Check term against type while collecting live goal constraints"
       (try
-        (let [result (check Γ t A)
-              constraints (constraints/gen Γ t A)]
-          {:result result :constraints constraints})
+        (let [result (collect/goals (fn [] (check Γ t A)))
+              solved (solve-goals (result :goals))]
+          {:result (result :result)
+           :constraints solved
+           :goals (result :goals)})
         ([e]
           {:error e :constraints @[]})))
 

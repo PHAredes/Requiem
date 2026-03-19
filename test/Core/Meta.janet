@@ -40,4 +40,24 @@
       ((state :error-check) "named" [:type 1] (ctx @[]))))
   "Named goals reject inconsistent expected types")
 
+(test/assert suite
+  (let [state (make-state)]
+    ((state :set-collect!) true)
+    ((state :reset!))
+    ((state :error-check) "_" [:type 0] (ctx @[]))
+    ((state :error-check) "_" [:type 1] (ctx @[]))
+    (let [goals (state :goals)]
+      (and (= (length goals) 2)
+           (nil? ((goals 0) :name))
+           (nil? ((goals 1) :name)))))
+  "Underscore holes stay anonymous across goal collection")
+
+(test/assert suite
+  (let [state (make-state)]
+    ((state :set-collect!) true)
+    ((state :error-check) "named" [:type 0] (ctx @[]))
+    ((state :reset!))
+    (= (length (state :goals)) 0))
+  "Meta state reset clears collected goals")
+
 (test/end-suite suite)

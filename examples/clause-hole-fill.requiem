@@ -1,0 +1,7 @@
+Nat:
+  zero
+  succ Nat
+
+id(n: Nat): Nat
+  zero = ?goal
+  succ k = succ k

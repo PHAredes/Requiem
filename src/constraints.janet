@@ -46,6 +46,21 @@
   "Create an implicit argument constraint"
   (constraint/make mv name expected nil (ctx/from-env env) (or origin :elab/implicit) dependencies))
 
+(defn constraints/from-goals [goals]
+  (reduce (fn [acc i]
+            (let [goal (goals i)
+                  mv (symbol (string "?goal" (+ i 1)))]
+              (array/push acc
+                          (constraint/make mv
+                                           (goal :name)
+                                           (goal :expected)
+                                           nil
+                                           (goal :ctx)
+                                           :meta/goal))
+              acc))
+          @[]
+          (range (length goals))))
+
 (defn- goals/expected-map [goals]
   (reduce (fn [acc goal]
             (if (goal :name)
@@ -140,6 +155,7 @@
    :constraint/dependent constraint/dependent
    :constraint/level constraint/level
    :constraint/implicit constraint/implicit
+   :constraints/from-goals constraints/from-goals
    :constraint/merge-goals constraint/merge-goals
    :constraint/mv-set constraint/mv-set
    :constraint/name-map constraint/name-map

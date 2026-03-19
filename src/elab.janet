@@ -800,4 +800,5 @@
    :record->decls record->decls
    :resolve-decls program/resolve-decls
    :decl/elab (fn [decl] (decl/elab @[] decl))
+   :term/elab-in-sig elab/term
    :term/elab (fn [env node] (elab/term env @[] node))})
