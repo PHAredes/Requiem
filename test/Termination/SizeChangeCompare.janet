@@ -43,6 +43,12 @@
   "Beta-redexes are reduced before recursive-argument comparison")
 
 (test/assert suite
+  (= :eq (term/sc/compare [:fst [:app [:lam (fn [u] [:pair [:var "x"] [:var "y"]])]
+                                       [:var "unit"]]]
+                          [:pat/var "x"]))
+  "Projection redexes are reduced before recursive-argument comparison")
+
+(test/assert suite
   (= :unknown (term/sc/compare [:app [:var "f"] [:var "x"]] [:pat/var "f"]))
   "Higher-order applications are not mistaken for descent on the head")
 
@@ -60,6 +66,12 @@
   (= :unknown (term/sc/compare [:app [:var "zero"] [:var "n"]]
                                [:pat/con "succ" @[[:pat/var "n"]]]))
   "Different constructor heads do not compare spuriously")
+
+(test/assert suite
+  (= :unknown (term/sc/compare [:app [:var "succ"] [:var "n"]]
+                               [:pat/con "succ" @[[:pat/var "n"]]]
+                               @{"succ" true}))
+  "Bound variables that shadow constructors are not treated as constructor heads")
 
 (test/assert suite
   (= :unknown (term/sc/compare [:var "x"] [:pat/var "_"]))
@@ -136,6 +148,20 @@
 
 (test/assert suite
   (let [calls (term/sc/find-calls @{"loop" 1}
+                                  @[[:pat/var "x"]]
+                                  [:t-J [:var "Nat"]
+                                        [:var "x"]
+                                        (fn [y p] [:app [:var "loop"] [:var "x"]])
+                                        [:var "zero"]
+                                        [:var "x"]
+                                        [:t-refl [:var "x"]]])]
+    (and (= 1 (length calls))
+         (= "loop" ((calls 0) 0))
+         (= :eq (term/sc/matrix-get ((calls 0) 1) 0 0))))
+  "Call discovery sees recursive calls inside HOAS J motives")
+
+(test/assert suite
+  (let [calls (term/sc/find-calls @{"loop" 1}
                                   @[[:pat/var "p"]]
                                   [:fst [:app [:var "loop"] [:fst [:var "p"]]]])]
     (and (= 1 (length calls))
@@ -166,5 +192,16 @@
     (and (= 1 (length calls))
          (= "loop" ((calls 0) 0))))
   "Call discovery sees reducible callee heads after local reduction")
+
+(test/assert suite
+  (let [calls (term/sc/find-calls @{"loop" 1}
+                                  @[[:pat/var "n"]]
+                                  [:app [:fst [:app [:lam (fn [u] [:pair [:var "loop"] [:var "zero"]])]
+                                                   [:var "unit"]]]
+                                        [:var "n"]])]
+    (and (= 1 (length calls))
+         (= "loop" ((calls 0) 0))
+         (= :eq (term/sc/matrix-get ((calls 0) 1) 0 0))))
+  "Call discovery sees reducible callee heads hidden behind projection redexes")
 
 (test/end-suite suite)

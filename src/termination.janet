@@ -263,42 +263,60 @@
     (set cur
          (match cur
            [:app f x]
-           (let [f* (sc/whnf f)]
-             (match f*
-               [:lam body]
+            (let [f* (sc/whnf f)]
+              (match f*
+                [:lam body]
                (do
                  (set changed true)
                  (body x))
                _
                (if (not= f* f)
-                 (do
-                   (set changed true)
-                   [:app f* x])
-                 cur)))
-           [:fst [:pair l _]]
-           (do
-             (set changed true)
-             l)
-           [:snd [:pair _ r]]
-           (do
-             (set changed true)
-             r)
-           _ cur)))
+                  (do
+                    (set changed true)
+                    [:app f* x])
+                  cur)))
+            [:fst p]
+            (let [p* (sc/whnf p)]
+              (match p*
+                [:pair l _]
+                (do
+                  (set changed true)
+                  l)
+                _
+                (if (not= p* p)
+                  (do
+                    (set changed true)
+                    [:fst p*])
+                  cur)))
+            [:snd p]
+            (let [p* (sc/whnf p)]
+              (match p*
+                [:pair _ r]
+                (do
+                  (set changed true)
+                  r)
+                _
+                (if (not= p* p)
+                  (do
+                    (set changed true)
+                    [:snd p*])
+                  cur)))
+            _ cur)))
   cur)
 
-(defn sc/reduced-relation [term pat]
+(defn sc/reduced-relation [term pat bound-names]
   (match (sc/whnf term)
-    [:fst [:pair l _]] (sc/compare l pat)
-    [:snd [:pair _ r]] (sc/compare r pat)
+    [:fst [:pair l _]] (sc/compare l pat bound-names)
+    [:snd [:pair _ r]] (sc/compare r pat bound-names)
     _ :unknown))
 
-(defn sc/best-subterm-relation [term pat]
+(defn sc/best-subterm-relation [term pat bound-names]
   (let [subs (sc/immediate-subterms term)]
     (reduce (fn [best subterm]
-              (let [rel (sc/compare subterm pat)]
-                (if (= rel :unknown)
-                  best
-                  (sc/relation-max best :lt))))
+              (let [rel (sc/compare subterm pat bound-names)]
+                 (if (= rel :unknown)
+                   best
+                   (sc/relation-max best :lt))))
             :unknown
             subs)))
 
@@ -320,51 +338,53 @@
 (defn sc/combine-subrelations [rels]
   (reduce sc/relation-mul :eq rels))
 
-(defn sc/compare-con-args [args pats]
+(defn sc/compare-con-args [args pats bound-names]
   (if (not= (length args) (length pats))
     :unknown
     (let [rels @[]]
       (for i 0 (length args)
-        (array/push rels (sc/compare (args i) (pats i))))
+        (array/push rels (sc/compare (args i) (pats i) bound-names)))
       (sc/combine-subrelations rels))))
 
 (set sc/compare
-     (fn [term pat]
-       (let [term* (sc/whnf term)]
-         (match pat
-            [:pat/var x]
-            (cond
-              (= x "_") :unknown
-              (= term* [:var x]) :eq
-              (not= :unknown (sc/reduced-relation term* pat))
-              (sc/reduced-relation term* pat)
-              (not= :unknown (sc/best-subterm-relation term* pat))
-              :lt
-              true :unknown)
+     (fn [term pat &opt bound-names]
+       (let [bound-names (or bound-names @{})
+             term* (sc/whnf term)]
+          (match pat
+             [:pat/var x]
+             (cond
+               (= x "_") :unknown
+               (= term* [:var x]) :eq
+               (not= :unknown (sc/reduced-relation term* pat bound-names))
+               (sc/reduced-relation term* pat bound-names)
+               (not= :unknown (sc/best-subterm-relation term* pat bound-names))
+               :lt
+               true :unknown)
 
-           [:pat/con ctor args]
-            (let [[head term-args] (sc/spine term*)]
-              (if (and (tuple? head)
-                      (= (head 0) :var)
-                      (= (head 1) ctor)
-                      (= (length term-args) (length args)))
-               (sc/compare-con-args term-args args)
-               (reduce (fn [best subpat]
-                         (let [subrel (sc/compare term* subpat)]
-                           (if (= subrel :unknown)
-                              best
-                              (sc/relation-max best :lt))))
-                        :unknown
-                        (array/concat args (sc/immediate-subterms term*)))))
+            [:pat/con ctor args]
+             (let [[head term-args] (sc/spine term*)]
+               (if (and (tuple? head)
+                       (= (head 0) :var)
+                       (not (get bound-names (head 1)))
+                       (= (head 1) ctor)
+                       (= (length term-args) (length args)))
+                (sc/compare-con-args term-args args bound-names)
+                (reduce (fn [best subpat]
+                          (let [subrel (sc/compare term* subpat bound-names)]
+                            (if (= subrel :unknown)
+                               best
+                               (sc/relation-max best :lt))))
+                         :unknown
+                         (array/concat args (sc/immediate-subterms term*)))))
 
            _ :unknown))))
 
-(defn sc/call-matrix [caller-patterns call-args callee-arity]
+(defn sc/call-matrix [caller-patterns call-args callee-arity bound-names]
   (let [matrix (sc/matrix callee-arity (length caller-patterns))
         used-args (slice call-args 0 callee-arity)]
     (for i 0 callee-arity
       (for j 0 (length caller-patterns)
-        (sc/matrix-set matrix i j (sc/compare (used-args i) (caller-patterns j)))))
+        (sc/matrix-set matrix i j (sc/compare (used-args i) (caller-patterns j) bound-names))))
     matrix))
 
 (defn sc/call-head [tm target-arities bound-names]
@@ -383,8 +403,9 @@
   (when-let [[callee args] (sc/call-head tm target-arities bound-names)]
     (array/push calls
                  [callee (sc/call-matrix caller-patterns
-                                         args
-                                         (get target-arities callee))])))
+                                          args
+                                          (get target-arities callee)
+                                          bound-names)])))
 
 (defn sc/pattern-bound-names [patterns]
   (reduce (fn [acc pat]
@@ -440,7 +461,21 @@
                      (walk p bound-names))
         [:t-id A x y] (do (walk A bound-names) (walk x bound-names) (walk y bound-names))
         [:t-refl x] (walk x bound-names)
-        [:t-J A x P d y p] (do (walk A bound-names) (walk x bound-names) (walk P bound-names) (walk d bound-names) (walk y bound-names) (walk p bound-names))
+        [:t-J A x P d y p]
+        (do
+          (walk A bound-names)
+          (walk x bound-names)
+          (if (function? P)
+            (let [fresh-y (gensym)
+                  fresh-p (gensym)
+                  next-bound (table/clone bound-names)]
+              (put next-bound fresh-y true)
+              (put next-bound fresh-p true)
+              (walk (P [:var fresh-y] [:var fresh-p]) next-bound))
+            (walk P bound-names))
+          (walk d bound-names)
+          (walk y bound-names)
+          (walk p bound-names))
         _ nil))
     (walk term initial-bound)
     calls))

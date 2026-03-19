@@ -153,8 +153,35 @@
    @[
      [:core/clause @[[:pat/con "zero" @[]]]
       [:var "zero"]]
+      [:core/clause @[[:pat/con "succ" @[[:pat/var "n"]]]]
+       [:app [:fst [:pair [:var "wrapped-head-loop"] [:var "zero"]]]
+             [:app [:var "succ"] [:var "n"]]]]]])
+
+(def hoas-j-loop-decl
+  [:core/func "hoas-j-loop"
+   @[[ :bind "x" nat-type ]]
+   nat-type
+   nil
+   @[
+     [:core/clause @[[:pat/var "x"]]
+      [:t-J nat-type
+            [:var "x"]
+            (fn [y p] [:app [:var "hoas-j-loop"] [:var "x"]])
+            [:var "zero"]
+            [:var "x"]
+            [:t-refl [:var "x"]]]]]])
+
+(def beta-proj-head-loop-decl
+  [:core/func "beta-proj-head-loop"
+   @[[ :bind "n" nat-type ]]
+   nat-type
+   nil
+   @[
+     [:core/clause @[[:pat/con "zero" @[]]]
+      [:var "zero"]]
      [:core/clause @[[:pat/con "succ" @[[:pat/var "n"]]]]
-      [:app [:fst [:pair [:var "wrapped-head-loop"] [:var "zero"]]]
+      [:app [:fst [:app [:lam (fn [u] [:pair [:var "beta-proj-head-loop"] [:var "zero"]])]
+                        [:var "unit"]]]
             [:app [:var "succ"] [:var "n"]]]]]])
 
 (def header-left-decl
@@ -376,6 +403,20 @@
          (= (length (result :problems)) 1)
          (= (((result :problems) 0) :name) "wrapped-head-loop"))
     "SCT sees non-terminating recursive calls hidden behind reducible heads"))
+
+(let [result (term/sct hoas-j-loop-decl)]
+  (test/assert suite
+    (and (not (result :ok))
+         (= (length (result :problems)) 1)
+         (= (((result :problems) 0) :name) "hoas-j-loop"))
+    "SCT rejects recursive calls hidden inside HOAS J motives"))
+
+(let [result (term/sct beta-proj-head-loop-decl)]
+  (test/assert suite
+    (and (not (result :ok))
+         (= (length (result :problems)) 1)
+         (= (((result :problems) 0) :name) "beta-proj-head-loop"))
+    "SCT rejects recursive calls hidden behind projection redexes"))
 
 (let [result (term/sct* @[header-left-decl header-right-decl])]
   (test/assert suite
