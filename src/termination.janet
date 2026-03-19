@@ -255,8 +255,39 @@
     [:snd p] @[p]
     _ @[]))
 
+(defn sc/whnf [tm]
+  (var cur tm)
+  (var changed true)
+  (while changed
+    (set changed false)
+    (set cur
+         (match cur
+           [:app f x]
+           (let [f* (sc/whnf f)]
+             (match f*
+               [:lam body]
+               (do
+                 (set changed true)
+                 (body x))
+               _
+               (if (not= f* f)
+                 (do
+                   (set changed true)
+                   [:app f* x])
+                 cur)))
+           [:fst [:pair l _]]
+           (do
+             (set changed true)
+             l)
+           [:snd [:pair _ r]]
+           (do
+             (set changed true)
+             r)
+           _ cur)))
+  cur)
+
 (defn sc/reduced-relation [term pat]
-  (match term
+  (match (sc/whnf term)
     [:fst [:pair l _]] (sc/compare l pat)
     [:snd [:pair _ r]] (sc/compare r pat)
     _ :unknown))
@@ -299,33 +330,34 @@
 
 (set sc/compare
      (fn [term pat]
-       (match pat
-           [:pat/var x]
-           (cond
-             (= x "_") :unknown
-             (= term [:var x]) :eq
-             (not= :unknown (sc/reduced-relation term pat))
-             (sc/reduced-relation term pat)
-             (not= :unknown (sc/best-subterm-relation term pat))
-             :lt
-             true :unknown)
+       (let [term* (sc/whnf term)]
+         (match pat
+            [:pat/var x]
+            (cond
+              (= x "_") :unknown
+              (= term* [:var x]) :eq
+              (not= :unknown (sc/reduced-relation term* pat))
+              (sc/reduced-relation term* pat)
+              (not= :unknown (sc/best-subterm-relation term* pat))
+              :lt
+              true :unknown)
 
-         [:pat/con ctor args]
-          (let [[head term-args] (sc/spine term)]
-            (if (and (tuple? head)
-                    (= (head 0) :var)
-                    (= (head 1) ctor)
-                    (= (length term-args) (length args)))
-             (sc/compare-con-args term-args args)
-             (reduce (fn [best subpat]
-                       (let [subrel (sc/compare term subpat)]
-                         (if (= subrel :unknown)
-                            best
-                            (sc/relation-max best :lt))))
-                      :unknown
-                      (array/concat args (sc/immediate-subterms term)))))
+           [:pat/con ctor args]
+            (let [[head term-args] (sc/spine term*)]
+              (if (and (tuple? head)
+                      (= (head 0) :var)
+                      (= (head 1) ctor)
+                      (= (length term-args) (length args)))
+               (sc/compare-con-args term-args args)
+               (reduce (fn [best subpat]
+                         (let [subrel (sc/compare term* subpat)]
+                           (if (= subrel :unknown)
+                              best
+                              (sc/relation-max best :lt))))
+                        :unknown
+                        (array/concat args (sc/immediate-subterms term*)))))
 
-         _ :unknown)))
+           _ :unknown))))
 
 (defn sc/call-matrix [caller-patterns call-args callee-arity]
   (let [matrix (sc/matrix callee-arity (length caller-patterns))
@@ -336,7 +368,7 @@
     matrix))
 
 (defn sc/call-head [tm target-arities bound-names]
-  (let [[head args] (sc/spine tm)]
+  (let [[head args] (sc/spine (sc/whnf tm))]
     (match head
       [:var name]
       (if (get bound-names name)
@@ -576,6 +608,7 @@
     :sc/diagonal->string sc/diagonal->string
     :sc/find-calls sc/find-calls
     :sc/filter-incomparable sc/filter-incomparable
+    :sc/whnf sc/whnf
     :sc/matrix sc/matrix
     :sc/matrix-get sc/matrix-get
     :sc/matrix-diagonal-has-lt? sc/matrix-diagonal-has-lt?

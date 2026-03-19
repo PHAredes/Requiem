@@ -130,9 +130,32 @@
    @[[ :bind "f" [:var "Nat->Nat"] ]]
    nat-type
    nil
+    @[
+      [:core/clause @[[:pat/var "f"]]
+       [:app [:var "f"] [:var "zero"]]]]])
+
+(def beta-loop-decl
+  [:core/func "beta-loop"
+   @[[ :bind "n" nat-type ]]
+   nat-type
+   nil
    @[
-     [:core/clause @[[:pat/var "f"]]
-      [:app [:var "f"] [:var "zero"]]]]])
+     [:core/clause @[[:pat/con "zero" @[]]]
+      [:var "zero"]]
+     [:core/clause @[[:pat/con "succ" @[[:pat/var "n"]]]]
+      [:app [:var "beta-loop"] [:app [:lam (fn [x] x)] [:var "n"]]]]]])
+
+(def wrapped-head-loop-decl
+  [:core/func "wrapped-head-loop"
+   @[[ :bind "n" nat-type ]]
+   nat-type
+   nil
+   @[
+     [:core/clause @[[:pat/con "zero" @[]]]
+      [:var "zero"]]
+     [:core/clause @[[:pat/con "succ" @[[:pat/var "n"]]]]
+      [:app [:fst [:pair [:var "wrapped-head-loop"] [:var "zero"]]]
+            [:app [:var "succ"] [:var "n"]]]]]])
 
 (def header-left-decl
   [:core/func "header-left"
@@ -342,6 +365,17 @@
 (test/assert suite
   ((term/sct shadowed-f-decl) :ok)
   "SCT ignores shadowed local names when looking for recursive calls")
+
+(test/assert suite
+  ((term/sct beta-loop-decl) :ok)
+  "SCT reduces beta-redex recursive arguments before comparing them")
+
+(let [result (term/sct wrapped-head-loop-decl)]
+  (test/assert suite
+    (and (not (result :ok))
+         (= (length (result :problems)) 1)
+         (= (((result :problems) 0) :name) "wrapped-head-loop"))
+    "SCT sees non-terminating recursive calls hidden behind reducible heads"))
 
 (let [result (term/sct* @[header-left-decl header-right-decl])]
   (test/assert suite

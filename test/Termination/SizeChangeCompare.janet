@@ -39,6 +39,10 @@
   "Projecting a concrete pair preserves the exact component comparison")
 
 (test/assert suite
+  (= :eq (term/sc/compare [:app [:lam (fn [x] x)] [:var "n"]] [:pat/var "n"]))
+  "Beta-redexes are reduced before recursive-argument comparison")
+
+(test/assert suite
   (= :unknown (term/sc/compare [:app [:var "f"] [:var "x"]] [:pat/var "f"]))
   "Higher-order applications are not mistaken for descent on the head")
 
@@ -153,5 +157,14 @@
                                      @[[:pat/var "f"]]
                                      [:app [:var "f"] [:var "zero"]])))
   "Call discovery ignores locally bound variables that shadow function names")
+
+(test/assert suite
+  (let [calls (term/sc/find-calls @{"loop" 1}
+                                  @[[:pat/var "n"]]
+                                  [:app [:fst [:pair [:var "loop"] [:var "zero"]]]
+                                        [:app [:var "succ"] [:var "n"]]])]
+    (and (= 1 (length calls))
+         (= "loop" ((calls 0) 0))))
+  "Call discovery sees reducible callee heads after local reduction")
 
 (test/end-suite suite)
