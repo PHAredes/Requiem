@@ -128,9 +128,101 @@
     (= (result 0) :t-sigma))
   "Dispatch aliases normalize sigma spellings")
 
+(test/assert-error suite
+  (fn []
+    (e/elab/program
+      @[
+        [:decl/func "loop"
+         @[[ :bind "n" [:atom "Nat"] ]]
+         [:atom "Nat"]
+         @[
+           [:clause @[[:pat/con "zero" @[]]] [:atom "zero"]]
+           [:clause @[[:pat/con "succ" @[[:pat/var "n"]]]]
+            [:list @[[:atom "loop"] [:list @[[:atom "succ"] [:atom "n"]]]]]]
+         ]]
+      ]))
+  "Program elaboration rejects non-terminating recursion"
+  "termination check failed: loop")
+
+(test/assert-error suite
+  (fn []
+    (e/elab/program
+      @[
+        [:decl/func "header-left"
+         @[]
+         [:atom "header-right"]
+         @[
+           [:clause @[] [:atom "zero"]]
+         ]]
+        [:decl/func "header-right"
+         @[]
+         [:atom "header-left"]
+         @[
+           [:clause @[] [:atom "zero"]]
+         ]]
+      ]))
+  "Program elaboration rejects recursive cycles in function headers"
+  "termination check failed: header-left")
+
+(test/assert-error suite
+  (fn []
+    (e/elab/program
+      @[
+        [:decl/func "self-header"
+         @[]
+         [:atom "self-header"]
+         @[
+           [:clause @[] [:atom "zero"]]
+         ]]
+      ]))
+  "Program elaboration rejects direct self-recursion in function headers"
+  "termination check failed: self-header")
+
+(test/assert-error suite
+  (fn []
+    (e/elab/program
+      @[
+        [:decl/func "header-pi-left"
+         @[]
+         [:list @[[:atom "Pi"]
+                  [:list @[[:atom "Ann"] [:atom "x"] [:atom "Nat"]]]
+                  [:atom "header-pi-right"]]]
+         @[
+           [:clause @[] [:atom "zero"]]
+         ]]
+        [:decl/func "header-pi-right"
+         @[]
+         [:list @[[:atom "Sigma"]
+                  [:list @[[:atom "x:"] [:atom "Nat"]]]
+                  [:atom "."]
+                  [:atom "header-pi-left"]]]
+         @[
+           [:clause @[] [:atom "zero"]]
+         ]]
+      ]))
+  "Program elaboration rejects recursive cycles in dependent headers"
+  "termination check failed: header-pi")
+
+(test/assert suite
+  (let [program (e/elab/program
+                  @[
+                    [:decl/func "plus"
+                     @[[ :bind "m" [:atom "Nat"] ]
+                       [ :bind "n" [:atom "Nat"] ]]
+                     [:atom "Nat"]
+                     @[
+                       [:clause @[[:pat/con "zero" @[]] [:pat/var "n"]] [:atom "n"]]
+                       [:clause @[[:pat/con "succ" @[[:pat/var "m"]]] [:pat/var "n"]]
+                        [:list @[[:atom "succ"]
+                                 [:list @[[:atom "plus"] [:atom "m"] [:atom "n"]]]]]
+                       ]]]
+                   ])]
+    (= ((program 0) 0) :core/func))
+  "Program elaboration accepts structurally recursive functions")
+
 (test/assert suite
   (let [motive-body [:list @[[ :atom "Id" ]
-                              [:atom "Type1"]
+                               [:atom "Type1"]
                               [:atom "Type0"]
                               [:atom "y"]]]
         motive-inner [:list @[[ :atom "fn" ]
