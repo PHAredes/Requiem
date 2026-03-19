@@ -790,7 +790,7 @@
 (defn- termination/function-decls [core-decls]
   (reduce (fn [acc decl]
             (match decl
-              [:core/func _ _ _ _ _] [;acc decl]
+              [:core/func _ _ _ _ _] (do (array/push acc decl) acc)
               _ acc))
           @[]
           core-decls))

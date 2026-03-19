@@ -109,7 +109,11 @@
         true
         (array/push kept existing)))
     (++ i))
-  (if kept [;kept matrix] matrices))
+  (if kept
+    (do
+      (array/push kept matrix)
+      kept)
+    matrices))
 
 (defn sc/base-proof [label callee]
   [:sc/base-proof label callee])
@@ -167,7 +171,8 @@
       (eachp [to calls] tos
         (when (> (length calls) 0)
           (let [targets (get rev to @[])]
-            (put rev to [;targets from])))))
+            (array/push targets from)
+            (put rev to targets)))))
     rev))
 
 (defn sc/sccs [g]
@@ -313,7 +318,7 @@
                             best
                             (sc/relation-max best :lt))))
                       :unknown
-                      [;args (sc/immediate-subterms term)])))
+                      (array/concat args (sc/immediate-subterms term)))))
 
          _ :unknown)))
 
@@ -425,7 +430,9 @@
 (defn sc/recursive-components [g]
   (reduce (fn [acc comp]
             (if (sc/component-recursive? g comp)
-              [;acc comp]
+              (do
+                (array/push acc comp)
+                acc)
               acc))
           @[]
           (sc/sccs g)))
