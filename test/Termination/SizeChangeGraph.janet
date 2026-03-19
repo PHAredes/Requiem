@@ -294,6 +294,17 @@
     (result :ok))
   "Non-idempotent self-call matrices are not reported as SCT failures")
 
+(test/assert suite
+  (let [m1 (term/sc/call "f" "f"
+                         (mk-matrix 2 2 @[[1 1 :lt]])
+                         [:sc/base-proof "f-1" "f"])
+        m2 (term/sc/call "f" "f"
+                         (mk-matrix 2 2 @[[0 1 :lt] [1 0 :eq]])
+                         [:sc/base-proof "f-2" "f"])
+        result (term/sc/check-graph* @{"f" 2} @[m1 m2])]
+    (result :ok))
+  "SCT repeats closure rounds until stronger summaries dominate bad self matrices")
+
 (let [cases @[
         {:label "self-unknown"
          :nodes @["f"]

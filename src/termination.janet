@@ -254,9 +254,13 @@
     [:pair l r] @[l r]
     [:fst p] @[p]
     [:snd p] @[p]
-    [:fst [:pair l _]] @[l]
-    [:snd [:pair _ r]] @[r]
     _ @[]))
+
+(defn sc/reduced-relation [term pat]
+  (match term
+    [:fst [:pair l _]] (sc/compare l pat)
+    [:snd [:pair _ r]] (sc/compare r pat)
+    _ :unknown))
 
 (defn sc/best-subterm-relation [term pat]
   (let [subs (sc/immediate-subterms term)]
@@ -301,6 +305,8 @@
            (cond
              (= x "_") :unknown
              (= term [:var x]) :eq
+             (not= :unknown (sc/reduced-relation term pat))
+             (sc/reduced-relation term pat)
              (not= :unknown (sc/best-subterm-relation term pat))
              :lt
              true :unknown)
@@ -455,19 +461,23 @@
           (sc/sccs g)))
 
 (defn sc/complete-component [g comp]
-  (for k 0 (length comp)
-    (let [mid (comp k)]
-      (for i 0 (length comp)
-        (let [from (comp i)
-              left (array/slice (sc/matrices g from mid))]
-          (when (> (length left) 0)
-            (for j 0 (length comp)
-              (let [to (comp j)
-                    right (array/slice (sc/matrices g mid to))]
-                (when (> (length right) 0)
-                  (each c1 left
-                    (each c2 right
-                      (sc/add-call g from to (sc/call-compose c1 c2)))))))))))))
+  (var changed true)
+  (while changed
+    (set changed false)
+    (for k 0 (length comp)
+      (let [mid (comp k)]
+        (for i 0 (length comp)
+          (let [from (comp i)
+                left (array/slice (sc/matrices g from mid))]
+            (when (> (length left) 0)
+              (for j 0 (length comp)
+                (let [to (comp j)
+                      right (array/slice (sc/matrices g mid to))]
+                  (when (> (length right) 0)
+                    (each c1 left
+                      (each c2 right
+                        (when (sc/add-call g from to (sc/call-compose c1 c2))
+                          (set changed true))))))))))))))
 
 (defn sc/problems [g comps]
   (let [out @[]]

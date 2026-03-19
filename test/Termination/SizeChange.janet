@@ -112,9 +112,18 @@
    @[[ :bind "p" [:var "PairNat"] ]]
    nat-type
    nil
+    @[
+      [:core/clause @[[:pat/var "p"]]
+       [:app [:var "proj-loop"] [:fst [:var "p"]]]]]])
+
+(def pair-proj-loop-decl
+  [:core/func "pair-proj-loop"
+   @[[ :bind "x" nat-type ]]
+   nat-type
+   nil
    @[
-     [:core/clause @[[:pat/var "p"]]
-      [:app [:var "proj-loop"] [:fst [:var "p"]]]]]])
+     [:core/clause @[[:pat/var "x"]]
+      [:app [:var "pair-proj-loop"] [:fst [:pair [:var "x"] [:var "x"]]]]]]])
 
 (def header-left-decl
   [:core/func "header-left"
@@ -190,6 +199,26 @@
      [:core/clause @[[:pat/con "succ" @[[:pat/var "x"]]]
                      [:pat/con "succ" @[[:pat/var "y"]]]]
       [:app [:app [:var "swap-loop"] [:var "y"]] [:var "x"]]]]])
+
+(def closure-a-decl
+  [:core/func "closure-a"
+   @[[ :bind "x" nat-type ]
+     [ :bind "y" nat-type ]]
+   nat-type
+   nil
+   @[
+     [:core/clause @[[:pat/var "x"] [:pat/con "succ" @[[:pat/con "succ" @[[:pat/var "y"]]]]]]
+      [:app [:app [:var "closure-a"] [:var "zero"]] [:var "y"]]]]])
+
+(def closure-b-decl
+  [:core/func "closure-b"
+   @[[ :bind "x" nat-type ]
+     [ :bind "y" nat-type ]]
+   nat-type
+   nil
+   @[
+     [:core/clause @[[:pat/var "x"] [:pat/con "succ" @[[:pat/var "y"]]]]
+      [:app [:app [:var "closure-b"] [:var "y"]] [:var "x"]]]]])
 
 (def tri-a-decl
   [:core/func "tri-a"
@@ -294,6 +323,13 @@
   ((term/sct proj-loop-decl) :ok)
   "SCT still recognizes projection subterms as decreasing")
 
+(let [result (term/sct pair-proj-loop-decl)]
+  (test/assert suite
+    (and (not (result :ok))
+         (= (length (result :problems)) 1)
+         (= (((result :problems) 0) :name) "pair-proj-loop"))
+    "SCT does not treat projections of concrete pairs as decreasing by default"))
+
 (let [result (term/sct* @[header-left-decl header-right-decl])]
   (test/assert suite
     (and (not (result :ok))
@@ -325,6 +361,10 @@
 (test/assert suite
   ((term/sct swap-loop-decl) :ok)
   "SCT accepts non-idempotent self calls whose closure gains a diagonal decrease")
+
+(test/assert suite
+  ((term/sct* @[closure-a-decl closure-b-decl]) :ok)
+  "SCT iterates closure until newly discovered summaries stabilize")
 
 (test/assert suite
   ((term/sct* @[tri-a-decl tri-b-decl tri-c-decl]) :ok)
