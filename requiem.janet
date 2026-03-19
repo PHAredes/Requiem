@@ -715,6 +715,12 @@
 
     _ Γ))
 
+(defn- clause/body [clause]
+  (match clause
+    [:core/clause _ body] body
+    _ (or (clause :body)
+          (errorf "unknown clause representation: %v" clause))))
+
 (defn- build-ctor-env [core-decls]
   (let [ctors @{}
         ctor-name-set @{}]
@@ -806,20 +812,19 @@
         (when (check :error)
           (error (check :error)))
         (let [filled-report ((reports/exports :report/from-state) (check :constraints) (check :goals) @{})]
-        (printf "\nFilled ?%s with %s" hole-name (pp/print/tm replacement-core))
-        (printf "  In: %s : %s" (pp/print/tm tm) (pp/print/tm ty))
-        (printf "  => %s" (pp/print/tm (filled :term)))
-        (print "  => OK")
-        (let [entries (report/entries filled-report)]
-          (when (> (length entries) 0)
-            (print "  Remaining goals:")
-            (print/goals entries global-name-set @[preferred-names] nil "    ")))
-        true))
+          (printf "\nFilled ?%s with %s" hole-name (pp/print/tm replacement-core))
+          (printf "  In: %s : %s" (pp/print/tm tm) (pp/print/tm ty))
+          (printf "  => %s" (pp/print/tm (filled :term)))
+          (print "  => OK")
+          (let [entries (report/entries filled-report)]
+            (when (> (length entries) 0)
+              (print "  Remaining goals:")
+              (print/goals entries global-name-set @[preferred-names] nil "    ")))
+          true))
       false)))
 
 (defn- fill/candidates [core global-ctx ctor-env lowered-check-names]
-  (let [out @[]
-        ]
+  (let [out @[]]
     (var check-goal-index 0)
     (each decl core
       (match decl
@@ -827,7 +832,7 @@
         (let [Γ (binders->ctx params global-ctx)]
           (eachp [i clause] clauses
             (array/push out {:label (string "function " name " clause " (+ i 1))
-                             :tm (clause 2)
+                             :tm (clause/body clause)
                              :ty result
                              :ctx (clause/extend-ctx Γ params clause ctor-env)
                              :preferred-names @[]})))

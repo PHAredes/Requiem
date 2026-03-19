@@ -7,6 +7,7 @@
         T/Refl (deps :T/Refl)
         T/Pair (deps :T/Pair)
         T/Neutral (deps :T/Neutral)
+        T/Meta (deps :T/Meta)
         ty/type (deps :ty/type)
         ty/pi (deps :ty/pi)
         eq-type (deps :eq-type)
@@ -21,6 +22,7 @@
         ctx/add (deps :ctx/add)
         ctx/lookup (deps :ctx/lookup)
         ne/app (deps :ne/app)
+        ne/meta (deps :ne/meta)
         ne/var (deps :ne/var)
         ne/fst (deps :ne/fst)
         print/sem (deps :print/sem)
@@ -30,6 +32,8 @@
         unify (deps :unify)
         goals (meta :goals)
         goals/reset! (meta :reset!)
+        meta/snapshot (meta :snapshot)
+        meta/restore! (meta :restore!)
         goals/set-collect! (meta :set-collect!)
         goals/collect? (meta :collect?)]
 
@@ -69,6 +73,7 @@
       (let [tag (tag-of p-sem)]
         (cond
           (= tag T/Pair) (get p-sem 1)
+          (= tag T/Meta) (sem/neutral (ne/fst (ne/meta (get p-sem 1))))
           (= tag T/Neutral) (sem/neutral (ne/fst (get p-sem 1)))
           true (errorf "fst expected pair semantics, got: %s" (print/sem p-sem)))))
 
@@ -81,15 +86,18 @@
       (let [tag (tag-of f-ty)]
         (if (= tag T/Pi)
           (let [[_tag A B] f-ty
-                B-sem (B arg-sem)
-                ftag (tag-of f-sem)]
-            {:ty B-sem
-             :sem (cond
-                    (= ftag T/Neutral)
-                    (raise B-sem (ne/app (get f-sem 1) (lower A arg-sem)))
+                 B-sem (B arg-sem)
+                 ftag (tag-of f-sem)]
+             {:ty B-sem
+              :sem (cond
+                     (or (= ftag T/Neutral) (= ftag T/Meta))
+                     (raise B-sem (ne/app (if (= ftag T/Meta)
+                                           (ne/meta (get f-sem 1))
+                                           (get f-sem 1))
+                                         (lower A arg-sem)))
 
-                    (function? f-sem)
-                    (f-sem arg-sem)
+                     (function? f-sem)
+                     (f-sem arg-sem)
 
                     true
                     (errorf "expected function semantics for application, got: %v" f-sem))})
@@ -388,23 +396,16 @@
           cs)))
 
     (defn collect/goals [thunk]
-      (let [saved-collect (goals/collect?)
-            saved-goals (array/slice goals)]
+      (let [saved-state (meta/snapshot)]
         (goals/reset!)
         (goals/set-collect! true)
         (try
           (let [result (thunk)
                 fresh-goals (array/slice goals)]
-            (goals/reset!)
-            (each goal saved-goals
-              (array/push goals goal))
-            (goals/set-collect! saved-collect)
+            (meta/restore! saved-state)
             {:result result :goals fresh-goals})
           ([err]
-           (goals/reset!)
-           (each goal saved-goals
-             (array/push goals goal))
-           (goals/set-collect! saved-collect)
+           (meta/restore! saved-state)
            (error err)))))
 
     (defn solve-constraints [constraints]

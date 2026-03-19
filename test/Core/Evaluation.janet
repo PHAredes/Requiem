@@ -61,6 +61,20 @@
     (= (c/eval Γ1 [:var fresh]) [c/T/Neutral [:nvar fresh]])
     "Symbol variables (gensyms) evaluate to neutrals"))
 
+(test/assert suite
+  (= (c/eval (c/ctx/empty) [:hole "goal"])
+     [c/T/Meta "goal"])
+  "Named holes survive evaluation as semantic metas")
+
+(test/assert suite
+  (= (c/eval (c/ctx/empty) [:fst [:hole "pair-goal"]])
+     [c/T/Neutral [:nfst [:nmeta "pair-goal"]]])
+  "Metas survive projections through neutral structure")
+
+(test/assert suite
+  (c/term-eq (c/ctx/empty) (c/ty/type 0) [:hole "goal"] [:hole "goal"])
+  "Semantic equality treats the same named meta as rigidly equal")
+
 (let [dom (c/ty/pi (c/ty/type 0) (fn [_] (c/ty/type 0)))
       Γ (c/ctx/add (c/ctx/empty) "f" (c/ty/pi dom (fn [_] (c/ty/type 0))))
       sem (c/eval Γ [:app [:var "f"] [:lam (fn [x] [:var x])]])

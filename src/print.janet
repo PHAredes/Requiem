@@ -7,6 +7,7 @@
         T/Id (deps :T/Id)
         T/Refl (deps :T/Refl)
         T/Neutral (deps :T/Neutral)
+        T/Meta (deps :T/Meta)
         T/Pair (deps :T/Pair)
         NF/Neut (deps :NF/Neut)
         NF/Lam (deps :NF/Lam)
@@ -87,6 +88,7 @@
     (defn atomic-ne? [ne]
       (match ne
         [:nvar _] true
+        [:nmeta _] true
         _ false))
 
     (defn atomic-nf? [nf]
@@ -126,6 +128,7 @@
          (fn [ne]
            (match ne
              [:nvar x] (name x)
+             [:nmeta id] (string "?" id)
              [:napp f x] (string (ne-arg f) " " (nf-arg x))
              [:nfst p] (string "fst " (ne-arg p))
              [:nsnd p] (string "snd " (ne-arg p))
@@ -255,6 +258,7 @@
       (let [tag (tag-of sem)]
         (cond
           (= tag T/Neutral) (print/ne* (get sem 1))
+          (= tag T/Meta) (string "?" (get sem 1))
           (= tag T/Refl) (string "refl " (sem* (get sem 1)))
           (= tag T/Pair) (string "(" (sem* (get sem 1)) ", " (sem* (get sem 2)) ")")
           (or (= tag T/Type) (= tag T/Pi) (= tag T/Sigma) (= tag T/Id))

@@ -19,6 +19,7 @@
 (def T/Refl 0x10)
 (def T/Neutral 0x20)
 (def T/Pair 0x40)
+(def T/Meta 0x80)
 
 # Normal Form Tags
 (def NF/Neut 0x100)
@@ -64,6 +65,7 @@
 (defn ne/fst [p] [:nfst p])
 (defn ne/snd [p] [:nsnd p])
 (defn ne/J [A x P d y p] [:nJ A x P d y p])
+(defn ne/meta [id] [:nmeta id])
 
 (defn nf/neut [ne] [NF/Neut ne])
 (defn nf/lam [body] [NF/Lam body])
@@ -102,6 +104,7 @@
 (var sem-eq nil)
 (var runtime-sig nil)
 (var delta/whnf nil)
+(var meta/value nil)
 
 (defn- term/spine [tm]
   (var cur tm)
@@ -211,10 +214,21 @@
         (= tag T/Id)
         (= tag T/Refl)
         (= tag T/Neutral)
+        (= tag T/Meta)
         (= tag T/Pair))))
 
 (defn- sem/neutral [ne]
   [T/Neutral ne])
+
+(defn- sem/meta [id]
+  [T/Meta id])
+
+(defn- sem/head-neutral [sem]
+  (let [tag (tag-of sem)]
+    (cond
+      (= tag T/Neutral) (get sem 1)
+      (= tag T/Meta) (ne/meta (get sem 1))
+      true nil)))
 
 (defn- named-neutral [A fresh]
   (raise A (ne/var fresh)))
@@ -229,8 +243,9 @@
     (if (= tag T/Pi)
       (let [[_ A B] f-ty
             stag (tag-of f-sem)]
-        (cond
-          (= stag T/Neutral) (raise (B arg-sem) (ne/app (get f-sem 1) (lower A arg-sem)))
+         (cond
+          (or (= stag T/Neutral) (= stag T/Meta))
+          (raise (B arg-sem) (ne/app (sem/head-neutral f-sem) (lower A arg-sem)))
           (function? f-sem) (f-sem arg-sem)
           true (errorf "expected function semantics, got: %v" f-sem)))
       (errorf "expected Pi type for semantic application, got: %v" f-ty))))
@@ -312,6 +327,7 @@
   (let [tag (tag-of sem)]
     (cond
       (= tag T/Neutral) (nf/neut (get sem 1))
+      (= tag T/Meta) (nf/neut (ne/meta (get sem 1)))
       (= tag T/Type) (nf/type (get sem 1))
       (= tag T/Pi) (let [[_ A B] sem]
                      (nf/pi (lower/type A)
@@ -329,13 +345,24 @@
 
 (defn- lower/pi [A B sem]
   (let [stag (tag-of sem)]
-    (if (= stag T/Neutral)
+    (cond
+      (= stag T/Neutral)
       (let [ne (get sem 1)]
         (nf/lam
           (fn [fresh]
             (let [arg-sem (named-neutral A fresh)]
               (lower (B arg-sem)
                      (raise (B arg-sem) (ne/app ne (lower A arg-sem))))))))
+
+      (= stag T/Meta)
+      (let [ne (ne/meta (get sem 1))]
+        (nf/lam
+          (fn [fresh]
+            (let [arg-sem (named-neutral A fresh)]
+              (lower (B arg-sem)
+                     (raise (B arg-sem) (ne/app ne (lower A arg-sem))))))))
+
+      true
       (nf/lam
         (fn [fresh]
           (let [arg-sem (named-neutral A fresh)]
@@ -343,11 +370,20 @@
 
 (defn- lower/sigma [A B sem]
   (let [stag (tag-of sem)]
-    (if (= stag T/Neutral)
+    (cond
+      (= stag T/Neutral)
       (let [ne (get sem 1)
             v1 (raise A (ne/fst ne))
             v2 (raise (B v1) (ne/snd ne))]
         (nf/pair (lower A v1) (lower (B v1) v2)))
+
+      (= stag T/Meta)
+      (let [ne (ne/meta (get sem 1))
+            v1 (raise A (ne/fst ne))
+            v2 (raise (B v1) (ne/snd ne))]
+        (nf/pair (lower A v1) (lower (B v1) v2)))
+
+      true
       (let [[_ v1 v2] sem]
         (nf/pair (lower A v1) (lower (B v1) v2))))))
 
@@ -355,6 +391,7 @@
   (let [stag (tag-of sem)]
     (cond
       (= stag T/Refl) (nf/refl (lower (get ty 1) (get sem 1)))
+      (= stag T/Meta) (nf/neut (ne/meta (get sem 1)))
       (= stag T/Neutral) (nf/neut (get sem 1))
       true sem)))
 
@@ -362,7 +399,9 @@
   (let [stag (tag-of sem)]
     (if (= stag T/Neutral)
       (nf/neut (get sem 1))
-      sem)))
+      (if (= stag T/Meta)
+        (nf/neut (ne/meta (get sem 1)))
+        sem))))
 
 (set lower
      (fn [ty sem]
@@ -382,6 +421,7 @@
                  :T/Id T/Id
                  :T/Refl T/Refl
                  :T/Neutral T/Neutral
+                 :T/Meta T/Meta
                  :T/Pair T/Pair
                  :NF/Neut NF/Neut
                  :NF/Lam NF/Lam
@@ -451,6 +491,7 @@
          (not (and (tuple? ne1) (tuple? ne2))) (= ne1 ne2)
          (not= (get ne1 0) (get ne2 0)) false
          (= (get ne1 0) :nvar) (= (get ne1 1) (get ne2 1))
+         (= (get ne1 0) :nmeta) (= (get ne1 1) (get ne2 1))
          (= (get ne1 0) :napp)
          (and (ne-eq (get ne1 1) (get ne2 1))
               (nf-eq (get ne1 2) (get ne2 2)))
@@ -571,16 +612,22 @@
 
 (set sem-eq
      (fn [ty v1 v2]
-        "Check if two semantic values are equal at given type (with eta)"
+         "Check if two semantic values are equal at given type (with eta)"
        (if (= v1 v2)
          true
-         (let [tag (tag-of ty)]
-           (cond
-             (= tag T/Type) (sem-eq/type ty v1 v2)
-             (= tag T/Pi) (let [[_ A B] ty] (sem-eq/pi A B v1 v2))
-             (= tag T/Sigma) (let [[_ A B] ty] (sem-eq/sigma A B v1 v2))
-             (= tag T/Id) (let [[_ A _ _] ty] (sem-eq/id A v1 v2))
-             true false)))))
+         (let [tag1 (tag-of v1)
+               tag2 (tag-of v2)]
+           (if (or (= tag1 T/Meta) (= tag2 T/Meta))
+             (and (= tag1 T/Meta)
+                  (= tag2 T/Meta)
+                  (= (get v1 1) (get v2 1)))
+             (let [tag (tag-of ty)]
+               (cond
+                 (= tag T/Type) (sem-eq/type ty v1 v2)
+                 (= tag T/Pi) (let [[_ A B] ty] (sem-eq/pi A B v1 v2))
+                 (= tag T/Sigma) (let [[_ A B] ty] (sem-eq/sigma A B v1 v2))
+                 (= tag T/Id) (let [[_ A _ _] ty] (sem-eq/id A v1 v2))
+                 true false)))))))
 
 (defn- eval/var [Γ x]
   (if (or (string? x) (symbol? x))
@@ -592,17 +639,29 @@
 
 (defn- eval/app [Γ f x]
   (let [fv (eval Γ f)
-         xv (eval Γ x)
-         tag (tag-of fv)]
-      (if (= tag T/Neutral)
-        (let [fA (infer Γ f)
-              ftag (tag-of fA)]
-          (if (= ftag T/Pi)
-            (let [[_ A _] fA]
-              (sem/neutral (ne/app (get fv 1) (lower A xv))))
-            (errorf "cannot apply neutral term with non-function type: %s"
-                    (print/sem fA))))
-        (fv xv))))
+        xv (eval Γ x)
+        tag (tag-of fv)]
+    (cond
+      (= tag T/Neutral)
+      (let [fA (infer Γ f)
+            ftag (tag-of fA)]
+        (if (= ftag T/Pi)
+          (let [[_ A _] fA]
+            (sem/neutral (ne/app (get fv 1) (lower A xv))))
+          (errorf "cannot apply neutral term with non-function type: %s"
+                  (print/sem fA))))
+
+      (= tag T/Meta)
+      (let [fA (infer Γ f)
+            ftag (tag-of fA)]
+        (if (= ftag T/Pi)
+          (let [[_ A _] fA]
+            (sem/neutral (ne/app (ne/meta (get fv 1)) (lower A xv))))
+          (errorf "cannot apply meta term with non-function type: %s"
+                  (print/sem fA))))
+
+      true
+      (fv xv))))
 
 (defn- eval/t-pi [Γ A B]
   (ty/pi (eval Γ A) (fn [x] (eval Γ (B x)))))
@@ -621,6 +680,7 @@
       (match v
         [T/Pair v1 _] v1
         _ (errorf "invalid pair structure in fst: %s" (print/sem v)))
+      (= tag T/Meta) (sem/neutral (ne/fst (ne/meta (get v 1))))
       (= tag T/Neutral) (sem/neutral (ne/fst (get v 1)))
       true (errorf "fst expects a pair value (Σ type), but got: %s"
                    (print/sem v)))))
@@ -633,6 +693,7 @@
       (match v
         [T/Pair _ v2] v2
         _ (errorf "invalid pair structure in snd: %s" (print/sem v)))
+      (= tag T/Meta) (sem/neutral (ne/snd (ne/meta (get v 1))))
       (= tag T/Neutral) (sem/neutral (ne/snd (get v 1)))
       true (errorf "snd expects a pair value (Σ type), but got: %s"
                    (print/sem v)))))
@@ -657,6 +718,9 @@
         (if (sem-eq Av zv xv) dv
           (sem/neutral (ne/J Av xv Pv dv yv pv))))
 
+      (= tag T/Meta)
+      (sem/neutral (ne/J Av xv Pv dv yv pv))
+
       (= tag T/Neutral)
       (sem/neutral (ne/J Av xv Pv dv yv pv))
 
@@ -678,8 +742,9 @@
             [:t-sigma A B] (eval/t-sigma Γ A B)
             [:pair a b] (eval/pair Γ a b)
             [:fst p] (eval/fst Γ p)
-            [:snd p] (eval/snd Γ p)
-             [:t-id A x y] (eval/t-id Γ A x y)
+             [:snd p] (eval/snd Γ p)
+             [:hole name] (meta/value name)
+              [:t-id A x y] (eval/t-id Γ A x y)
              [:t-refl x] (eval/t-refl Γ x)
              [:t-J A x P d y p] (eval/t-J Γ A x P d y p)
              _ tm)))))
@@ -702,10 +767,10 @@
 # Bidirectional checker / metas are installed later.
 (def meta-state
   (meta/make {:ty/type ty/type
+              :T/Meta T/Meta
               :lower lower
               :ctx/lookup ctx/lookup
               :goal-ty T/Type100
-              :goal-term (tm/type 100)
               :print/sem print/sem
               :sem-eq sem-eq}))
 
@@ -716,6 +781,7 @@
                  :T/Refl T/Refl
                  :T/Pair T/Pair
                  :T/Neutral T/Neutral
+                 :T/Meta T/Meta
                  :ty/type ty/type
                  :ty/pi ty/pi
                  :eq-type T/Type100
@@ -730,6 +796,7 @@
                  :ctx/add ctx/add
                  :ctx/lookup ctx/lookup
                  :ne/app ne/app
+                 :ne/meta ne/meta
                  :ne/var ne/var
                  :ne/fst ne/fst
                  :print/sem print/sem
@@ -739,6 +806,7 @@
                   :unify unify/exports}))
 
 (def goals (meta-state :goals))
+(set meta/value (meta-state :meta/value))
 (def goals/set-collect! (meta-state :set-collect!))
 (def goals/collect? (meta-state :collect?))
 (def goals/reset! (meta-state :reset!))
@@ -817,6 +885,7 @@
    :T/Id T/Id
    :T/Refl T/Refl
    :T/Neutral T/Neutral
+   :T/Meta T/Meta
    :T/Pair T/Pair
    :NF/Neut NF/Neut
    :NF/Lam NF/Lam
@@ -844,7 +913,8 @@
    :tm/J tm/J
    :tm/hole tm/hole
    :ne/var ne/var
-   :ne/app ne/app
+    :ne/app ne/app
+    :ne/meta ne/meta
    :ne/fst ne/fst
    :ne/snd ne/snd
    :ne/J ne/J
