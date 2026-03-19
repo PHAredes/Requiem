@@ -381,6 +381,20 @@
 (defn sc/header-proof [name section callee]
   (sc/base-proof (string/format "%s:%s" name section) callee))
 
+(defn sc/header-patterns [params]
+  (reduce (fn [acc param]
+            (match param
+              [:bind name _]
+              (do
+                (array/push acc [:pat/var name])
+                acc)
+              _
+              (do
+                (array/push acc [:pat/var "_"])
+                acc)))
+          @[]
+          params))
+
 (defn sc/add-clause-call [g name clause-index callee matrix]
   (sc/add-call g
                name
@@ -411,11 +425,11 @@
         _ nil))
     (each def defs
       (match def
-        [:core/func name _ result core-type clauses]
-        (do
-          (each [callee matrix] (sc/find-calls target-arities @[] core-type)
+        [:core/func name params result core-type clauses]
+        (let [header-pats (sc/header-patterns params)]
+          (each [callee matrix] (sc/find-calls target-arities header-pats core-type)
             (sc/add-header-call g name "type" callee matrix))
-          (each [callee matrix] (sc/find-calls target-arities @[] result)
+          (each [callee matrix] (sc/find-calls target-arities header-pats result)
             (sc/add-header-call g name "result" callee matrix))
           (for clause-index 0 (length clauses)
             (let [clause (clauses clause-index)]
@@ -426,6 +440,9 @@
                 _ nil))))
         _ nil))
     g))
+
+(defn sc/idempotent-matrix? [m]
+  (sc/matrix-dominates? m (sc/compose m m)))
 
 (defn sc/recursive-components [g]
   (reduce (fn [acc comp]
@@ -457,7 +474,8 @@
     (each comp comps
       (each name comp
         (each call (sc/matrices g name name)
-          (when (not (sc/matrix-diagonal-has-lt? (call :matrix)))
+          (when (and (sc/idempotent-matrix? (call :matrix))
+                     (not (sc/matrix-diagonal-has-lt? (call :matrix))))
             (array/push out {:name name
                              :component comp
                              :matrix (call :matrix)

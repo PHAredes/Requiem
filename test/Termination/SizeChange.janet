@@ -153,8 +153,43 @@
    @[]
    [:t-sigma [:var "Nat"] (fn [x] [:var "complex-header-left"])]
    [:t-sigma [:var "Nat"] (fn [x] [:var "complex-header-left"])]
+    @[
+      [:core/clause @[] [:var "zero"]]]])
+
+(def header-clause-left-decl
+  [:core/func "header-clause-left"
+   @[[ :bind "x" nat-type ]]
+   nat-type
+   nil
    @[
-     [:core/clause @[] [:var "zero"]]]])
+     [:core/clause @[[:pat/con "zero" @[]]]
+      [:var "zero"]]
+     [:core/clause @[[:pat/con "succ" @[[:pat/var "x"]]]]
+      [:app [:var "header-clause-right"] [:var "x"]]]]])
+
+(def header-clause-right-decl
+  [:core/func "header-clause-right"
+   @[[ :bind "y" nat-type ]]
+   [:app [:var "header-clause-left"] [:var "y"]]
+   nil
+   @[
+     [:core/clause @[[:pat/var "y"]]
+      [:var "zero"]]]])
+
+(def swap-loop-decl
+  [:core/func "swap-loop"
+   @[[ :bind "x" nat-type ]
+     [ :bind "y" nat-type ]]
+   nat-type
+   nil
+   @[
+     [:core/clause @[[:pat/con "zero" @[]] [:pat/var "y"]]
+      [:var "y"]]
+     [:core/clause @[[:pat/var "x"] [:pat/con "zero" @[]]]
+      [:var "x"]]
+     [:core/clause @[[:pat/con "succ" @[[:pat/var "x"]]]
+                     [:pat/con "succ" @[[:pat/var "y"]]]]
+      [:app [:app [:var "swap-loop"] [:var "y"]] [:var "x"]]]]])
 
 (def tri-a-decl
   [:core/func "tri-a"
@@ -280,8 +315,16 @@
     (and (not (result :ok))
          (= (length (result :problems)) 2)
          (not (nil? (string/find "complex-header-left:type" (term/sc/problem-report (result :problems)))))
-         (not (nil? (string/find "complex-header-right:type" (term/sc/problem-report (result :problems))))))
+          (not (nil? (string/find "complex-header-right:type" (term/sc/problem-report (result :problems))))))
     "SCT rejects recursive cycles found under dependent header terms"))
+
+(test/assert suite
+  ((term/sct* @[header-clause-left-decl header-clause-right-decl]) :ok)
+  "SCT handles recursive header edges with the caller arity preserved")
+
+(test/assert suite
+  ((term/sct swap-loop-decl) :ok)
+  "SCT accepts non-idempotent self calls whose closure gains a diagonal decrease")
 
 (test/assert suite
   ((term/sct* @[tri-a-decl tri-b-decl tri-c-decl]) :ok)

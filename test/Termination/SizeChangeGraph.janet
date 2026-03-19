@@ -286,6 +286,14 @@
                 "2x2 composition preserves decreases on distinct coordinates"
                 (term/sc/matrix->string composed)))
 
+(test/assert suite
+  (let [swap (term/sc/call "swap" "swap"
+                           (mk-matrix 2 2 @[[0 1 :lt] [1 0 :lt]])
+                           [:sc/base-proof "swap" "swap"])
+        result (term/sc/check-graph* @{"swap" 2} @[swap])]
+    (result :ok))
+  "Non-idempotent self-call matrices are not reported as SCT failures")
+
 (let [cases @[
         {:label "self-unknown"
          :nodes @["f"]
