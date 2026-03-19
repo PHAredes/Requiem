@@ -251,7 +251,6 @@
 
 (defn sc/immediate-subterms [tm]
   (match tm
-    [:pair l r] @[l r]
     [:fst p] @[p]
     [:snd p] @[p]
     _ @[]))
@@ -336,49 +335,82 @@
         (sc/matrix-set matrix i j (sc/compare (used-args i) (caller-patterns j)))))
     matrix))
 
-(defn sc/call-head [tm target-arities]
+(defn sc/call-head [tm target-arities bound-names]
   (let [[head args] (sc/spine tm)]
     (match head
       [:var name]
-      (if-let [arity (get target-arities name)]
+      (if (get bound-names name)
+        nil
+        (if-let [arity (get target-arities name)]
         (when (>= (length args) arity)
           [name (slice args 0 arity)])
-        nil)
+        nil))
       _ nil)))
 
-(defn sc/maybe-record-call [calls target-arities caller-patterns tm]
-  (when-let [[callee args] (sc/call-head tm target-arities)]
+(defn sc/maybe-record-call [calls target-arities caller-patterns bound-names tm]
+  (when-let [[callee args] (sc/call-head tm target-arities bound-names)]
     (array/push calls
-                [callee (sc/call-matrix caller-patterns
-                                        args
-                                        (get target-arities callee))])))
+                 [callee (sc/call-matrix caller-patterns
+                                         args
+                                         (get target-arities callee))])))
+
+(defn sc/pattern-bound-names [patterns]
+  (reduce (fn [acc pat]
+            (defn walk-pat [p]
+              (match p
+                [:pat/var x]
+                (when (not= x "_")
+                  (put acc x true))
+                [:pat/con _ args]
+                (each arg args
+                  (walk-pat arg))
+                _ nil))
+            (walk-pat pat)
+            acc)
+          @{}
+          patterns))
 
 (defn sc/find-calls [target-arities caller-patterns term]
-  (let [calls @[]]
-    (defn walk [tm]
+  (let [calls @[]
+        initial-bound (sc/pattern-bound-names caller-patterns)]
+    (defn walk [tm bound-names]
       (match tm
         [:app f x]
         (do
-          (sc/maybe-record-call calls target-arities caller-patterns tm)
-          (walk f)
-          (walk x))
+          (sc/maybe-record-call calls target-arities caller-patterns bound-names tm)
+          (walk f bound-names)
+          (walk x bound-names))
 
         [:var _]
-        (sc/maybe-record-call calls target-arities caller-patterns tm)
+        (sc/maybe-record-call calls target-arities caller-patterns bound-names tm)
 
-        [:lam body] (walk (body [:var (gensym)]))
-        [:t-pi A B] (do (walk A) (walk (B [:var (gensym)])))
-        [:t-sigma A B] (do (walk A) (walk (B [:var (gensym)])))
-        [:pair l r] (do (walk l) (walk r))
-        [:fst p] (do (sc/maybe-record-call calls target-arities caller-patterns tm)
-                     (walk p))
-        [:snd p] (do (sc/maybe-record-call calls target-arities caller-patterns tm)
-                     (walk p))
-        [:t-id A x y] (do (walk A) (walk x) (walk y))
-        [:t-refl x] (walk x)
-        [:t-J A x P d y p] (do (walk A) (walk x) (walk P) (walk d) (walk y) (walk p))
+        [:lam body]
+        (let [x (gensym)
+              next-bound (table/clone bound-names)]
+          (put next-bound x true)
+          (walk (body [:var x]) next-bound))
+        [:t-pi A B]
+        (let [x (gensym)
+              next-bound (table/clone bound-names)]
+          (put next-bound x true)
+          (walk A bound-names)
+          (walk (B [:var x]) next-bound))
+        [:t-sigma A B]
+        (let [x (gensym)
+              next-bound (table/clone bound-names)]
+          (put next-bound x true)
+          (walk A bound-names)
+          (walk (B [:var x]) next-bound))
+        [:pair l r] (do (walk l bound-names) (walk r bound-names))
+        [:fst p] (do (sc/maybe-record-call calls target-arities caller-patterns bound-names tm)
+                     (walk p bound-names))
+        [:snd p] (do (sc/maybe-record-call calls target-arities caller-patterns bound-names tm)
+                     (walk p bound-names))
+        [:t-id A x y] (do (walk A bound-names) (walk x bound-names) (walk y bound-names))
+        [:t-refl x] (walk x bound-names)
+        [:t-J A x P d y p] (do (walk A bound-names) (walk x bound-names) (walk P bound-names) (walk d bound-names) (walk y bound-names) (walk p bound-names))
         _ nil))
-    (walk term)
+    (walk term initial-bound)
     calls))
 
 (defn sc/clause-proof [name clause-index callee]

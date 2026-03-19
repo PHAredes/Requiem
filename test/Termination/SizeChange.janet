@@ -121,9 +121,18 @@
    @[[ :bind "x" nat-type ]]
    nat-type
    nil
+    @[
+      [:core/clause @[[:pat/var "x"]]
+       [:app [:var "pair-proj-loop"] [:fst [:pair [:var "x"] [:var "x"]]]]]]])
+
+(def shadowed-f-decl
+  [:core/func "shadowed-f"
+   @[[ :bind "f" [:var "Nat->Nat"] ]]
+   nat-type
+   nil
    @[
-     [:core/clause @[[:pat/var "x"]]
-      [:app [:var "pair-proj-loop"] [:fst [:pair [:var "x"] [:var "x"]]]]]]])
+     [:core/clause @[[:pat/var "f"]]
+      [:app [:var "f"] [:var "zero"]]]]])
 
 (def header-left-decl
   [:core/func "header-left"
@@ -329,6 +338,10 @@
          (= (length (result :problems)) 1)
          (= (((result :problems) 0) :name) "pair-proj-loop"))
     "SCT does not treat projections of concrete pairs as decreasing by default"))
+
+(test/assert suite
+  ((term/sct shadowed-f-decl) :ok)
+  "SCT ignores shadowed local names when looking for recursive calls")
 
 (let [result (term/sct* @[header-left-decl header-right-decl])]
   (test/assert suite

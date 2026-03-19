@@ -31,8 +31,12 @@
   "Second projections count as structural descent")
 
 (test/assert suite
-  (= :lt (term/sc/compare [:pair [:var "x"] [:var "y"]] [:pat/var "x"]))
-  "Pair components count as subterms of the whole pair")
+  (= :unknown (term/sc/compare [:pair [:var "x"] [:var "y"]] [:pat/var "x"]))
+  "Pair construction alone does not count as structural descent")
+
+(test/assert suite
+  (= :eq (term/sc/compare [:fst [:pair [:var "x"] [:var "y"]]] [:pat/var "x"]))
+  "Projecting a concrete pair preserves the exact component comparison")
 
 (test/assert suite
   (= :unknown (term/sc/compare [:app [:var "f"] [:var "x"]] [:pat/var "f"]))
@@ -143,5 +147,11 @@
          (= "loop" ((calls 0) 0))
          (= :eq (term/sc/matrix-get ((calls 0) 1) 0 0))))
   "Call discovery records recursive calls inside non-recursive applications only once")
+
+(test/assert suite
+  (zero? (length (term/sc/find-calls @{"f" 1}
+                                     @[[:pat/var "f"]]
+                                     [:app [:var "f"] [:var "zero"]])))
+  "Call discovery ignores locally bound variables that shadow function names")
 
 (test/end-suite suite)
