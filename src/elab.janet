@@ -6,6 +6,7 @@
 (import ./frontend/surface/parser :as sp)
 (import ./sig :as s)
 (import ./coreTT :as tt)
+(import ./termination :as term)
 
 (defn env/lookup [env name]
   (var i (- (length env) 1))
@@ -786,10 +787,28 @@
     _
     (errorf "invalid declaration: %v" decl)))
 
+(defn- termination/function-decls [core-decls]
+  (reduce (fn [acc decl]
+            (match decl
+              [:core/func _ _ _ _ _] [;acc decl]
+              _ acc))
+          @[]
+          core-decls))
+
+(defn- termination/check! [core-decls]
+  (let [funcs (termination/function-decls core-decls)]
+    (when (> (length funcs) 0)
+      (let [result (term/sct* funcs)]
+        (when (not (result :ok))
+          (errorf "termination check failed: %s"
+                  (term/sc/problem-report (result :problems)))))))
+  core-decls)
+
 (defn elab/program [decls]
   (let [resolved (program/resolve-decls decls)
-        sig-env (sig/from-decls resolved)]
-    (map |(decl/elab sig-env $) resolved)))
+        sig-env (sig/from-decls resolved)
+        core-decls (map |(decl/elab sig-env $) resolved)]
+    (termination/check! core-decls)))
 
 (def exports
   {:elab/state elab/state
