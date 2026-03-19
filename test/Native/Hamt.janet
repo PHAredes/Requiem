@@ -1,5 +1,7 @@
 (import ../../build/hamt :as h)
 (import ../Utils/TestRunner :as test)
+(import ../../src/coreTT :as c)
+(import ../Utils/Generators :as gen)
 
 (def suite (test/start-suite "Native HAMT"))
 
@@ -54,5 +56,27 @@
 
 # Force collisions (hash is complex to force, but large N helps coverage)
 # We rely on the large dataset to trigger splitting nodes
+
+(defn hamt/stress-semantic-values [seed rounds]
+  (let [rng (gen/rng seed)]
+    (var ok true)
+    (var i 0)
+    (while (and ok (< i rounds))
+      (let [sample (gen/gen-inferable-judgment rng)]
+        (try
+          (c/infer (sample :ctx) (sample :term))
+          ([err]
+            (set ok false)
+            (print "HAMT semantic-value corruption:")
+            (print "  seed =" seed)
+            (print "  round =" i)
+            (print "  kind =" (sample :kind))
+            (print "  err =" err))))
+      (++ i))
+    ok))
+
+(test/assert suite
+  (hamt/stress-semantic-values "3" 3000)
+  "HAMT retains semantic values across GC pressure")
 
 (test/end-suite suite)

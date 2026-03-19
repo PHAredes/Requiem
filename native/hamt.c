@@ -189,12 +189,36 @@ static void h_collect(void *n, JanetTable *t, JanetArray *keys) {
 /* Janet abstract type */
 typedef struct { void *root; size_t size; Arena *arena; } Hamt;
 
+static void hamt_mark_node(void *n) {
+    if (!n) return;
+    if (is_leaf(n)) {
+        for (Leaf *l = get_ptr(n); l; l = l->next) {
+            janet_mark(l->val);
+        }
+        return;
+    }
+    Node *node = n;
+    int c = h_pop(node->bits);
+    for (int i = 0; i < c; i++) hamt_mark_node(node->kids[i]);
+}
+
 static int hamt_gc(void *p, size_t sz) {
     (void)sz; arena_dec(((Hamt *)p)->arena);
     return 0;
 }
 
-static const JanetAbstractType hamt_type = { "hamt", hamt_gc };
+static int hamt_gcmark(void *p, size_t sz) {
+    (void)sz;
+    hamt_mark_node(((Hamt *)p)->root);
+    return 0;
+}
+
+static const JanetAbstractType hamt_type = {
+    "hamt",
+    hamt_gc,
+    hamt_gcmark,
+    JANET_ATEND_GCMARK
+};
 
 /* Janet API */
 static Janet cf_new(int32_t argc, Janet *argv) {
